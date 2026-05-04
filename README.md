@@ -40,7 +40,6 @@ Install dependencies:
 ```bash
 npm install
 ```
-
 Create a `.env` file in the project root:
 
 ```env
