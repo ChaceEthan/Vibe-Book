@@ -1,2 +1,11 @@
 node_modules/
+dist/
+*.log
+
 .env
+.env.*
+!.env.example
+!frontend/.env
+
+backend/uploads/images/
+backend/uploads/videos/
