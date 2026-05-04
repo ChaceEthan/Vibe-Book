@@ -1,11 +1,6 @@
-const dns = require("dns");
 const mongoose = require("mongoose");
 
-const configureMongoDns = () => {
-  if (process.env.MONGO_URI && process.env.MONGO_URI.startsWith("mongodb+srv://")) {
-    dns.setServers(["1.1.1.1", "8.8.8.8"]);
-  }
-};
+const isProduction = process.env.NODE_ENV === "production";
 
 const getDatabaseStatus = () => ({
   status: "OK",
@@ -14,18 +9,22 @@ const getDatabaseStatus = () => ({
 });
 
 const connectDB = async () => {
-  if (!process.env.MONGO_URI) {
-    throw new Error("MONGO_URI is missing");
+  try {
+    if (!process.env.MONGO_URI) {
+      throw new Error("MONGO_URI is missing");
+    }
+
+    const connection = await mongoose.connect(process.env.MONGO_URI);
+
+    console.log("MongoDB Connected");
+    console.log(`DB Name: ${connection.connection.name}`);
+
+    return connection;
+  } catch (error) {
+    console.error("MongoDB connection failed");
+    console.error(isProduction ? error.message : error.stack || error.message);
+    process.exit(1);
   }
-
-  configureMongoDns();
-
-  const connection = await mongoose.connect(process.env.MONGO_URI);
-
-  console.log(`MongoDB Connected: ${connection.connection.host}`);
-  console.log(`DB Name: ${connection.connection.name}`);
-
-  return connection;
 };
 
 module.exports = connectDB;

@@ -7,14 +7,16 @@ const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 
 const logError = (label, error) => {
+  console.error("=================================");
   console.error(label);
 
   if (isProduction) {
     console.error(error.message || "Unexpected server error");
-    return;
+  } else {
+    console.error(error.stack || error.message || error);
   }
 
-  console.error(error.stack || error.message || error);
+  console.error("=================================");
 };
 
 const shutdown = (exitCode = 1) => {
@@ -31,11 +33,13 @@ const verifyEnv = () => {
     }
   });
 
-  const portNumber = Number(PORT);
+  if (process.env.PORT) {
+    const portNumber = Number(process.env.PORT);
 
-  if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
-    console.error("ENV ERROR: Missing required variable: PORT");
-    shutdown(1);
+    if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+      console.error("ENV ERROR: Missing required variable: PORT");
+      shutdown(1);
+    }
   }
 };
 
@@ -50,9 +54,9 @@ process.on("uncaughtException", (error) => {
 });
 
 const startServer = async () => {
-  verifyEnv();
-
   try {
+    verifyEnv();
+
     await connectDB();
 
     const app = require("./src/app");
@@ -61,7 +65,6 @@ const startServer = async () => {
       console.log("=================================");
       console.log("VIBEBOOK SERVER RUNNING");
       console.log(`PORT: ${PORT}`);
-      console.log(`API BASE URL: http://localhost:${PORT}/api`);
       console.log("=================================");
     });
 
