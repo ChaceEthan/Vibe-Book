@@ -115,7 +115,7 @@ npm run dev
 
 ## Project Status
 
-The backend is production-ready for Railway deployment. It includes environment validation, MongoDB startup flow, protected routes, admin controls, booking management, ratings, and a health check endpoint.
+The backend is production-ready for Render deployment. It includes environment validation, MongoDB startup flow, protected routes, admin controls, booking management, ratings, and a health check endpoint.
 
 ## Future Improvements
 
