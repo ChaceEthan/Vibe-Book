@@ -1,163 +1,128 @@
-# 🎭 VibeBook
+# VibeBook
 
-VibeBook is a modern entertainment booking platform that connects event organizers ("bosses") with performers such as dancers, DJs, MCs, traditional dance crews, and artists.
+VibeBook is an entertainment booking platform that connects event organizers with performers, including dancers, DJs, MCs, artists, and crews.
 
-The platform allows users to discover talent, view profiles, and request bookings directly through the system.
+The backend provides authentication, profile management, search and filtering, booking requests, ratings, admin controls, and health checks for production deployment.
 
----
+## Features
 
-## 🚀 Project Vision
+- Authentication with JWT
+- User registration and login
+- Performer profiles with images, pricing, contact details, availability, and ratings
+- Search and filter by role, type, gender, category, availability, and price range
+- Booking system for requesting and managing talent bookings
+- Rating system for performer feedback
+- Admin dashboard support for user management, verification, blocking, deletion, stats, and rules
+- Public website rules endpoint
+- Production health check endpoint
 
-To build a digital marketplace for entertainment professionals where:
+## Tech Stack
 
-- Performers can showcase their profiles
-- Clients can search and book talent easily
-- Communication happens fast and directly
-- Trust and visibility are improved in the entertainment industry
-
----
-
-## 🌟 Core Features
-
-### 👤 User System
-- Registration for:
-  - Dancers (single & crew)
-  - DJs
-  - MCs / Hosts
-  - Artists
-- Profile management
-- Role-based access
-
----
-
-### 🔎 Search & Discovery
-- Search performers by:
-  - Role (Dancer, DJ, MC, Artist)
-  - Gender
-  - Category (Modern / Traditional)
-  - Availability
-  - Price range
-
----
-
-### 📸 Profiles
-Each performer profile includes:
-- Name & bio
-- Profile images
-- Category & type
-- Pricing
-- Contact information (WhatsApp / phone)
-- Availability status
-- Rating system
-
----
-
-### 📅 Booking System
-- Clients can send booking requests
-- Performers can accept or reject bookings
-- Booking status tracking:
-  - Pending
-  - Accepted
-  - Rejected
-
----
-
-### ⭐ Rating System
-- Clients can rate performers
-- Average rating displayed on profiles
-
----
-
-### 🛡️ Admin Dashboard
-Admins can:
-- Manage users
-- Verify performers
-- Delete or block users
-- Monitor platform activity
-
----
-
-## 🧱 Tech Stack
-
-### Backend
 - Node.js
-- Express.js
-- MongoDB Atlas
+- Express
+- MongoDB
 - Mongoose
-- JWT Authentication
+- JWT
 - bcryptjs
+- Nodemailer
 
-### Frontend (Planned / Future)
-- React.js
-- Tailwind CSS
-- Mobile responsive UI
+## Setup
 
----
-
-## 🗄️ Database Structure
-
-Main collections:
-
-### Users
-- name
-- role (dancer, DJ, MC, artist)
-- type (single / crew)
-- gender
-- category (modern / traditional)
-- price
-- images
-- availability
-- rating
-- contact info
-
-### Bookings
-- user (client)
-- performer
-- message
-- status (pending / accepted / rejected)
-- timestamps
-
----
-
-## 🔐 Authentication
-
-- JWT-based authentication
-- Password hashing using bcrypt
-- Protected routes for users and admin
-
----
-
-## 💳 Payments (Future Feature)
-
-Planned payment methods:
-- MTN Mobile Money
-- Airtel Money
-- USDT / Crypto
-- USD payments
-
----
-
-## 📲 Notifications (Future Feature)
-
-- Email notifications
-- WhatsApp integration
-- Real-time booking alerts
-
----
-
-## ⚙️ Installation
+Clone the repository:
 
 ```bash
-# Clone repository
 git clone https://github.com/ChaceEthan/Vibe-Book.git
+cd Vibe-Book
+```
 
-# Install dependencies
+Install dependencies:
+
+```bash
 npm install
+```
 
-# Setup environment variables
-MONGO_URI=your_mongodb_uri
-JWT_SECRET=your_secret
+Create a `.env` file in the project root:
+
+```env
+MONGO_URI=your_mongodb_connection_string
+JWT_SECRET=your_jwt_secret
 PORT=5000
+```
 
-# Run server
+Start the server:
+
+```bash
 npm start
+```
+
+For local development:
+
+```bash
+npm run dev
+```
+
+## Environment Variables
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MONGO_URI` | Yes | MongoDB connection string |
+| `JWT_SECRET` | Yes | Secret key used to sign JWT tokens |
+| `PORT` | No | Server port. Defaults to `5000` when not provided |
+
+## API Endpoints Overview
+
+### Health
+
+- `GET /api/health` - Check API and MongoDB connection status
+
+### Auth
+
+- `POST /api/auth/register` - Register a new user
+- `POST /api/auth/login` - Log in and receive a JWT
+
+### Users
+
+- `GET /api/users/search` - Search and filter performers
+- `GET /api/users/profile` - Get logged-in user profile
+- `GET /api/users/:id` - Get a public user profile
+- `PUT /api/users/update` - Update logged-in user profile
+- `PATCH /api/users/update` - Partially update logged-in user profile
+- `POST /api/users/:id/contact` - Send a contact request to a performer
+
+### Bookings
+
+- `POST /api/bookings` - Create a booking request
+- `GET /api/bookings/me` - Get bookings for the logged-in user
+- `PATCH /api/bookings/:id/status` - Update booking status
+
+### Ratings
+
+- `POST /api/ratings/:userId` - Add or update a rating for a user
+- `GET /api/ratings/:userId` - Get ratings for a user
+
+### Admin
+
+- `GET /api/admin/stats` - Get admin dashboard stats
+- `GET /api/admin/users` - Get all users
+- `DELETE /api/admin/delete/:id` - Delete a user
+- `PATCH /api/admin/block/:id` - Block a user
+- `PATCH /api/admin/unblock/:id` - Unblock a user
+- `PATCH /api/admin/verify/:id` - Verify a user
+- `POST /api/admin/rules` - Create a website rule
+
+### Rules
+
+- `GET /api/rules` - Fetch public website rules
+
+## Project Status
+
+The backend is production-ready for Railway deployment. It includes environment validation, MongoDB startup flow, protected routes, admin controls, booking management, ratings, and a health check endpoint.
+
+## Future Improvements
+
+- Payment integration
+- Real-time notifications
+- File storage for uploaded profile images
+- Advanced admin analytics
+- Email templates
+- Frontend client application
