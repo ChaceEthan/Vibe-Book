@@ -1,10 +1,9 @@
 // @ts-nocheck
 import axios from "axios";
 
-const rawApiUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
-const API_BASE_URL = rawApiUrl
-  ? `${rawApiUrl.replace(/\/+$/, "").replace(/\/api$/i, "")}/api`
-  : "";
+const API_ROOT = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
+const API = API_ROOT ? `${API_ROOT.replace(/\/+$/, "")}/api` : "";
+const API_BASE_URL = API.replace(/\/api\/api$/i, "/api");
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
 if (!API_BASE_URL) {
