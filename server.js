@@ -3,7 +3,7 @@ require("dotenv").config({ quiet: true });
 
 const connectDB = require("./src/config/db");
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT;
 const isProduction = process.env.NODE_ENV === "production";
 
 const logError = (label, error) => {
@@ -24,7 +24,7 @@ const shutdown = (exitCode = 1) => {
 };
 
 const verifyEnv = () => {
-  const requiredVariables = ["MONGO_URI", "JWT_SECRET"];
+  const requiredVariables = ["MONGO_URI", "JWT_SECRET", "PORT"];
 
   requiredVariables.forEach((key) => {
     if (!process.env[key]) {
@@ -33,13 +33,11 @@ const verifyEnv = () => {
     }
   });
 
-  if (process.env.PORT) {
-    const portNumber = Number(process.env.PORT);
+  const portNumber = Number(PORT);
 
-    if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
-      console.error("ENV ERROR: Missing required variable: PORT");
-      shutdown(1);
-    }
+  if (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+    console.error("ENV ERROR: Missing required variable: PORT");
+    shutdown(1);
   }
 };
 
@@ -61,10 +59,10 @@ const startServer = async () => {
 
     const app = require("./src/app");
 
-    const server = app.listen(PORT, () => {
+    const server = app.listen(PORT, "0.0.0.0", () => {
       console.log("=================================");
       console.log("VIBEBOOK SERVER RUNNING");
-      console.log(`PORT: ${PORT}`);
+      console.log(`Server running on port ${PORT}`);
       console.log("=================================");
     });
 
