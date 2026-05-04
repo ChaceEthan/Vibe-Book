@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: vibe-book-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js

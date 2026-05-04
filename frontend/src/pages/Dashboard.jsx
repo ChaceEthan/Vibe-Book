@@ -46,9 +46,11 @@ const getVideoDuration = (file) => {
 };
 
 const Dashboard = () => {
-  const { user, refreshProfile, updateProfile, uploadProfileImages, uploadProfileVideos } = useAuth();
+  const { user, refreshProfile, updateProfile, uploadProfileImage, uploadProfileImages, uploadProfileVideos } = useAuth();
   const { t } = useLanguage();
   const [form, setForm] = useState(initialForm);
+  const [selectedProfileImageFile, setSelectedProfileImageFile] = useState(null);
+  const [profileImagePreview, setProfileImagePreview] = useState("");
   const [selectedImageFiles, setSelectedImageFiles] = useState([]);
   const [selectedVideoFiles, setSelectedVideoFiles] = useState([]);
   const [status, setStatus] = useState("");
@@ -57,6 +59,7 @@ const Dashboard = () => {
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
   const existingImages = Array.isArray(user?.images) ? user.images : [];
   const existingVideos = Array.isArray(user?.videoUrls) ? user.videoUrls : [];
+  const profileImage = profileImagePreview || mediaUrl(user?.profileImage || existingImages[0] || "");
   const districtOptions = getDistrictsForProvince(form.province);
   const hasProfile = Boolean(
     user?.bio || existingImages.length || existingVideos.length || user?.phone || user?.location || Number(user?.price || 0) > 0
@@ -84,6 +87,14 @@ const Dashboard = () => {
       });
     }
   }, [user]);
+
+  useEffect(() => {
+    return () => {
+      if (profileImagePreview) {
+        URL.revokeObjectURL(profileImagePreview);
+      }
+    };
+  }, [profileImagePreview]);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -118,6 +129,32 @@ const Dashboard = () => {
     }
 
     setSelectedImageFiles(files);
+  };
+
+  const handleProfileImageFile = (event) => {
+    const file = event.target.files?.[0];
+    setError("");
+
+    if (!file) {
+      setSelectedProfileImageFile(null);
+      setProfileImagePreview("");
+      return;
+    }
+
+    if (!file.type.startsWith("image/") || file.size > MAX_IMAGE_SIZE) {
+      setError("Profile image must be a valid image file under 5MB.");
+      event.target.value = "";
+      return;
+    }
+
+    setSelectedProfileImageFile(file);
+    setProfileImagePreview((currentPreview) => {
+      if (currentPreview) {
+        URL.revokeObjectURL(currentPreview);
+      }
+
+      return URL.createObjectURL(file);
+    });
   };
 
   const handleCopyReferral = async () => {
@@ -180,6 +217,10 @@ const Dashboard = () => {
         price: form.price ? Number(form.price) : 0,
       });
 
+      if (selectedProfileImageFile) {
+        await uploadProfileImage(selectedProfileImageFile);
+      }
+
       if (selectedImageFiles.length) {
         await uploadProfileImages(selectedImageFiles);
       }
@@ -188,6 +229,8 @@ const Dashboard = () => {
         await uploadProfileVideos(selectedVideoFiles);
       }
 
+      setSelectedProfileImageFile(null);
+      setProfileImagePreview("");
       setSelectedImageFiles([]);
       setSelectedVideoFiles([]);
       setStatus(t("profileUpdated"));
@@ -328,6 +371,22 @@ const Dashboard = () => {
               <span className="label">{t("bio")}</span>
               <textarea className="field min-h-32 resize-y" name="bio" value={form.bio} onChange={handleChange} />
             </label>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-surface p-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <img src={profileImage} alt="" className="h-20 w-20 rounded-lg object-cover" />
+                <div>
+                  <h3 className="text-lg font-black text-navy">Profile picture</h3>
+                  <p className="mt-1 text-sm text-slate-600">Upload one main image for search and profile cards.</p>
+                </div>
+              </div>
+              <label className="btn-secondary cursor-pointer px-4 py-2">
+                Replace image
+                <input className="hidden" type="file" accept="image/*" onChange={handleProfileImageFile} />
+              </label>
+            </div>
           </div>
 
           <div>

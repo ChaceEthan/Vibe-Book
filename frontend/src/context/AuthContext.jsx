@@ -101,6 +101,11 @@ export const AuthProvider = ({ children }) => {
     return syncUser(data.user);
   };
 
+  const uploadProfileImage = async (file) => {
+    const { data } = await userApi.uploadProfileImage(file);
+    return syncUser(data.user);
+  };
+
   const uploadProfileVideos = async (files) => {
     const { data } = await userApi.uploadVideos(files);
     return syncUser(data.user);
@@ -122,6 +127,7 @@ export const AuthProvider = ({ children }) => {
       logout: clearSession,
       refreshProfile,
       updateProfile,
+      uploadProfileImage,
       uploadProfileImages,
       uploadProfileVideos,
       payAccess,

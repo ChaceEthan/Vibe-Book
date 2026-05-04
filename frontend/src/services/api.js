@@ -31,7 +31,7 @@ export const authApi = {
 
 export const userApi = {
   search: async (params) => {
-    const endpoint = "/users/search";
+    const endpoint = "/search";
     const response = await api.get(endpoint, { params });
     console.log("[VibeBook API] GET", api.getUri({ url: endpoint, params }), response.data);
     return response;
@@ -53,6 +53,11 @@ export const userApi = {
     const formData = new FormData();
     files.forEach((file) => formData.append("images", file));
     return api.post("/users/profile/images", formData);
+  },
+  uploadProfileImage: (file) => {
+    const formData = new FormData();
+    formData.append("image", file);
+    return api.post("/users/profile/image", formData);
   },
   uploadVideos: (files) => {
     const formData = new FormData();

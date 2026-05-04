@@ -48,6 +48,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use("/uploads", express.static("uploads"));
 app.use("/uploads", express.static(uploadRoot));
 app.use(express.json());
 app.use(responseMiddleware);
