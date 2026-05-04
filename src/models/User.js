@@ -1,7 +1,16 @@
 const mongoose = require("mongoose");
 
-const allowedRoles = ["dancer", "dj", "mc", "artist", "admin"];
+const allowedRoles = ["dancer", "dj", "mc", "artist", "crew", "admin"];
 const allowedTypes = ["single", "crew"];
+const allowedCategories = [
+  "Modern Dance",
+  "Traditional Dance",
+  "DJs",
+  "MCs",
+  "Artists",
+  "Crew groups",
+];
+const allowedAvailability = ["available", "busy", "unavailable"];
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -38,11 +47,13 @@ const userSchema = new mongoose.Schema({
   },
   category: {
     type: String,
+    enum: allowedCategories,
     trim: true,
   },
   price: {
     type: Number,
     default: 0,
+    min: 0,
   },
   phone: {
     type: String,
@@ -53,13 +64,101 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: "",
   },
+  whatsapp: {
+    type: String,
+    trim: true,
+    default: "",
+  },
   location: {
     type: String,
     trim: true,
   },
+  province: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  district: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  profileImage: {
+    type: String,
+    trim: true,
+    default: "",
+  },
   images: {
     type: [String],
     default: [],
+  },
+  videoUrls: {
+    type: [String],
+    default: [],
+  },
+  videos: {
+    type: [String],
+    default: [],
+  },
+  paidProfileViews: [
+    {
+      profile: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        required: true,
+      },
+      amount: {
+        type: Number,
+        required: true,
+        min: 1000,
+      },
+      currency: {
+        type: String,
+        default: "RWF",
+      },
+      paymentReference: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      paidAt: {
+        type: Date,
+        default: Date.now,
+      },
+    },
+  ],
+  referralCode: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+  },
+  referredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+  },
+  referredUsers: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  trialStartDate: {
+    type: Date,
+    default: Date.now,
+  },
+  trialActive: {
+    type: Boolean,
+    default: true,
+  },
+  hasPaidAccess: {
+    type: Boolean,
+    default: false,
+  },
+  lastPaymentDate: {
+    type: Date,
+  },
+  chatClearedAt: {
+    type: Date,
   },
   bio: {
     type: String,
@@ -79,6 +178,7 @@ const userSchema = new mongoose.Schema({
   },
   availability: {
     type: String,
+    enum: allowedAvailability,
     trim: true,
     default: "available",
   },
@@ -90,6 +190,10 @@ const userSchema = new mongoose.Schema({
     type: Date,
   },
   isPremium: {
+    type: Boolean,
+    default: false,
+  },
+  premiumBadge: {
     type: Boolean,
     default: false,
   },
@@ -143,5 +247,7 @@ const User = mongoose.model("User", userSchema);
 
 User.allowedRoles = allowedRoles;
 User.allowedTypes = allowedTypes;
+User.allowedCategories = allowedCategories;
+User.allowedAvailability = allowedAvailability;
 
 module.exports = User;

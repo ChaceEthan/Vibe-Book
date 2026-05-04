@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="640" viewBox="0 0 640 640" role="img" aria-label="Default VibeBook profile image">
+  <rect width="640" height="640" fill="#f1f5f9"/>
+  <circle cx="320" cy="250" r="108" fill="#94a3b8"/>
+  <path d="M140 570c28-112 104-174 180-174s152 62 180 174" fill="#cbd5e1"/>
+  <text x="320" y="92" text-anchor="middle" font-family="Arial, sans-serif" font-size="44" font-weight="700" fill="#0f172a">VibeBook</text>
+</svg>

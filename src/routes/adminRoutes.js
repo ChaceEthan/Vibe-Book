@@ -5,6 +5,7 @@ const {
   createRule,
   deleteUser,
   getAllUsers,
+  getDashboardStats,
   getStats,
   unblockUser,
   verifyUser,
@@ -17,6 +18,7 @@ const router = express.Router();
 router.use(authMiddleware, adminMiddleware);
 
 router.get("/stats", getStats);
+router.get("/dashboard", getDashboardStats);
 router.get("/users", getAllUsers);
 router.delete("/delete/:id", deleteUser);
 router.patch("/block/:id", blockUser);

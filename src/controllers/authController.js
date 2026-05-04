@@ -1,53 +1,77 @@
 const bcrypt = require("bcryptjs");
 
 const User = require("../models/User");
+const { buildAccessState, syncTrialState } = require("../utils/accessControl");
 const generateToken = require("../utils/generateToken");
+const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
+const {
+  normalizeEmail,
+  normalizeProfileFields,
+} = require("../utils/profileValidation");
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const publicRoles = User.allowedRoles.filter((role) => role !== "admin");
 
-const registerableFields = [
-  "name",
-  "email",
-  "role",
-  "type",
-  "gender",
-  "category",
-  "price",
-  "phone",
-  "whatsappNumber",
-  "location",
-  "images",
-  "bio",
-  "socialLinks",
-  "availability",
-];
+const createReferralCode = (name = "vibebook") => {
+  const prefix = String(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 8) || "vibe";
 
-const userResponse = (user) => ({
-  _id: user._id,
-  name: user.name,
-  email: user.email,
-  role: user.role,
-  type: user.type,
-  gender: user.gender,
-  category: user.category,
-  price: user.price,
-  phone: user.phone,
-  whatsappNumber: user.whatsappNumber,
-  location: user.location,
-  images: user.images,
-  bio: user.bio,
-  socialLinks: user.socialLinks,
-  availability: user.availability,
-  averageRating: user.averageRating,
-  isPremium: user.isPremium,
-  isVerified: user.isVerified,
-  isBlocked: user.isBlocked,
-  createdAt: user.createdAt,
-});
+  return `${prefix}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+};
 
-const normalizeEmail = (email) => {
-  return typeof email === "string" ? email.toLowerCase().trim() : "";
+const getReferralLink = (referralCode) => {
+  if (!referralCode) {
+    return "";
+  }
+
+  const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || "").replace(/\/$/, "");
+  return `${frontendUrl}/register?ref=${referralCode}`;
+};
+
+const userResponse = (user) => {
+  const images = Array.isArray(user.images) && user.images.length ? user.images : [DEFAULT_PROFILE_IMAGE_PATH];
+  const videos = Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || [];
+  const profileImage = user.profileImage || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
+
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    type: user.type,
+    gender: user.gender,
+    category: user.category,
+    price: user.price,
+    phone: user.phone,
+    whatsappNumber: user.whatsappNumber || user.whatsapp,
+    whatsapp: user.whatsapp || user.whatsappNumber,
+    location: user.location,
+    province: user.province,
+    district: user.district,
+    profileImage,
+    images,
+    videoUrls: videos,
+    videos,
+    bio: user.bio,
+    socialLinks: user.socialLinks,
+    availability: user.availability,
+    averageRating: user.averageRating,
+    isPremium: user.isPremium,
+    premiumBadge: user.premiumBadge || user.isPremium,
+    isVerified: user.isVerified,
+    isBlocked: user.isBlocked,
+    referralCode: user.referralCode,
+    referralLink: getReferralLink(user.referralCode),
+    referredUsers: user.referredUsers,
+    trialStartDate: user.trialStartDate,
+    trialActive: buildAccessState(user).trialActive,
+    trialEndsAt: buildAccessState(user).trialEndsAt,
+    hasPaidAccess: user.hasPaidAccess,
+    lastPaymentDate: user.lastPaymentDate,
+    access: buildAccessState(user),
+    createdAt: user.createdAt,
+  };
 };
 
 const isValidEmail = (email) => emailPattern.test(email);
@@ -77,49 +101,45 @@ const register = async (req, res, next) => {
       return res.status(400).json({ message: "Password must be at least 6 characters" });
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body, "role")) {
-      if (!User.allowedRoles.includes(req.body.role)) {
-        return res.status(400).json({ message: `Role must be one of: ${publicRoles.join(", ")}` });
-      }
-
-      if (req.body.role === "admin") {
-        return res.status(400).json({ message: "Admin role cannot be selected during registration" });
-      }
-    }
-
-    if (
-      Object.prototype.hasOwnProperty.call(req.body, "type") &&
-      !User.allowedTypes.includes(req.body.type)
-    ) {
-      return res.status(400).json({ message: `Type must be one of: ${User.allowedTypes.join(", ")}` });
-    }
-
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const userData = {};
+    const { data: userData, errors } = normalizeProfileFields(req.body, { allowRole: true });
 
-    registerableFields.forEach((field) => {
-      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
-        userData[field] = req.body[field];
-      }
-    });
+    if (errors.length) {
+      return res.status(400).json({ message: errors[0], errors });
+    }
 
     userData.email = email;
+    userData.referralCode = createReferralCode(name);
+
+    const refCode = typeof req.body.referralCode === "string" ? req.body.referralCode.trim() : "";
+    const referrer = refCode ? await User.findOne({ referralCode: refCode }) : null;
+
+    if (referrer) {
+      userData.referredBy = referrer._id;
+    }
 
     const user = await User.create({
       ...userData,
       acceptedTerms: true,
       acceptedTermsAt: new Date(),
+      trialStartDate: new Date(),
+      trialActive: true,
       password: hashedPassword,
     });
+
+    if (referrer) {
+      await User.findByIdAndUpdate(referrer._id, { $inc: { referredUsers: 1 } });
+    }
 
     return res.status(201).json({
       user: userResponse(user),
       token: generateToken(user._id),
+      message: "Registration successful",
     });
   } catch (error) {
     return next(error);
@@ -153,9 +173,12 @@ const login = async (req, res, next) => {
       return res.status(403).json({ message: "Your account is blocked" });
     }
 
+    await syncTrialState(user);
+
     return res.json({
       user: userResponse(user),
       token: generateToken(user._id),
+      message: "Login successful",
     });
   } catch (error) {
     return next(error);

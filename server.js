@@ -1,9 +1,12 @@
 // @ts-nocheck
 require("dotenv").config({ quiet: true });
 
-const connectDB = require("./src/config/db");
+const http = require("http");
 
-const PORT = process.env.PORT || 5000;
+const connectDB = require("./src/config/db");
+const { initSocket } = require("./src/socket");
+
+const PORT = process.env.PORT;
 const isProduction = process.env.NODE_ENV === "production";
 
 const logError = (label, error) => {
@@ -27,11 +30,17 @@ const verifyEnv = () => {
   const requiredVariables = ["MONGO_URI", "JWT_SECRET"];
 
   requiredVariables.forEach((key) => {
-    if (!process.env[key]) {
+    if (!process.env[key] || !process.env[key].trim()) {
       console.error(`ENV ERROR: Missing required variable: ${key}`);
       shutdown(1);
     }
   });
+
+  const portNumber = Number(PORT);
+  if (PORT && (!Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535)) {
+    console.error("ENV ERROR: PORT must be between 1 and 65535");
+    shutdown(1);
+  }
 };
 
 process.on("unhandledRejection", (error) => {
@@ -51,12 +60,21 @@ const startServer = async () => {
     await connectDB();
 
     const app = require("./src/app");
+    const server = http.createServer(app);
+    const io = initSocket(server, {
+      origin: process.env.FRONTEND_URL || process.env.CLIENT_URL || process.env.CORS_ORIGIN || true,
+    });
 
-    const server = app.listen(PORT, "0.0.0.0", () => {
+    app.set("io", io);
+
+    server.listen(PORT, "0.0.0.0", () => {
+      const address = server.address();
+      const activePort = typeof address === "object" && address ? address.port : PORT;
+
       console.log("=================================");
       console.log("VIBEBOOK SERVER RUNNING");
-      console.log(`PORT: ${PORT}`);
-      console.log(`ENV: ${process.env.NODE_ENV}`);
+      console.log(`PORT: ${activePort}`);
+      console.log(`ENV: ${process.env.NODE_ENV || "development"}`);
       console.log("=================================");
     });
 

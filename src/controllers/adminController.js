@@ -1,5 +1,11 @@
 const Rule = require("../models/Rule");
 const User = require("../models/User");
+const Booking = require("../models/Booking");
+const ChatMessage = require("../models/ChatMessage");
+const VisitorStat = require("../models/VisitorStat");
+const { getOnlineUsersCount } = require("../socket");
+
+const getDateKey = () => new Date().toISOString().slice(0, 10);
 
 const getAllUsers = async (req, res, next) => {
   try {
@@ -12,16 +18,44 @@ const getAllUsers = async (req, res, next) => {
 
 const getStats = async (req, res, next) => {
   try {
-    const [totalUsers, totalDancers, totalArtists] = await Promise.all([
+    const [totalUsers, totalDancers, totalArtists, totalBookings, totalChats, dailyVisitors] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ role: "dancer" }),
       User.countDocuments({ role: "artist" }),
+      Booking.countDocuments(),
+      ChatMessage.countDocuments(),
+      VisitorStat.findOne({ dateKey: getDateKey() }),
     ]);
 
     return res.json({
       totalUsers,
       totalDancers,
       totalArtists,
+      totalBookings,
+      totalChats,
+      onlineUsers: getOnlineUsersCount(),
+      dailyVisitors: dailyVisitors?.visitors || 0,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getDashboardStats = async (req, res, next) => {
+  try {
+    const [totalUsers, totalBookings, totalChats, dailyVisitors] = await Promise.all([
+      User.countDocuments(),
+      Booking.countDocuments(),
+      ChatMessage.countDocuments(),
+      VisitorStat.findOne({ dateKey: getDateKey() }),
+    ]);
+
+    return res.json({
+      totalUsers,
+      totalBookings,
+      totalChats,
+      onlineUsers: getOnlineUsersCount(),
+      dailyVisitors: dailyVisitors?.visitors || 0,
     });
   } catch (error) {
     return next(error);
@@ -46,7 +80,7 @@ const blockUser = async (req, res, next) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { isBlocked: true },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     ).select("-password");
 
     if (!user) {
@@ -64,7 +98,7 @@ const unblockUser = async (req, res, next) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { isBlocked: false },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     ).select("-password");
 
     if (!user) {
@@ -82,7 +116,7 @@ const verifyUser = async (req, res, next) => {
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { isVerified: true },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     ).select("-password");
 
     if (!user) {
@@ -112,6 +146,7 @@ const createRule = async (req, res, next) => {
 
 module.exports = {
   getAllUsers,
+  getDashboardStats,
   getStats,
   deleteUser,
   blockUser,

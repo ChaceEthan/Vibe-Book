@@ -48,6 +48,41 @@ const sendContactNotification = async ({ to, contactedUser, fromUser, message })
   return { sent: true };
 };
 
+const sendBookingNotification = async ({ to, talent, requester, booking, whatsappLink }) => {
+  console.log(
+    `Booking notification prepared: ${requester.name} (${requester.email}) booked ${talent.name} (${talent.email})`
+  );
+
+  if (!hasSmtpConfig()) {
+    console.log("Booking email not sent: SMTP configuration is missing");
+    return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
+  }
+
+  const transporter = createTransporter();
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to,
+    subject: `New VibeBook booking request from ${requester.name}`,
+    text: [
+      `Hi ${talent.name},`,
+      "",
+      `${requester.name} sent you a booking request on VibeBook.`,
+      "",
+      `Business: ${booking.businessName || "Not provided"}`,
+      `Event location: ${booking.location || "Not provided"}`,
+      `Offered price: ${booking.offeredPrice || booking.offerPrice || "Not provided"} RWF`,
+      `Message: ${booking.message || "No message"}`,
+      "",
+      whatsappLink ? `WhatsApp action link: ${whatsappLink}` : "",
+      `Reply email: ${requester.email}`,
+    ].filter(Boolean).join("\n"),
+  });
+
+  return { sent: true };
+};
+
 module.exports = {
   sendContactNotification,
+  sendBookingNotification,
 };
