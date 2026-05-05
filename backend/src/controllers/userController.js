@@ -309,6 +309,15 @@ const updateProfile = async (req, res, next) => {
       updates.password = await bcrypt.hash(password, 10);
     }
 
+    const isPremium = Boolean(req.user.isPremium || req.user.premiumBadge);
+    if (!isPremium && Array.isArray(updates.images) && updates.images.length > MAX_IMAGES_PER_USER) {
+      return res.status(400).json({ message: `Free profiles can have a maximum of ${MAX_IMAGES_PER_USER} images` });
+    }
+
+    if (!isPremium && Array.isArray(updates.videos) && updates.videos.length > FREE_VIDEO_LIMIT) {
+      return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 60 seconds` });
+    }
+
     const user = await User.findByIdAndUpdate(req.user._id, updates, {
       returnDocument: "after",
       runValidators: true,

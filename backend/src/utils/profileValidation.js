@@ -29,6 +29,20 @@ const normalizeStringArray = (value) => {
     .slice(0, 25);
 };
 
+const normalizeMediaArray = (value, field) => {
+  const values = normalizeStringArray(value).filter((item) => {
+    return item.startsWith("/uploads/") || /^https?:\/\//i.test(item);
+  });
+
+  if (Array.isArray(value) && values.length !== value.filter(Boolean).length) {
+    return {
+      error: `${field} must contain valid upload URLs`,
+    };
+  }
+
+  return { value: values };
+};
+
 const findAllowedValue = (value, allowedValues) => {
   const normalized = normalizeLowerText(value);
   return allowedValues.find((allowedValue) => allowedValue.toLowerCase() === normalized);
@@ -184,6 +198,34 @@ const normalizeProfileFields = (body, options = {}) => {
     const result = normalizeSocialLinks(body.socialLinks);
     if (result.error) errors.push(result.error);
     else data.socialLinks = result.value;
+  }
+
+  if (hasOwn(body, "images")) {
+    const result = normalizeMediaArray(body.images, "Images");
+    if (result.error) errors.push(result.error);
+    else {
+      data.images = result.value;
+      data.gallery = result.value;
+    }
+  }
+
+  if (hasOwn(body, "videos")) {
+    const result = normalizeMediaArray(body.videos, "Videos");
+    if (result.error) errors.push(result.error);
+    else {
+      data.videos = result.value;
+      data.videoUrls = result.value;
+    }
+  }
+
+  if (hasOwn(body, "profilePicture")) {
+    data.profilePicture = normalizeText(body.profilePicture);
+    data.profileImage = data.profilePicture;
+  }
+
+  if (hasOwn(body, "profileImage") && !hasOwn(body, "profilePicture")) {
+    data.profileImage = normalizeText(body.profileImage);
+    data.profilePicture = data.profileImage;
   }
 
   if (hasOwn(body, "availability")) {

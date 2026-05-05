@@ -43,6 +43,15 @@ const createStorage = (directory) =>
     },
   });
 
+const genericUploadStorage = multer.diskStorage({
+  destination(req, file, callback) {
+    callback(null, uploadRoot);
+  },
+  filename(req, file, callback) {
+    callback(null, safeName(file.originalname));
+  },
+});
+
 const createFileFilter = (allowedTypes, label) => (req, file, callback) => {
   if (!allowedTypes.includes(file.mimetype)) {
     const error = new Error(`Only ${label} files are allowed`);
@@ -52,6 +61,15 @@ const createFileFilter = (allowedTypes, label) => (req, file, callback) => {
 
   return callback(null, true);
 };
+
+const uploadFiles = multer({
+  storage: genericUploadStorage,
+  limits: {
+    fileSize: maxVideoSize,
+    files: 10,
+  },
+  fileFilter: createFileFilter([...imageMimeTypes, ...videoMimeTypes], "image or video"),
+});
 
 const uploadImages = multer({
   storage: createStorage(imageUploadDir),
@@ -82,6 +100,7 @@ const uploadVideos = multer({
 
 module.exports = {
   ensureUploadFolders,
+  uploadFiles,
   imageUploadDir,
   maxImageSize,
   maxVideoSize,

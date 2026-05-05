@@ -37,17 +37,22 @@ export const userApi = {
     return response;
   },
   getById: (id) => api.get(`/users/${id}`),
-  getProfile: () => api.get("/users/profile"),
+  getProfile: () => api.get("/profile"),
   updateProfile: async (payload) => {
     try {
-      return await api.put("/users/profile", payload);
+      return await api.put("/profile", payload);
     } catch (error) {
       if (error.response?.status === 404) {
-        return api.put("/users/update", payload);
+        return api.put("/users/profile", payload);
       }
 
       throw error;
     }
+  },
+  uploadFiles: (files) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    return api.post("/upload", formData);
   },
   uploadImages: (files) => {
     const formData = new FormData();

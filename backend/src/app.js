@@ -11,8 +11,9 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
-const { searchUsers } = require("./controllers/userController");
+const { getProfile, searchUsers, updateProfile } = require("./controllers/userController");
 const optionalAuthMiddleware = require("./middleware/optionalAuthMiddleware");
+const authMiddleware = require("./middleware/authMiddleware");
 const responseMiddleware = require("./middleware/responseMiddleware");
 const errorMiddleware = require("./middleware/errorMiddleware");
 const { visitorMiddleware } = require("./middleware/visitorMiddleware");
@@ -32,6 +33,18 @@ const allowedOrigins = [
 if (process.env.CLIENT_URL && !allowedOrigins.includes(process.env.CLIENT_URL)) {
   allowedOrigins.push(process.env.CLIENT_URL);
 }
+
+[process.env.FRONTEND_URL, process.env.CORS_ORIGIN].filter(Boolean).forEach((origin) => {
+  origin
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .forEach((value) => {
+      if (!allowedOrigins.includes(value)) {
+        allowedOrigins.push(value);
+      }
+    });
+});
 
 const corsOptions = {
   origin(origin, callback) {
@@ -70,6 +83,9 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.get("/api/profile", authMiddleware, getProfile);
+app.put("/api/profile", authMiddleware, updateProfile);
+app.patch("/api/profile", authMiddleware, updateProfile);
 app.use("/api/users", userRoutes);
 app.use("/api/profiles", userRoutes);
 app.get("/api/search", optionalAuthMiddleware, searchUsers);
