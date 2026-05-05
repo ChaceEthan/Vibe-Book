@@ -3,6 +3,7 @@ dist
 .vite
 .cache
 *.log
+/data/
 
 .env
 .env.*

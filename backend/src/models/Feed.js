@@ -45,6 +45,36 @@ const feedSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    orientation: {
+      type: String,
+      enum: ["portrait", "landscape"],
+      default: "portrait",
+    },
+    duration: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    caption: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
+    tags: {
+      type: [String],
+      default: [],
+    },
+    views: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    shareCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     likes: {
       type: Number,
       default: 0,
@@ -62,6 +92,7 @@ const feedSchema = new mongoose.Schema(
     },
   },
   {
+    collection: "posts",
     timestamps: true,
   }
 );
@@ -69,4 +100,3 @@ const feedSchema = new mongoose.Schema(
 feedSchema.index({ userId: 1, mediaUrl: 1 }, { unique: true });
 
 module.exports = mongoose.model("Feed", feedSchema);
-

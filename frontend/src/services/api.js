@@ -92,6 +92,8 @@ export const feedApi = {
   get: (params = {}) => API.get("/feed", { params }),
   toggleLike: (id) => API.post(`/feed/${id}/like`),
   addComment: (id, payload) => API.post(`/feed/${id}/comments`, payload),
+  recordView: (id) => API.post(`/feed/${id}/view`),
+  share: (id) => API.post(`/feed/${id}/share`),
 };
 
 export const bookingApi = {

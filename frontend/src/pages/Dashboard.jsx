@@ -229,7 +229,7 @@ const Dashboard = () => {
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-black text-navy">Videos</h2>
-            <p className="mt-1 text-sm text-slate-500">Videos must be 60 seconds or shorter.</p>
+            <p className="mt-1 text-sm text-slate-500">Videos must be 2 minutes or shorter.</p>
           </div>
           <button type="button" className="btn-primary gap-2" onClick={() => openUpload("video")}>
             <Video className="h-4 w-4" />

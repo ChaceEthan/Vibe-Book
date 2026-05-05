@@ -18,9 +18,39 @@ const { getMp4DurationSeconds } = require("../utils/videoDuration");
 const { serializeFeedItem, userSelect } = require("../controllers/feedController");
 
 const router = express.Router();
-const MAX_VIDEO_SECONDS = 60;
+const MAX_VIDEO_SECONDS = 120;
 
 const cleanDescription = (value) => (typeof value === "string" ? value.trim().slice(0, 500) : "");
+const normalizeOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
+const parseDuration = (value) => {
+  const duration = Number(value || 0);
+  return Number.isFinite(duration) && duration > 0 ? duration : 0;
+};
+const parseTags = (value) => {
+  if (Array.isArray(value)) {
+    return value.flatMap(parseTags).slice(0, 10);
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.flatMap(parseTags).slice(0, 10);
+    }
+  } catch {
+    // Comma-separated tags are the default upload form format.
+  }
+
+  return value
+    .split(",")
+    .map((tag) => tag.trim().replace(/^#/, "").toLowerCase())
+    .filter(Boolean)
+    .filter((tag, index, tags) => tags.indexOf(tag) === index)
+    .slice(0, 10);
+};
 
 const buildUploadedFiles = (req, files = []) => {
   return files.map((file) => ({
@@ -57,10 +87,12 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
 
     if (type === "video") {
       const duration = await getMp4DurationSeconds(file.path);
+      const clientDuration = parseDuration(req.body.duration);
+      const knownDuration = duration || clientDuration;
 
-      if (duration && duration > MAX_VIDEO_SECONDS) {
+      if (knownDuration && knownDuration > MAX_VIDEO_SECONDS) {
         await removeFiles([file]);
-        return res.status(400).json({ message: "Videos must be 60 seconds or shorter" });
+        return res.status(400).json({ message: "Videos must be 2 minutes or shorter" });
       }
     }
 
@@ -68,7 +100,10 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     const publicUrl = toPublicUploadUrl(req, url);
     const mediaField = type === "video" ? "videos" : "images";
     const mirrorField = type === "video" ? "videoUrls" : "gallery";
-    const description = cleanDescription(req.body.description);
+    const caption = cleanDescription(req.body.caption || req.body.description);
+    const tags = parseTags(req.body.tags);
+    const orientation = normalizeOrientation(req.body.orientation);
+    const duration = type === "video" ? parseDuration(req.body.duration) || (await getMp4DurationSeconds(file.path)) || 0 : 0;
     const update = {
       $addToSet: {
         [mediaField]: url,
@@ -76,11 +111,11 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       },
     };
 
-    if (description) {
+    if (caption) {
       update.$push = {
         [type === "video" ? "videoDescriptions" : "imageDescriptions"]: {
           url,
-          description,
+          description: caption,
         },
       };
     }
@@ -100,11 +135,19 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     const feed = await Feed.findOneAndUpdate(
       { userId: req.user._id, mediaUrl: url },
       {
+        $set: {
+          caption,
+          tags,
+          orientation,
+          duration,
+        },
         $setOnInsert: {
           userId: req.user._id,
           mediaUrl: url,
           type,
+          views: 0,
           likes: 0,
+          shareCount: 0,
           comments: [],
         },
       },
@@ -122,7 +165,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
         originalName: file.originalname,
       },
       files: buildUploadedFiles(req, [file]),
-      feedItem: serializeFeedItem(feed, req.user),
+      feedItem: serializeFeedItem(feed, req.user, false, { req }),
       user: profileResponse(user, user, { includePrivate: true }),
     });
   } catch (error) {

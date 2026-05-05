@@ -1,0 +1,25 @@
+{
+  "tool": "deepsec",
+  "version": "1.1.13",
+  "projectId": "vibebook",
+  "generatedAt": "2026-05-05T16:04:20-10:00",
+  "scan": {
+    "status": "completed",
+    "runId": "20260505160420-e03c04559ddf9613",
+    "candidateCount": 48,
+    "mode": "regex-scan",
+    "paths": [
+      "backend/src/",
+      "frontend/src/"
+    ],
+    "note": "DeepSec scan completed successfully in WSL because the native Windows CLI run hit a path separator bug. DeepSec export returned zero analyzed findings. The built-in report command requires deepsec process before it can emit analyzed findings."
+  },
+  "summary": {
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 0,
+    "findings": 0
+  },
+  "issues": []
+}

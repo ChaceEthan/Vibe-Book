@@ -1,0 +1,13 @@
+{
+  "priorityPaths": [
+    "backend/src/",
+    "frontend/src/"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/uploads/**",
+    ".git/**",
+    ".deepsec/data/**"
+  ]
+}

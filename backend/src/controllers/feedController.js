@@ -2,10 +2,10 @@ const Feed = require("../models/Feed");
 const User = require("../models/User");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { addMonetizationScore } = require("../utils/monetization");
-const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
+const { normalizeStoredUploadPath, normalizeStoredUploadPaths, toPublicUploadUrl } = require("../utils/storagePaths");
 const { validateChatMessage } = require("../utils/chatModeration");
 
-const userSelect = "name role category profileImage profilePicture images gallery videos videoUrls averageRating rating likes likedBy followers following isPremium premiumBadge province district createdAt";
+const userSelect = "name role category profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following isPremium premiumBadge province district createdAt";
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
 
@@ -17,6 +17,14 @@ const hasId = (items, id) => {
   const targetId = idOf(id);
   return items.some((item) => idOf(item) === targetId);
 };
+
+const normalizeDescriptionFor = (items = [], mediaUrl = "") => {
+  const target = normalizeStoredUploadPath(mediaUrl);
+  const item = (Array.isArray(items) ? items : []).find((entry) => normalizeStoredUploadPath(entry?.url) === target);
+  return typeof item?.description === "string" ? item.description.trim().slice(0, 500) : "";
+};
+
+const inferOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
 
 const buildProfile = (user, viewer = null) => {
   const images = normalizeStoredUploadPaths(Array.isArray(user?.images) && user.images.length ? user.images : user?.gallery || []);
@@ -47,21 +55,30 @@ const buildProfile = (user, viewer = null) => {
   };
 };
 
-const serializeFeedItem = (item, viewer = null, virtual = false) => {
+const serializeFeedItem = (item, viewer = null, virtual = false, options = {}) => {
   const user = item.userId;
   const likedBy = Array.isArray(item.likedBy) ? item.likedBy : [];
   const viewerId = viewer?._id?.toString?.() || "";
+  const mediaPath = normalizeStoredUploadPath(item.mediaUrl);
 
   return {
     _id: item._id,
     userId: buildProfile(user, viewer),
-    mediaUrl: normalizeStoredUploadPath(item.mediaUrl),
+    mediaUrl: mediaPath,
+    url: toPublicUploadUrl(options.req, mediaPath),
     type: item.type,
+    orientation: inferOrientation(item.orientation),
+    duration: Number(item.duration || 0),
+    caption: item.caption || "",
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    views: Number(item.views || 0),
     likes: virtual ? Number(item.likes || 0) : likedBy.length,
     likeCount: virtual ? Number(item.likes || 0) : likedBy.length,
     likedByViewer: Boolean(viewerId && likedBy.some((id) => id.toString() === viewerId)),
     comments: Array.isArray(item.comments) ? item.comments.slice(-20) : [],
     commentCount: Array.isArray(item.comments) ? item.comments.length : 0,
+    commentsCount: Array.isArray(item.comments) ? item.comments.length : 0,
+    shareCount: Number(item.shareCount || 0),
     createdAt: item.createdAt,
     virtual,
   };
@@ -72,27 +89,60 @@ const getUserMedia = (user) => {
   const images = normalizeStoredUploadPaths(Array.isArray(user.images) && user.images.length ? user.images : user.gallery || []);
 
   return [
-    ...videos.filter(Boolean).map((mediaUrl) => ({ mediaUrl, type: "video" })),
-    ...images.filter(Boolean).map((mediaUrl) => ({ mediaUrl, type: "image" })),
+    ...videos.filter(Boolean).map((mediaUrl) => ({
+      mediaUrl,
+      type: "video",
+      caption: normalizeDescriptionFor(user.videoDescriptions, mediaUrl),
+    })),
+    ...images.filter(Boolean).map((mediaUrl) => ({
+      mediaUrl,
+      type: "image",
+      caption: normalizeDescriptionFor(user.imageDescriptions, mediaUrl),
+    })),
   ];
+};
+
+const ensureMediaPosts = async (users = []) => {
+  const writes = [];
+
+  users.forEach((user) => {
+    getUserMedia(user).forEach((media) => {
+      writes.push(
+        Feed.findOneAndUpdate(
+          { userId: user._id, mediaUrl: media.mediaUrl },
+          {
+            $setOnInsert: {
+              userId: user._id,
+              mediaUrl: media.mediaUrl,
+              type: media.type,
+              orientation: "portrait",
+              duration: 0,
+              caption: media.caption || "",
+              tags: [],
+              views: 0,
+              likes: 0,
+              shareCount: 0,
+              comments: [],
+              createdAt: user.createdAt || new Date(),
+            },
+          },
+          { new: true, upsert: true, runValidators: true }
+        )
+      );
+    });
+  });
+
+  if (!writes.length) {
+    return;
+  }
+
+  await Promise.all(writes.map((write) => write.catch(() => null)));
 };
 
 const getFeed = async (req, res, next) => {
   try {
     const followedIds = new Set((req.user?.following || []).map((id) => idOf(id)));
     const followingOnly = req.query.mode === "following" || req.query.filter === "following";
-    const feedDocs = await Feed.find()
-      .populate("userId", userSelect)
-      .sort({ createdAt: -1 })
-      .limit(300);
-
-    const feedByKey = new Map();
-    const feedItems = feedDocs
-      .filter((item) => item.userId)
-      .map((item) => {
-        feedByKey.set(`${idOf(item.userId)}:${normalizeStoredUploadPath(item.mediaUrl)}`, true);
-        return serializeFeedItem(item, req.user);
-      });
 
     const users = await User.find({
       isBlocked: false,
@@ -108,50 +158,14 @@ const getFeed = async (req, res, next) => {
       .sort({ createdAt: -1 })
       .limit(200);
 
-    users.forEach((user) => {
-      getUserMedia(user).forEach((media) => {
-        const key = `${idOf(user)}:${media.mediaUrl}`;
+    await ensureMediaPosts(users);
 
-        if (feedByKey.has(key)) {
-          return;
-        }
-
-        feedItems.push(
-          serializeFeedItem(
-            {
-              _id: `legacy-${idOf(user)}-${Buffer.from(media.mediaUrl).toString("base64url")}`,
-              userId: user,
-              mediaUrl: media.mediaUrl,
-              type: media.type,
-              likes: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
-              comments: [],
-              createdAt: user.createdAt,
-            },
-            req.user,
-            true
-          )
-        );
-      });
-    });
-
-    const filteredFeedItems = followingOnly
-      ? feedItems.filter((item) => followedIds.has(idOf(item.userId?._id)))
-      : feedItems;
-
-    filteredFeedItems.sort((a, b) => {
-      const aFollowed = followedIds.has(idOf(a.userId?._id));
-      const bFollowed = followedIds.has(idOf(b.userId?._id));
-
-      if (aFollowed !== bFollowed) {
-        return aFollowed ? -1 : 1;
-      }
-
-      if (a.type !== b.type) {
-        return a.type === "video" ? -1 : 1;
-      }
-
-      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-    });
+    const query = followingOnly ? { userId: { $in: Array.from(followedIds) } } : {};
+    const feedDocs = await Feed.find(query)
+      .populate("userId", userSelect)
+      .sort({ createdAt: -1 })
+      .limit(300);
+    const filteredFeedItems = feedDocs.filter((item) => item.userId).map((item) => serializeFeedItem(item, req.user, false, { req }));
 
     return res.json({ feed: filteredFeedItems });
   } catch (error) {
@@ -184,7 +198,7 @@ const toggleFeedLike = async (req, res, next) => {
       await addMonetizationScore(item.userId, "like");
     }
 
-    return res.json({ feedItem: serializeFeedItem(item, req.user), message: liked ? "Like removed" : "Liked" });
+    return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: liked ? "Like removed" : "Liked" });
   } catch (error) {
     return next(error);
   }
@@ -212,7 +226,43 @@ const addFeedComment = async (req, res, next) => {
     await item.save();
     await item.populate("userId", userSelect);
 
-    return res.status(201).json({ feedItem: serializeFeedItem(item, req.user), message: "Comment added" });
+    return res.status(201).json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: "Comment added" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const incrementPostView = async (req, res, next) => {
+  try {
+    const item = await Feed.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { views: 1 } },
+      { returnDocument: "after", runValidators: true }
+    ).populate("userId", userSelect);
+
+    if (!item) {
+      return res.status(404).json({ message: "Feed item not found" });
+    }
+
+    return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: "View counted" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const sharePost = async (req, res, next) => {
+  try {
+    const item = await Feed.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { shareCount: 1 } },
+      { returnDocument: "after", runValidators: true }
+    ).populate("userId", userSelect);
+
+    if (!item) {
+      return res.status(404).json({ message: "Feed item not found" });
+    }
+
+    return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: "Share counted" });
   } catch (error) {
     return next(error);
   }
@@ -221,7 +271,9 @@ const addFeedComment = async (req, res, next) => {
 module.exports = {
   addFeedComment,
   getFeed,
+  incrementPostView,
   serializeFeedItem,
+  sharePost,
   toggleFeedLike,
   userSelect,
 };

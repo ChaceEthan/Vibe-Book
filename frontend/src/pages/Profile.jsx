@@ -1,10 +1,12 @@
 // @ts-nocheck
-import { CreditCard, Heart, Lock, Mail, MessageCircle, Phone, Star, UserMinus, UserPlus, X } from "lucide-react";
+import { CreditCard, Eye, Heart, Lock, Mail, MessageCircle, Phone, Send, Share2, Star, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import PostMedia from "../components/PostMedia.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { bookingApi, mediaUrl, paymentApi, ratingApi, userApi } from "../services/api";
+import { bookingApi, feedApi, mediaUrl, paymentApi, ratingApi, userApi } from "../services/api";
+import { usePostStore } from "../store/postStore";
 
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
 
@@ -72,6 +74,9 @@ const toEmbedUrl = (url) => {
 const Profile = () => {
   const { id } = useParams();
   const { refreshProfile, user: currentUser } = useAuth();
+  const storePosts = usePostStore((state) => state.posts);
+  const mergePosts = usePostStore((state) => state.mergePosts);
+  const replacePost = usePostStore((state) => state.replacePost);
   const [user, setUser] = useState(null);
   const [activeImage, setActiveImage] = useState(0);
   const [previewImage, setPreviewImage] = useState("");
@@ -99,6 +104,9 @@ const Profile = () => {
   const [likeStatus, setLikeStatus] = useState("");
   const [followStatus, setFollowStatus] = useState("");
   const [followUpdating, setFollowUpdating] = useState(false);
+  const [viewedPosts, setViewedPosts] = useState(new Set());
+  const [profileCommentOpen, setProfileCommentOpen] = useState("");
+  const [profileCommentText, setProfileCommentText] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -109,6 +117,14 @@ const Profile = () => {
       try {
         const { data } = await userApi.getById(id);
         setUser(data.user);
+        if (Array.isArray(data.user?.posts)) {
+          mergePosts(data.user.posts);
+          console.log("[VibeBook profile] fetched profile posts", {
+            userId: data.user?._id,
+            count: data.user.posts.length,
+            posts: data.user.posts,
+          });
+        }
       } catch (requestError) {
         setError(requestError.response?.data?.message || "Profile not found.");
       } finally {
@@ -117,7 +133,7 @@ const Profile = () => {
     };
 
     fetchProfile();
-  }, [id]);
+  }, [id, mergePosts]);
 
   useEffect(() => {
     setActiveImage(0);
@@ -135,6 +151,9 @@ const Profile = () => {
     setPaymentError("");
     setFollowStatus("");
     setFollowUpdating(false);
+    setViewedPosts(new Set());
+    setProfileCommentOpen("");
+    setProfileCommentText("");
   }, [id, currentUser]);
 
   useEffect(() => {
@@ -165,6 +184,20 @@ const Profile = () => {
   const phone = cleanPhone(user?.phone || "");
   const contactUnlocked = Boolean(isOwnProfile || user?.contactUnlocked || contentUnlocked);
   const contactLocked = Boolean(!isOwnProfile && user?.contactLocked);
+  const profilePosts = useMemo(() => {
+    const byId = new Map();
+    const userId = user?._id || id;
+    const userPosts = Array.isArray(user?.posts) ? user.posts : [];
+    const syncedPosts = storePosts.filter((post) => (post.userId?._id || post.userId) === userId);
+
+    [...userPosts, ...syncedPosts].forEach((post) => {
+      if (post?._id) {
+        byId.set(post._id, { ...(byId.get(post._id) || {}), ...post });
+      }
+    });
+
+    return Array.from(byId.values()).sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0));
+  }, [id, storePosts, user]);
 
   const goToImage = (direction) => {
     setActiveImage((current) => {
@@ -276,6 +309,96 @@ const Profile = () => {
       setFollowStatus(requestError.response?.data?.message || "Unable to update follow.");
     } finally {
       setFollowUpdating(false);
+    }
+  };
+
+  const replaceProfilePost = (nextPost) => {
+    if (!nextPost?._id) {
+      return;
+    }
+
+    replacePost(nextPost);
+    setUser((current) => ({
+      ...current,
+      posts: (current?.posts || []).map((post) => (post._id === nextPost._id ? { ...post, ...nextPost } : post)),
+    }));
+  };
+
+  const handlePostLike = async (post) => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      const { data } = await feedApi.toggleLike(post._id);
+      replaceProfilePost(data.feedItem);
+    } catch {
+      setLikeStatus("Unable to update post like.");
+    }
+  };
+
+  const handlePostViewed = async (post) => {
+    if (!post?._id || viewedPosts.has(post._id)) {
+      return;
+    }
+
+    setViewedPosts((current) => {
+      const next = new Set(current);
+      next.add(post._id);
+      return next;
+    });
+
+    try {
+      const { data } = await feedApi.recordView(post._id);
+      replaceProfilePost(data.feedItem);
+    } catch {
+      // View tracking is best-effort and should not interrupt media playback.
+    }
+  };
+
+  const handlePostShare = async (post) => {
+    const shareUrl = `${window.location.origin}/profile/${user?._id || id}`;
+    const shareData = {
+      title: user?.name || "VibeBook post",
+      text: post.caption || "Check out this VibeBook post",
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+      }
+
+      const { data } = await feedApi.share(post._id);
+      replaceProfilePost(data.feedItem);
+    } catch (requestError) {
+      if (requestError.name !== "AbortError") {
+        setLikeStatus("Unable to share post.");
+      }
+    }
+  };
+
+  const handlePostComment = async (event, post) => {
+    event.preventDefault();
+
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    if (!profileCommentText.trim()) {
+      return;
+    }
+
+    try {
+      const { data } = await feedApi.addComment(post._id, { message: profileCommentText.trim() });
+      replaceProfilePost(data.feedItem);
+      setProfileCommentText("");
+    } catch {
+      setLikeStatus("Unable to add post comment.");
     }
   };
 
@@ -524,6 +647,82 @@ const Profile = () => {
               </div>
             </div>
           )}
+
+          {profilePosts.length > 0 || (!isOwnProfile && Number(user?.postCount || 0) > 0) ? (
+            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-black text-navy">Posts</h2>
+                <span className="text-xs font-bold uppercase text-slate-500">{Number(user?.postCount || profilePosts.length || 0)} posts</span>
+              </div>
+              {profilePosts.length > 0 ? (
+                <div className="mt-4 grid gap-4">
+                  {profilePosts.map((post) => (
+                    <article key={post._id} className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                      <PostMedia
+                        post={post}
+                        alt={`${user.name} post`}
+                        imageClassName="max-h-[300px] w-full rounded-lg object-cover"
+                        videoClassName="max-h-[350px] w-full bg-slate-950 object-cover"
+                        placeholderClassName="rounded-lg"
+                        controls
+                        onViewed={() => handlePostViewed(post)}
+                      />
+                      <div className="p-3">
+                        {post.caption && <p className="line-clamp-2 text-sm font-semibold text-slate-700">{post.caption}</p>}
+                        {Array.isArray(post.tags) && post.tags.length > 0 && (
+                          <p className="mt-2 line-clamp-1 text-xs font-bold text-brand">
+                            {post.tags.slice(0, 5).map((tag) => `#${tag}`).join(" ")}
+                          </p>
+                        )}
+                        <div className="mt-3 grid grid-cols-4 gap-2 text-xs font-bold text-slate-600">
+                          <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2" onClick={() => handlePostLike(post)}>
+                            <Heart className={`h-4 w-4 ${post.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
+                            {Number(post.likes || post.likeCount || 0)}
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 rounded-lg bg-white px-2 py-2"
+                            onClick={() => setProfileCommentOpen((current) => (current === post._id ? "" : post._id))}
+                          >
+                            <MessageCircle className="h-4 w-4" />
+                            {Number(post.commentCount || 0)}
+                          </button>
+                          <span className="flex items-center gap-1 rounded-lg bg-white px-2 py-2">
+                            <Eye className="h-4 w-4" />
+                            {Number(post.views || 0)}
+                          </span>
+                          <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2" onClick={() => handlePostShare(post)}>
+                            <Share2 className="h-4 w-4" />
+                            {Number(post.shareCount || 0)}
+                          </button>
+                        </div>
+                        {profileCommentOpen === post._id && (
+                          <form className="mt-3 flex gap-2" onSubmit={(event) => handlePostComment(event, post)}>
+                            <input
+                              className="field min-w-0 flex-1"
+                              value={profileCommentText}
+                              onChange={(event) => setProfileCommentText(event.target.value)}
+                              placeholder="Add comment"
+                            />
+                            <button type="submit" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand text-navy" aria-label="Send comment">
+                              <Send className="h-4 w-4" />
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 flex min-h-28 items-center justify-center rounded-lg bg-slate-100 p-5 text-center text-sm font-bold text-slate-600">
+                  <span className="inline-flex items-center gap-2">
+                    <Lock className="h-4 w-4" />
+                    Follow to unlock posts
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-5">

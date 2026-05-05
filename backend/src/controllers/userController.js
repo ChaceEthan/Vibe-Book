@@ -1,6 +1,7 @@
 const bcrypt = require("bcryptjs");
 
 const Booking = require("../models/Booking");
+const Feed = require("../models/Feed");
 const User = require("../models/User");
 const { sendContactNotification } = require("../utils/emailService");
 const {
@@ -11,7 +12,7 @@ const {
 const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
-const { normalizeStoredUploadPath, normalizeStoredUploadPaths, toUploadPath } = require("../utils/storagePaths");
+const { normalizeStoredUploadPath, normalizeStoredUploadPaths, toPublicUploadUrl, toUploadPath } = require("../utils/storagePaths");
 const {
   normalizeAvailability,
   normalizeGender,
@@ -26,7 +27,7 @@ const CONTACT_UNLOCK_PRICE = PLATFORM_ACCESS_AMOUNT;
 const CONTACT_UNLOCK_CURRENCY = PLATFORM_ACCESS_CURRENCY;
 const MAX_IMAGES_PER_USER = 3;
 const FREE_VIDEO_LIMIT = 1;
-const MAX_VIDEO_SECONDS = 60;
+const MAX_VIDEO_SECONDS = 120;
 const searchRoleAliases = {
   djs: "dj",
   dj: "dj",
@@ -127,6 +128,94 @@ const normalizeDescriptions = (items = [], allowedUrls = []) => {
     .filter((item) => item.url && (!allowed.size || allowed.has(item.url)));
 };
 
+const descriptionFor = (items = [], mediaUrl = "") => {
+  const normalizedUrl = normalizeStoredUploadPath(mediaUrl);
+  const match = (Array.isArray(items) ? items : []).find((item) => normalizeStoredUploadPath(item?.url) === normalizedUrl);
+  return normalizeText(match?.description).slice(0, 500);
+};
+
+const profileMediaItems = (user) => {
+  const videos = normalizeStoredUploadPaths(Array.isArray(user?.videos) && user.videos.length ? user.videos : user?.videoUrls || []);
+  const images = normalizeStoredUploadPaths(Array.isArray(user?.images) && user.images.length ? user.images : user?.gallery || []);
+
+  return [
+    ...videos.filter(Boolean).map((mediaUrl) => ({
+      mediaUrl,
+      type: "video",
+      caption: descriptionFor(user.videoDescriptions, mediaUrl),
+    })),
+    ...images.filter(Boolean).map((mediaUrl) => ({
+      mediaUrl,
+      type: "image",
+      caption: descriptionFor(user.imageDescriptions, mediaUrl),
+    })),
+  ];
+};
+
+const ensureProfilePosts = async (user) => {
+  const writes = profileMediaItems(user).map((media) =>
+    Feed.findOneAndUpdate(
+      { userId: user._id, mediaUrl: media.mediaUrl },
+      {
+        $setOnInsert: {
+          userId: user._id,
+          mediaUrl: media.mediaUrl,
+          type: media.type,
+          orientation: "portrait",
+          duration: 0,
+          caption: media.caption || "",
+          tags: [],
+          views: 0,
+          likes: 0,
+          shareCount: 0,
+          comments: [],
+          createdAt: user.createdAt || new Date(),
+        },
+      },
+      { new: true, upsert: true, runValidators: true }
+    )
+  );
+
+  if (!writes.length) {
+    return;
+  }
+
+  await Promise.all(writes.map((write) => write.catch(() => null)));
+};
+
+const serializeProfilePost = (post, viewer = null, req = null) => {
+  const likedBy = Array.isArray(post.likedBy) ? post.likedBy : [];
+  const viewerId = viewer?._id?.toString?.() || "";
+  const mediaPath = normalizeStoredUploadPath(post.mediaUrl);
+
+  return {
+    _id: post._id,
+    userId: post.userId,
+    mediaUrl: mediaPath,
+    url: toPublicUploadUrl(req, mediaPath),
+    type: post.type,
+    orientation: post.orientation === "landscape" ? "landscape" : "portrait",
+    duration: Number(post.duration || 0),
+    caption: post.caption || "",
+    tags: Array.isArray(post.tags) ? post.tags : [],
+    views: Number(post.views || 0),
+    likes: likedBy.length,
+    likeCount: likedBy.length,
+    likedByViewer: Boolean(viewerId && likedBy.some((id) => id.toString() === viewerId)),
+    comments: Array.isArray(post.comments) ? post.comments.slice(-10) : [],
+    commentCount: Array.isArray(post.comments) ? post.comments.length : 0,
+    commentsCount: Array.isArray(post.comments) ? post.comments.length : 0,
+    shareCount: Number(post.shareCount || 0),
+    createdAt: post.createdAt,
+  };
+};
+
+const getProfilePosts = async (user, viewer = null, req = null) => {
+  await ensureProfilePosts(user);
+  const posts = await Feed.find({ userId: user._id }).sort({ createdAt: -1 }).limit(100);
+  return posts.map((post) => serializeProfilePost(post, viewer, req));
+};
+
 const profileResponse = (user, viewer = null, options = {}) => {
   const isOwnProfile = Boolean(viewer && sameId(viewer._id, user?._id));
   const isFollowing = viewerFollowsProfile(viewer, user);
@@ -149,6 +238,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
   const visibleVideos = isUnlocked ? storedVideos : [];
   const imageDescriptions = normalizeDescriptions(user.imageDescriptions, visibleImages);
   const videoDescriptions = normalizeDescriptions(user.videoDescriptions, visibleVideos);
+  const posts = Array.isArray(options.posts) && isUnlocked ? options.posts : [];
   const socialLinks = {
     instagram: user.socialLinks?.instagram || "",
     whatsapp: contactUnlocked ? user.whatsapp || user.whatsappNumber || user.socialLinks?.whatsapp || "" : "",
@@ -186,6 +276,8 @@ const profileResponse = (user, viewer = null, options = {}) => {
       videos: videoDescriptions,
     },
     videoCount: storedVideos.length,
+    posts,
+    postCount: Number(options.postCount ?? options.posts?.length ?? posts.length),
     bio: isUnlocked ? user.bio : "",
     socialLinks,
     availability: user.availability,
@@ -235,7 +327,8 @@ const profileResponse = (user, viewer = null, options = {}) => {
 
 const getProfile = async (req, res, next) => {
   try {
-    return res.json({ user: profileResponse(req.user, req.user, { includePrivate: true }) });
+    const posts = await getProfilePosts(req.user, req.user, req);
+    return res.json({ user: profileResponse(req.user, req.user, { includePrivate: true, posts, postCount: posts.length }) });
   } catch (error) {
     return next(error);
   }
@@ -256,7 +349,9 @@ const getUserById = async (req, res, next) => {
 
     const bookingStarted = await hasBookingOrPaymentAccess(req.user, user._id);
 
-    return res.json({ user: profileResponse(user, req.user, { bookingStarted }) });
+    const posts = await getProfilePosts(user, req.user, req);
+
+    return res.json({ user: profileResponse(user, req.user, { bookingStarted, posts, postCount: posts.length }) });
   } catch (error) {
     return next(error);
   }
@@ -381,7 +476,7 @@ const updateProfile = async (req, res, next) => {
     }
 
     if (!isPremium && Array.isArray(updates.videos) && updates.videos.length > FREE_VIDEO_LIMIT) {
-      return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 60 seconds` });
+      return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 2 minutes` });
     }
 
     const user = await User.findByIdAndUpdate(req.user._id, updates, {
@@ -477,7 +572,7 @@ const uploadProfileVideos = async (req, res, next) => {
 
       if (!duration || duration > MAX_VIDEO_SECONDS) {
         await removeFiles(files);
-        return res.status(400).json({ message: "Videos must be 60 seconds or shorter" });
+        return res.status(400).json({ message: "Videos must be 2 minutes or shorter" });
       }
     }
 
@@ -490,7 +585,7 @@ const uploadProfileVideos = async (req, res, next) => {
     const isPremium = Boolean(req.user.isPremium || req.user.premiumBadge);
     if (!isPremium && currentVideos.length + files.length > FREE_VIDEO_LIMIT) {
       await removeFiles(files);
-      return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 60 seconds` });
+      return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 2 minutes` });
     }
 
     const videoPaths = files.map((file) => toUploadPath(file, "videos"));

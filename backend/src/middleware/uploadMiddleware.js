@@ -11,7 +11,7 @@ const videoUploadDir = path.join(uploadRoot, "videos");
 const imageMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const videoMimeTypes = ["video/mp4", "video/quicktime", "video/webm"];
 const maxImageSize = 5 * 1024 * 1024;
-const maxVideoSize = 30 * 1024 * 1024;
+const maxVideoSize = 100 * 1024 * 1024;
 
 const ensureUploadFolders = () => {
   [imageUploadDir, videoUploadDir].forEach((directory) => {

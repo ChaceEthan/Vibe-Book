@@ -1,39 +1,24 @@
 // @ts-nocheck
-import { CalendarCheck, Heart, MessageCircle, Search, Send, Star, UserMinus, UserPlus } from "lucide-react";
+import { CalendarCheck, Eye, Heart, MessageCircle, Search, Send, Share2, Star, UserMinus, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import PostMedia from "../components/PostMedia.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, mediaUrl, userApi } from "../services/api";
-
-const FeedMedia = ({ item }) => {
-  const src = mediaUrl(item.mediaUrl);
-
-  if (item.type === "video") {
-    return (
-      <video
-        src={src}
-        className="h-full w-full object-cover"
-        muted
-        loop
-        playsInline
-        controls
-        autoPlay
-        preload="metadata"
-        style={{ width: "100%", borderRadius: "12px" }}
-      />
-    );
-  }
-
-  return <img src={src} alt={item.userId?.name || "VibeBook media"} className="h-full w-full object-cover" />;
-};
+import { usePostStore } from "../store/postStore";
 
 const Home = () => {
   const { isAuthenticated, user: currentUser } = useAuth();
-  const [feed, setFeed] = useState([]);
+  const posts = usePostStore((state) => state.posts);
+  const setPosts = usePostStore((state) => state.setPosts);
+  const prependPost = usePostStore((state) => state.prependPost);
+  const replacePost = usePostStore((state) => state.replacePost);
+  const updatePostsByUser = usePostStore((state) => state.updatePostsByUser);
   const [feedMode, setFeedMode] = useState("for-you");
   const [commentOpen, setCommentOpen] = useState("");
   const [commentText, setCommentText] = useState("");
+  const [viewedPosts, setViewedPosts] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const navigate = useNavigate();
@@ -44,7 +29,12 @@ const Home = () => {
 
     try {
       const { data } = await feedApi.get(feedMode === "following" ? { mode: "following" } : {});
-      setFeed(Array.isArray(data?.feed) ? data.feed : []);
+      const nextPosts = Array.isArray(data?.feed) ? data.feed : [];
+      setPosts(nextPosts);
+      console.log("[VibeBook feed] fetched posts", {
+        count: nextPosts.length,
+        posts: nextPosts,
+      });
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to load feed.");
     } finally {
@@ -56,24 +46,36 @@ const Home = () => {
     loadFeed();
   }, [loadFeed]);
 
+  useEffect(() => {
+    const handlePostCreated = (event) => {
+      const post = event.detail?.post;
+
+      if (!post?._id) {
+        return;
+      }
+
+      prependPost(post);
+      console.log("[VibeBook feed] post received in state", post);
+    };
+
+    window.addEventListener("vibebook:post-created", handlePostCreated);
+    return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
+  }, []);
+
   const visibleFeed = useMemo(
     () =>
-      feed.filter((item) => {
-        if (item?.userId?._id === currentUser?._id) {
-          return false;
-        }
-
+      posts.filter((item) => {
         if (feedMode === "following") {
           return Boolean(item?.userId?.isFollowing);
         }
 
         return true;
       }),
-    [feed, currentUser?._id, feedMode]
+    [posts, feedMode]
   );
 
   const replaceFeedItem = (nextItem) => {
-    setFeed((current) => current.map((item) => (item._id === nextItem._id ? nextItem : item)));
+    replacePost(nextItem);
   };
 
   const handleLike = async (item) => {
@@ -87,18 +89,18 @@ const Home = () => {
         const { data } = item.likedByViewer
           ? await userApi.unlikeProfile(item.userId._id)
           : await userApi.likeProfile(item.userId._id);
-        setFeed((current) =>
-          current.map((feedItem) =>
+        updatePostsByUser(item.userId._id, (profile) => ({
+          ...profile,
+          likes: data.user?.likes || data.user?.likeCount || profile.likes,
+          likeCount: data.user?.likes || data.user?.likeCount || profile.likeCount,
+        }));
+        usePostStore.setState((state) => ({
+          posts: state.posts.map((feedItem) =>
             feedItem.userId?._id === item.userId._id
-              ? {
-                  ...feedItem,
-                  likedByViewer: !item.likedByViewer,
-                  likes: data.user?.likes || data.user?.likeCount || feedItem.likes,
-                  likeCount: data.user?.likes || data.user?.likeCount || feedItem.likeCount,
-                }
+              ? { ...feedItem, likedByViewer: !item.likedByViewer }
               : feedItem
-          )
-        );
+          ),
+        }));
         return;
       }
 
@@ -128,25 +130,59 @@ const Home = () => {
       const { data } = isFollowing ? await userApi.unfollow(profileId) : await userApi.follow(profileId);
       const nextUser = data.user || {};
 
-      setFeed((current) =>
-        current.map((feedItem) =>
-          feedItem.userId?._id === profileId
-            ? {
-                ...feedItem,
-                userId: {
-                  ...feedItem.userId,
-                  ...nextUser,
-                  isFollowing: !isFollowing,
-                  followerCount: Number(
-                    nextUser.followerCount ?? feedItem.userId?.followerCount ?? feedItem.userId?.followers?.length ?? 0
-                  ),
-                },
-              }
-            : feedItem
-        )
-      );
+      updatePostsByUser(profileId, (profile) => ({
+        ...profile,
+        ...nextUser,
+        isFollowing: !isFollowing,
+        followerCount: Number(nextUser.followerCount ?? profile.followerCount ?? profile.followers?.length ?? 0),
+      }));
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to update follow.");
+    }
+  };
+
+  const handleViewed = async (item) => {
+    if (!item?._id || item.virtual || viewedPosts.has(item._id)) {
+      return;
+    }
+
+    setViewedPosts((current) => {
+      const next = new Set(current);
+      next.add(item._id);
+      return next;
+    });
+
+    try {
+      const { data } = await feedApi.recordView(item._id);
+      replaceFeedItem(data.feedItem);
+    } catch {
+      // View tracking should never interrupt playback.
+    }
+  };
+
+  const handleShare = async (item) => {
+    const shareUrl = `${window.location.origin}/profile/${item.userId?._id || ""}`;
+    const shareData = {
+      title: item.userId?.name || "VibeBook post",
+      text: item.caption || "Check out this VibeBook post",
+      url: shareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+      }
+
+      if (!item.virtual && item._id) {
+        const { data } = await feedApi.share(item._id);
+        replaceFeedItem(data.feedItem);
+      }
+    } catch (requestError) {
+      if (requestError.name !== "AbortError") {
+        setError("Unable to share this post.");
+      }
     }
   };
 
@@ -220,7 +256,19 @@ const Home = () => {
 
             return (
               <article key={item._id} className="relative h-full snap-start overflow-hidden bg-slate-900">
-                <FeedMedia item={item} />
+                <PostMedia
+                  post={item}
+                  alt={profile.name || "VibeBook media"}
+                  className="h-full w-full object-cover"
+                  imageClassName="h-full w-full object-cover"
+                  videoClassName="h-full w-full object-cover"
+                  placeholderClassName="h-full w-full"
+                  muted
+                  loop
+                  autoPlay
+                  controls
+                  onViewed={() => handleViewed(item)}
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/10 to-transparent" />
 
                 <div className="absolute bottom-5 left-4 right-24 text-white">
@@ -246,10 +294,21 @@ const Home = () => {
                       <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
                       {Number(profile.rating || profile.averageRating || 0).toFixed(1)}
                     </span>
+                    <span className="inline-flex items-center gap-1">
+                      <Eye className="h-4 w-4" />
+                      {Number(item.views || 0)}
+                    </span>
                     <span className="max-w-full truncate">
                       {profile.province || "Rwanda"}{profile.district ? `, ${profile.district}` : ""}
                     </span>
                   </div>
+
+                  {item.caption && <p className="mt-3 line-clamp-2 text-sm font-semibold text-white">{item.caption}</p>}
+                  {Array.isArray(item.tags) && item.tags.length > 0 && (
+                    <p className="mt-2 line-clamp-1 text-xs font-bold text-brand">
+                      {item.tags.slice(0, 4).map((tag) => `#${tag}`).join(" ")}
+                    </p>
+                  )}
 
                   {commentOpen === item._id && (
                     <div className="mt-4 rounded-lg bg-slate-950/70 p-3 backdrop-blur">
@@ -299,6 +358,16 @@ const Home = () => {
                     <MessageCircle className="h-6 w-6" />
                   </button>
                   <span className="-mt-3 max-w-12 truncate text-xs font-bold text-white">{Number(item.commentCount || 0)}</span>
+
+                  <button
+                    type="button"
+                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur"
+                    onClick={() => handleShare(item)}
+                    aria-label="Share post"
+                  >
+                    <Share2 className="h-6 w-6" />
+                  </button>
+                  <span className="-mt-3 max-w-12 truncate text-xs font-bold text-white">{Number(item.shareCount || 0)}</span>
 
                   <button
                     type="button"
