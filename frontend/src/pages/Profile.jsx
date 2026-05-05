@@ -124,7 +124,11 @@ const Profile = () => {
     }));
   }, [currentUser?.name]);
 
-  const allImages = useMemo(() => (user?.images?.length ? user.images : ["/logo.png"]), [user]);
+  const profilePicture = user?.profilePicture || user?.profileImage || "";
+  const allImages = useMemo(
+    () => (user?.images?.length ? user.images : [profilePicture || "/logo.png"]),
+    [profilePicture, user]
+  );
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
   const images = useMemo(() => (premiumActive ? allImages : allImages.slice(0, 3)), [allImages, premiumActive]);
   const lockedImageCount = premiumActive ? 0 : Math.max(Number(user?.galleryImageCount || allImages.length) - images.length, 0);
@@ -364,6 +368,7 @@ const Profile = () => {
           <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
+                <img src={mediaUrl(profilePicture || activeImageUrl)} alt="" className="mb-4 h-20 w-20 rounded-full object-cover shadow-soft" />
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-semibold uppercase text-brand">{user.role}</p>
                   {premiumActive && (

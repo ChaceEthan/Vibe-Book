@@ -111,6 +111,14 @@ export const AuthProvider = ({ children }) => {
     return syncUser(data.user);
   };
 
+  const uploadMedia = async (formData) => {
+    const { data } = await userApi.uploadMedia(formData);
+    if (data.user) {
+      syncUser(data.user);
+    }
+    return data;
+  };
+
   const payAccess = async (payload = {}) => {
     const { data } = await userApi.payAccess(payload);
     return syncUser(data.user);
@@ -130,6 +138,7 @@ export const AuthProvider = ({ children }) => {
       uploadProfileImage,
       uploadProfileImages,
       uploadProfileVideos,
+      uploadMedia,
       payAccess,
     }),
     [user, token, loading, refreshProfile]

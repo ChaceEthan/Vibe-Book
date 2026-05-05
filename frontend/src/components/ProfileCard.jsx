@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Heart, MapPin, Star } from "lucide-react";
+import { CalendarCheck, Heart, MapPin, Star } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { mediaUrl } from "../services/api";
@@ -61,9 +61,15 @@ const ProfileCard = ({ user }) => {
           <span>{user.contactLocked ? "Contact locked" : "Contact unlocked"}</span>
         </div>
 
-        <Link to={`/profile/${user._id}`} className="btn-primary w-full py-2.5">
-          View Profile
-        </Link>
+        <div className="grid grid-cols-2 gap-2">
+          <Link to={`/profile/${user._id}`} className="btn-secondary py-2.5">
+            View
+          </Link>
+          <Link to={`/profile/${user._id}`} className="btn-primary gap-2 py-2.5">
+            <CalendarCheck className="h-4 w-4" />
+            Book Now
+          </Link>
+        </div>
       </div>
     </article>
   );

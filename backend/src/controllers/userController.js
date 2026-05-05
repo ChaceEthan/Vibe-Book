@@ -631,6 +631,7 @@ const contactUser = async (req, res, next) => {
 };
 
 module.exports = {
+  profileResponse,
   getProfile,
   getUserById,
   searchUsers,

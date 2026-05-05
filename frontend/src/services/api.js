@@ -29,6 +29,11 @@ export const authApi = {
   register: (payload) => api.post("/auth/register", payload),
 };
 
+export const uploadMedia = (formData) =>
+  api.post("/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
 export const userApi = {
   search: async (params) => {
     const endpoint = "/search";
@@ -49,11 +54,7 @@ export const userApi = {
       throw error;
     }
   },
-  uploadFiles: (files) => {
-    const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
-    return api.post("/upload", formData);
-  },
+  uploadMedia,
   uploadImages: (files) => {
     const formData = new FormData();
     files.forEach((file) => formData.append("images", file));
@@ -76,7 +77,7 @@ export const userApi = {
 };
 
 export const bookingApi = {
-  create: (payload) => api.post("/bookings", payload),
+  create: (payload) => api.post("/book", payload),
   getMine: () => api.get("/bookings/me"),
   payAccess: (id, payload) => api.patch(`/bookings/${id}/pay`, payload),
   sendOffer: (payload) => api.post("/bookings/offers", payload),

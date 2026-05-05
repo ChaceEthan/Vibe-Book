@@ -11,6 +11,7 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
+const { createBooking } = require("./controllers/bookingController");
 const { getProfile, searchUsers, updateProfile } = require("./controllers/userController");
 const optionalAuthMiddleware = require("./middleware/optionalAuthMiddleware");
 const authMiddleware = require("./middleware/authMiddleware");
@@ -97,6 +98,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/rules", ruleRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/ratings", ratingRoutes);
+app.post("/api/book", authMiddleware, createBooking);
 app.use("/api/bookings", bookingRoutes);
 
 app.use((req, res, next) => {
