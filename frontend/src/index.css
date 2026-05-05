@@ -24,6 +24,12 @@
   select {
     min-width: 0;
   }
+
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+  }
 }
 
 @layer components {

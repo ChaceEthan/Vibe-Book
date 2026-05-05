@@ -1,7 +1,6 @@
 // @ts-nocheck
-import { Image as ImageIcon, UploadCloud, Video, X } from "lucide-react";
+import { Image as ImageIcon, Trash2, UploadCloud, Video, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl } from "../services/api";
@@ -10,15 +9,17 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 30 * 1024 * 1024;
 
 const Upload = ({ open, onClose }) => {
-  const { uploadMedia, user } = useAuth();
+  const { deleteMedia, uploadMedia } = useAuth();
   const [type, setType] = useState("image");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
   const [uploadedUrl, setUploadedUrl] = useState("");
+  const [uploadedPath, setUploadedPath] = useState("");
+  const [description, setDescription] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
-  const navigate = useNavigate();
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -32,8 +33,11 @@ const Upload = ({ open, onClose }) => {
     if (!open) {
       setFile(null);
       setUploadedUrl("");
+      setUploadedPath("");
+      setDescription("");
       setStatus("");
       setError("");
+      setProgress(0);
       setPreview((current) => {
         if (current) URL.revokeObjectURL(current);
         return "";
@@ -51,8 +55,11 @@ const Upload = ({ open, onClose }) => {
     setType(nextType);
     setFile(null);
     setUploadedUrl("");
+    setUploadedPath("");
+    setDescription("");
     setStatus("");
     setError("");
+    setProgress(0);
     setPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return "";
@@ -64,6 +71,8 @@ const Upload = ({ open, onClose }) => {
     setError("");
     setStatus("");
     setUploadedUrl("");
+    setUploadedPath("");
+    setProgress(0);
 
     if (!selectedFile) {
       setFile(null);
@@ -100,24 +109,57 @@ const Upload = ({ open, onClose }) => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("type", type);
+    if (description.trim()) {
+      formData.append("description", description.trim());
+    }
 
     setUploading(true);
     setError("");
     setStatus("");
+    setProgress(0);
 
     try {
-      const data = await uploadMedia(formData, type);
+      const data = await uploadMedia(formData, type, {
+        onUploadProgress: (event) => {
+          if (event.total) {
+            setProgress(Math.round((event.loaded * 100) / event.total));
+          }
+        },
+      });
       const nextUrl = data.url || data.file?.url || data.files?.[0]?.url || "";
+      const nextPath = data.path || data.file?.path || data.files?.[0]?.path || nextUrl;
       setUploadedUrl(nextUrl);
+      setUploadedPath(nextPath);
+      setProgress(100);
       setStatus(isImage ? "Image uploaded." : "Video uploaded.");
-      window.setTimeout(() => {
-        onClose?.();
-        navigate(`/profile/${data.user?._id || user?._id}`);
-      }, 450);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Upload failed.");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleDeleteUploaded = async () => {
+    const pathToDelete = uploadedPath || uploadedUrl;
+
+    if (!pathToDelete || !window.confirm("Delete this upload?")) {
+      return;
+    }
+
+    setUploadedUrl("");
+    setUploadedPath("");
+    setFile(null);
+    setPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+    setProgress(0);
+    setStatus("Media deleted.");
+
+    try {
+      await deleteMedia(pathToDelete);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to delete media.");
     }
   };
 
@@ -166,14 +208,40 @@ const Upload = ({ open, onClose }) => {
           <input className="hidden" type="file" accept={isImage ? "image/*" : "video/*"} onChange={handleSelect} />
         </label>
 
+        {isImage && (
+          <label className="mt-4 block space-y-2">
+            <span className="label">Image description</span>
+            <input
+              className="field"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Optional caption"
+            />
+          </label>
+        )}
+
         {(preview || uploadedUrl) && (
-          <div className="mt-4 overflow-hidden rounded-lg bg-slate-100">
+          <div className="relative mt-4 max-h-[400px] overflow-y-auto rounded-lg bg-slate-100 p-2">
+            {uploadedUrl && (
+              <button
+                type="button"
+                className="absolute right-4 top-4 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-red-600 shadow"
+                onClick={handleDeleteUploaded}
+                aria-label="Delete upload"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            )}
             {isImage ? (
-              <img src={uploadedUrl ? mediaUrl(uploadedUrl) : preview} alt="" className="max-h-72 w-full object-cover" />
+              <img
+                src={uploadedUrl ? mediaUrl(uploadedUrl) : preview}
+                alt=""
+                className="h-auto max-h-[300px] w-full rounded-lg object-cover"
+              />
             ) : (
               <video
                 src={uploadedUrl ? mediaUrl(uploadedUrl) : preview}
-                className="max-h-72 bg-slate-900"
+                className="h-auto max-h-[300px] bg-slate-900"
                 controls
                 muted
                 playsInline
@@ -181,6 +249,18 @@ const Upload = ({ open, onClose }) => {
                 style={{ width: "100%", borderRadius: "12px" }}
               />
             )}
+          </div>
+        )}
+
+        {uploading && (
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-500">
+              <span>Uploading...</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+              <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progress}%` }} />
+            </div>
           </div>
         )}
 

@@ -1,22 +1,22 @@
 // @ts-nocheck
 import axios from "axios";
 
-const API_ROOT = import.meta.env.DEV ? "http://localhost:5000" : import.meta.env.VITE_API_URL || "";
-const API = API_ROOT ? `${API_ROOT.replace(/\/+$/, "")}/api` : "";
-const API_BASE_URL = API.replace(/\/api\/api$/i, "/api");
+const API_ROOT = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+const API_BASE_URL = API_ROOT.endsWith("/api") ? API_ROOT : `${API_ROOT}/api`;
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
-if (!API_BASE_URL) {
+if (!API_ROOT) {
   throw new Error("VITE_API_URL is required");
 }
 
-const api = axios.create({
+const API = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
 });
 
 const getStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
 
-api.interceptors.request.use((config) => {
+API.interceptors.request.use((config) => {
   const token = getStoredToken();
 
   if (token) {
@@ -28,100 +28,120 @@ api.interceptors.request.use((config) => {
 });
 
 export const authApi = {
-  login: (payload) => api.post("/auth/login", payload),
-  register: (payload) => api.post("/auth/register", payload),
+  login: (payload) => API.post("/auth/login", payload),
+  register: (payload) => API.post("/auth/register", payload),
 };
 
-export const uploadMedia = (formData, type) => {
+export const mediaId = (path = "") => {
+  const value = String(path || "");
+
+  try {
+    return btoa(value).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  } catch {
+    return encodeURIComponent(value);
+  }
+};
+
+export const uploadMedia = (formData, type, options = {}) => {
   const mediaType = type || formData.get?.("type") || "image";
 
-  return api.post(`/upload/${mediaType === "video" ? "video" : "image"}`, formData, {
+  return API.post(`/upload/${mediaType === "video" ? "video" : "image"}`, formData, {
     headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: options.onUploadProgress,
+  });
+};
+
+export const uploadProfilePicture = (formData, options = {}) => {
+  return API.post("/users/profile/image", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: options.onUploadProgress,
   });
 };
 
 export const userApi = {
   search: async (params) => {
     const endpoint = "/search";
-    const response = await api.get(endpoint, { params });
+    const response = await API.get(endpoint, { params });
     return response;
   },
-  getById: (id) => api.get(`/users/${id}`),
-  getProfile: () => api.get("/profile"),
+  getById: (id) => API.get(`/users/${id}`),
+  getProfile: () => API.get("/profile"),
   updateProfile: async (payload) => {
     try {
-      return await api.put("/profile", payload);
+      return await API.put("/profile", payload);
     } catch (error) {
       if (error.response?.status === 404) {
-        return api.put("/users/profile", payload);
+        return API.put("/users/profile", payload);
       }
 
       throw error;
     }
   },
   uploadMedia,
-  payAccess: (payload = {}) => api.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
-  follow: (id) => api.post(`/follow/${id}`),
-  unfollow: (id) => api.post(`/unfollow/${id}`),
-  likeProfile: (id) => api.post(`/users/${id}/like`),
-  unlikeProfile: (id) => api.delete(`/users/${id}/like`),
-  deleteMe: () => api.delete("/users/me"),
+  uploadProfilePicture,
+  deleteMedia: (path) => API.delete(`/media/${mediaId(path)}`),
+  payAccess: (payload = {}) => API.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
+  follow: (id) => API.post(`/follow/${id}`),
+  unfollow: (id) => API.post(`/unfollow/${id}`),
+  likeProfile: (id) => API.post(`/users/${id}/like`),
+  unlikeProfile: (id) => API.delete(`/users/${id}/like`),
+  deleteMe: () => API.delete("/users/me"),
 };
 
 export const feedApi = {
-  get: (params = {}) => api.get("/feed", { params }),
-  toggleLike: (id) => api.post(`/feed/${id}/like`),
-  addComment: (id, payload) => api.post(`/feed/${id}/comments`, payload),
+  get: (params = {}) => API.get("/feed", { params }),
+  toggleLike: (id) => API.post(`/feed/${id}/like`),
+  addComment: (id, payload) => API.post(`/feed/${id}/comments`, payload),
 };
 
 export const bookingApi = {
-  create: (payload) => api.post("/book", payload),
-  getMine: () => api.get("/bookings/me"),
-  payAccess: (id, payload) => api.patch(`/bookings/${id}/pay`, payload),
-  sendOffer: (payload) => api.post("/bookings/offers", payload),
-  updateStatus: (id, payload) => api.patch(`/bookings/${id}/status`, payload),
+  create: (payload) => API.post("/book", payload),
+  getMine: () => API.get("/bookings/me"),
+  payAccess: (id, payload) => API.patch(`/bookings/${id}/pay`, payload),
+  sendOffer: (payload) => API.post("/bookings/offers", payload),
+  updateStatus: (id, payload) => API.patch(`/bookings/${id}/status`, payload),
 };
 
 export const paymentApi = {
-  options: () => api.get("/payments/options"),
-  create: (payload) => api.post("/payments/create", payload),
-  verify: (payload) => api.post("/payments/verify", payload),
+  options: () => API.get("/payments/options"),
+  create: (payload) => API.post("/payments/create", payload),
+  verify: (payload) => API.post("/payments/verify", payload),
 };
 
 export const messageApi = {
-  getInbox: () => api.get("/messages/inbox"),
-  getUnreadCount: () => api.get("/messages/unread-count"),
-  getDrafts: () => api.get("/messages/drafts"),
-  getById: (id) => api.get(`/messages/id/${id}`),
-  getConversation: (userId) => api.get(`/messages/${userId}`),
-  sendDirect: (userId, payload) => api.post("/messages", { ...payload, recipientId: userId }),
-  sendMessage: (payload) => api.post("/messages", payload),
-  markRead: (id) => api.patch(`/messages/${id}/read`),
-  markUnread: (id) => api.patch(`/messages/${id}/unread`),
-  reply: (id, payload) => api.post(`/messages/${id}/reply`, payload),
-  saveDraft: (payload) => api.post("/messages/drafts", payload),
-  updateDraft: (id, payload) => api.patch(`/messages/drafts/${id}`, payload),
+  getInbox: () => API.get("/messages/inbox"),
+  getUnreadCount: () => API.get("/messages/unread-count"),
+  getDrafts: () => API.get("/messages/drafts"),
+  getById: (id) => API.get(`/messages/id/${id}`),
+  getConversation: (userId) => API.get(`/messages/${userId}`),
+  sendDirect: (userId, payload) => API.post("/messages", { ...payload, recipientId: userId }),
+  sendMessage: (payload) => API.post("/messages", payload),
+  markRead: (id) => API.patch(`/messages/${id}/read`),
+  markUnread: (id) => API.patch(`/messages/${id}/unread`),
+  reply: (id, payload) => API.post(`/messages/${id}/reply`, payload),
+  saveDraft: (payload) => API.post("/messages/drafts", payload),
+  updateDraft: (id, payload) => API.patch(`/messages/drafts/${id}`, payload),
 };
 
 export const groupChatApi = {
-  list: () => api.get("/chat/groups"),
-  create: (payload) => api.post("/chat/group", payload),
-  getMessages: (groupId) => api.get(`/chat/group/${groupId}/messages`),
-  send: (groupId, payload) => api.post(`/chat/group/${groupId}/messages`, payload),
+  list: () => API.get("/chat/groups"),
+  create: (payload) => API.post("/chat/group", payload),
+  getMessages: (groupId) => API.get(`/chat/group/${groupId}/messages`),
+  send: (groupId, payload) => API.post(`/chat/group/${groupId}/messages`, payload),
 };
 
 export const adminApi = {
-  stats: () => api.get("/admin/dashboard"),
-  users: () => api.get("/admin/users"),
-  deleteUser: (id) => api.delete(`/admin/delete/${id}`),
-  blockUser: (id) => api.patch(`/admin/block/${id}`),
-  unblockUser: (id) => api.patch(`/admin/unblock/${id}`),
-  featureProfile: (id, featured = true) => api.patch(`/admin/feature/${id}`, { featured }),
+  stats: () => API.get("/admin/dashboard"),
+  users: () => API.get("/admin/users"),
+  deleteUser: (id) => API.delete(`/admin/delete/${id}`),
+  blockUser: (id) => API.patch(`/admin/block/${id}`),
+  unblockUser: (id) => API.patch(`/admin/unblock/${id}`),
+  featureProfile: (id, featured = true) => API.patch(`/admin/feature/${id}`, { featured }),
 };
 
 export const ratingApi = {
-  add: (userId, payload) => api.post(`/ratings/${userId}`, payload),
-  get: (userId) => api.get(`/ratings/${userId}`),
+  add: (userId, payload) => API.post(`/ratings/${userId}`, payload),
+  get: (userId) => API.get(`/ratings/${userId}`),
 };
 
 export const mediaUrl = (path) => {
@@ -140,4 +160,4 @@ export const mediaUrl = (path) => {
   return path;
 };
 
-export default api;
+export default API;

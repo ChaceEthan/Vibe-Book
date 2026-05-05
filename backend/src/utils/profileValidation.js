@@ -70,6 +70,18 @@ const normalizeMediaArray = (value, field) => {
   return { value: values };
 };
 
+const normalizeDescriptionArray = (value) => {
+  const items = Array.isArray(value) ? value : [];
+
+  return items
+    .map((item) => {
+      const url = normalizeMediaPath(item?.url);
+      const description = normalizeText(item?.description).slice(0, 500);
+      return url ? { url, description } : null;
+    })
+    .filter(Boolean);
+};
+
 const findAllowedValue = (value, allowedValues) => {
   const normalized = normalizeLowerText(value);
   return allowedValues.find((allowedValue) => allowedValue.toLowerCase() === normalized);
@@ -254,6 +266,10 @@ const normalizeProfileFields = (body, options = {}) => {
     }
   }
 
+  if (hasOwn(body, "imageDescriptions")) {
+    data.imageDescriptions = normalizeDescriptionArray(body.imageDescriptions);
+  }
+
   if (hasOwn(body, "videos")) {
     const result = normalizeMediaArray(body.videos, "Videos");
     if (result.error) errors.push(result.error);
@@ -261,6 +277,10 @@ const normalizeProfileFields = (body, options = {}) => {
       data.videos = result.value;
       data.videoUrls = result.value;
     }
+  }
+
+  if (hasOwn(body, "videoDescriptions")) {
+    data.videoDescriptions = normalizeDescriptionArray(body.videoDescriptions);
   }
 
   if (hasOwn(body, "profilePicture")) {

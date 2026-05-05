@@ -116,6 +116,17 @@ const hasBookingOrPaymentAccess = async (viewer, profileId) => {
   return Boolean(booking);
 };
 
+const normalizeDescriptions = (items = [], allowedUrls = []) => {
+  const allowed = new Set(allowedUrls);
+
+  return (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      url: normalizeStoredUploadPath(item?.url),
+      description: normalizeText(item?.description).slice(0, 500),
+    }))
+    .filter((item) => item.url && (!allowed.size || allowed.has(item.url)));
+};
+
 const profileResponse = (user, viewer = null, options = {}) => {
   const isOwnProfile = Boolean(viewer && sameId(viewer._id, user?._id));
   const isFollowing = viewerFollowsProfile(viewer, user);
@@ -135,6 +146,9 @@ const profileResponse = (user, viewer = null, options = {}) => {
   const profileImage =
     normalizeStoredUploadPath(user.profilePicture || user.profileImage) || allImages[0] || DEFAULT_PROFILE_IMAGE_PATH;
   const visibleImages = isUnlocked ? allImages : [profileImage].filter(Boolean);
+  const visibleVideos = isUnlocked ? storedVideos : [];
+  const imageDescriptions = normalizeDescriptions(user.imageDescriptions, visibleImages);
+  const videoDescriptions = normalizeDescriptions(user.videoDescriptions, visibleVideos);
   const socialLinks = {
     instagram: user.socialLinks?.instagram || "",
     whatsapp: contactUnlocked ? user.whatsapp || user.whatsappNumber || user.socialLinks?.whatsapp || "" : "",
@@ -163,8 +177,14 @@ const profileResponse = (user, viewer = null, options = {}) => {
     images: visibleImages,
     gallery: visibleImages,
     galleryImageCount: storedImages.length,
-    videoUrls: isUnlocked ? storedVideos : [],
-    videos: isUnlocked ? storedVideos : [],
+    imageDescriptions,
+    videoUrls: visibleVideos,
+    videos: visibleVideos,
+    videoDescriptions,
+    descriptions: {
+      images: imageDescriptions,
+      videos: videoDescriptions,
+    },
     videoCount: storedVideos.length,
     bio: isUnlocked ? user.bio : "",
     socialLinks,
@@ -396,11 +416,16 @@ const uploadProfileImages = async (req, res, next) => {
     }
 
     const imagePaths = files.map((file) => toUploadPath(file, "images"));
+    const descriptions = imagePaths.map((imagePath) => ({
+      url: imagePath,
+      description: normalizeText(req.body.description).slice(0, 500),
+    }));
     const user = await User.findByIdAndUpdate(
       req.user._id,
       {
         images: isPremium ? [...currentImages, ...imagePaths] : [...currentImages, ...imagePaths].slice(0, MAX_IMAGES_PER_USER),
         gallery: isPremium ? [...currentImages, ...imagePaths] : [...currentImages, ...imagePaths].slice(0, MAX_IMAGES_PER_USER),
+        imageDescriptions: [...(req.user.imageDescriptions || []), ...descriptions],
         profileImage: req.user.profileImage || req.user.profilePicture || imagePaths[0],
         profilePicture: req.user.profilePicture || req.user.profileImage || imagePaths[0],
       },
@@ -470,11 +495,16 @@ const uploadProfileVideos = async (req, res, next) => {
 
     const videoPaths = files.map((file) => toUploadPath(file, "videos"));
     const nextVideos = [...currentVideos, ...videoPaths];
+    const descriptions = videoPaths.map((videoPath) => ({
+      url: videoPath,
+      description: normalizeText(req.body.description).slice(0, 500),
+    }));
     const user = await User.findByIdAndUpdate(
       req.user._id,
       {
         videoUrls: nextVideos,
         videos: nextVideos,
+        videoDescriptions: [...(req.user.videoDescriptions || []), ...descriptions],
       },
       { returnDocument: "after", runValidators: true }
     ).select("-password");

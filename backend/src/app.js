@@ -9,6 +9,7 @@ const healthRoutes = require("./routes/healthRoutes");
 const ratingRoutes = require("./routes/ratingRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
+const mediaRoutes = require("./routes/mediaRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const feedRoutes = require("./routes/feedRoutes");
@@ -23,11 +24,13 @@ const { visitorMiddleware } = require("./middleware/visitorMiddleware");
 const { ensureUploadFolders, uploadRoot } = require("./middleware/uploadMiddleware");
 
 const app = express();
+app.set("trust proxy", 1);
 ensureUploadFolders();
 
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
+  "http://localhost:5175",
   "http://localhost:3000",
   "https://vibe-book-kappa.vercel.app",
 ];
@@ -93,6 +96,7 @@ app.post("/api/unfollow/:id", authMiddleware, unfollowProfile);
 app.get("/api/search", optionalAuthMiddleware, searchUsers);
 app.use("/api/feed", feedRoutes);
 app.use("/api/upload", uploadRoutes);
+app.use("/api/media", mediaRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);

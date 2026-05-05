@@ -110,12 +110,48 @@ const userSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
+  imageDescriptions: {
+    type: [
+      {
+        url: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+        description: {
+          type: String,
+          trim: true,
+          default: "",
+          maxlength: 500,
+        },
+      },
+    ],
+    default: [],
+  },
   videoUrls: {
     type: [String],
     default: [],
   },
   videos: {
     type: [String],
+    default: [],
+  },
+  videoDescriptions: {
+    type: [
+      {
+        url: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+        description: {
+          type: String,
+          trim: true,
+          default: "",
+          maxlength: 500,
+        },
+      },
+    ],
     default: [],
   },
   paidProfileViews: [

@@ -13,16 +13,19 @@ const {
   uploadSingleMedia,
 } = require("../middleware/uploadMiddleware");
 const { removeFiles } = require("../utils/fileCleanup");
-const { toUploadPath } = require("../utils/storagePaths");
+const { toPublicUploadUrl, toUploadPath } = require("../utils/storagePaths");
 const { getMp4DurationSeconds } = require("../utils/videoDuration");
 const { serializeFeedItem, userSelect } = require("../controllers/feedController");
 
 const router = express.Router();
 const MAX_VIDEO_SECONDS = 60;
 
-const buildUploadedFiles = (files = []) => {
+const cleanDescription = (value) => (typeof value === "string" ? value.trim().slice(0, 500) : "");
+
+const buildUploadedFiles = (req, files = []) => {
   return files.map((file) => ({
-    url: toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images"),
+    path: toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images"),
+    url: toPublicUploadUrl(req, toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images")),
     type: file.mimetype,
     originalName: file.originalname,
   }));
@@ -62,14 +65,25 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     }
 
     const url = toUploadPath(file, type === "video" ? "videos" : "images");
+    const publicUrl = toPublicUploadUrl(req, url);
     const mediaField = type === "video" ? "videos" : "images";
     const mirrorField = type === "video" ? "videoUrls" : "gallery";
+    const description = cleanDescription(req.body.description);
     const update = {
       $addToSet: {
         [mediaField]: url,
         [mirrorField]: url,
       },
     };
+
+    if (description) {
+      update.$push = {
+        [type === "video" ? "videoDescriptions" : "imageDescriptions"]: {
+          url,
+          description,
+        },
+      };
+    }
 
     if (type === "image" && !req.user.profilePicture && !req.user.profileImage) {
       update.$set = {
@@ -98,14 +112,16 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     ).populate("userId", userSelect);
 
     return res.status(201).json({
-      url,
+      url: publicUrl,
+      path: url,
       type,
       file: {
-        url,
+        url: publicUrl,
+        path: url,
         type: file.mimetype,
         originalName: file.originalname,
       },
-      files: buildUploadedFiles([file]),
+      files: buildUploadedFiles(req, [file]),
       feedItem: serializeFeedItem(feed, req.user),
       user: profileResponse(user, user, { includePrivate: true }),
     });

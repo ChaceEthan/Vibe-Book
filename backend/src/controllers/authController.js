@@ -35,6 +35,18 @@ const userResponse = (user) => {
   const images = normalizeStoredUploadPaths(gallery);
   const videos = normalizeStoredUploadPaths(Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || []);
   const profileImage = normalizeStoredUploadPath(user.profilePicture || user.profileImage) || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const imageDescriptions = (Array.isArray(user.imageDescriptions) ? user.imageDescriptions : [])
+    .map((item) => ({
+      url: normalizeStoredUploadPath(item?.url),
+      description: typeof item?.description === "string" ? item.description : "",
+    }))
+    .filter((item) => item.url && images.includes(item.url));
+  const videoDescriptions = (Array.isArray(user.videoDescriptions) ? user.videoDescriptions : [])
+    .map((item) => ({
+      url: normalizeStoredUploadPath(item?.url),
+      description: typeof item?.description === "string" ? item.description : "",
+    }))
+    .filter((item) => item.url && videos.includes(item.url));
   const followerCount = Array.isArray(user.followers) ? user.followers.length : 0;
   const followingCount = Array.isArray(user.following) ? user.following.length : 0;
 
@@ -58,8 +70,14 @@ const userResponse = (user) => {
     profilePicture: profileImage,
     images,
     gallery: images,
+    imageDescriptions,
     videoUrls: videos,
     videos,
+    videoDescriptions,
+    descriptions: {
+      images: imageDescriptions,
+      videos: videoDescriptions,
+    },
     bio: user.bio,
     socialLinks: user.socialLinks,
     availability: user.availability,
