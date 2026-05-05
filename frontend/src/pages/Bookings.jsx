@@ -3,7 +3,15 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
-import { bookingApi, mediaUrl } from "../services/api";
+import { bookingApi, mediaUrl, paymentApi } from "../services/api";
+
+const PAYMENT_OPTIONS = [
+  { value: "USDT", label: "USDT" },
+  { value: "USDC", label: "USDC" },
+  { value: "USD", label: "USD" },
+  { value: "MTN_MOMO", label: "MTN MoMo" },
+  { value: "AIRTEL_MONEY", label: "Airtel Money" },
+];
 
 const formatPrice = (value) => {
   const amount = Number(value || 0);
@@ -24,6 +32,7 @@ const Bookings = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [paying, setPaying] = useState("");
 
   const loadBookings = async () => {
     setLoading(true);
@@ -57,6 +66,33 @@ const Bookings = () => {
     }
   };
 
+  const payBooking = async (booking, method) => {
+    setPaying(`${booking._id}-${method}`);
+    setStatus("");
+    setError("");
+
+    try {
+      const { data: created } = await paymentApi.create({
+        method,
+        purpose: "booking_access",
+        bookingId: booking._id,
+        profileId: booking.talent?._id,
+        amount: booking.amount || 1000,
+        currency: booking.currency || "RWF",
+      });
+      await paymentApi.verify({
+        paymentId: created.payment?._id,
+        reference: created.payment?.reference,
+      });
+      setStatus("Sandbox payment verified.");
+      await loadBookings();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to verify payment.");
+    } finally {
+      setPaying("");
+    }
+  };
+
   return (
     <section className="container-page py-10">
       <div className="mb-8">
@@ -75,6 +111,7 @@ const Bookings = () => {
             const talent = booking.talent || {};
             const requester = booking.requester || {};
             const isTalent = talent._id === user?._id;
+            const isRequester = requester._id === user?._id;
             const otherUser = isTalent ? requester : talent;
             const image = otherUser.profilePicture || otherUser.profileImage || otherUser.images?.[0];
 
@@ -125,6 +162,25 @@ const Bookings = () => {
                     Open Chat
                   </Link>
                 </div>
+
+                {isRequester && booking.paymentStatus !== "paid" && (
+                  <div className="mt-5 rounded-lg border border-slate-200 bg-surface p-4">
+                    <p className="text-xs font-semibold uppercase text-slate-500">Payment</p>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      {PAYMENT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="btn-secondary justify-start"
+                          onClick={() => payBooking(booking, option.value)}
+                          disabled={Boolean(paying)}
+                        >
+                          {paying === `${booking._id}-${option.value}` ? "Verifying..." : option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </article>
             );
           })}

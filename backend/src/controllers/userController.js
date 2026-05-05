@@ -121,6 +121,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     email: contactUnlocked ? user.email || "" : "",
     role: user.role,
     type: user.type,
+    accountType: user.accountType || "talent",
     gender: user.gender,
     category: user.category,
     price: user.price,
@@ -167,6 +168,8 @@ const profileResponse = (user, viewer = null, options = {}) => {
     contactLocked: !contactUnlocked,
     contactUnlockPrice: CONTACT_UNLOCK_PRICE,
     contactUnlockCurrency: CONTACT_UNLOCK_CURRENCY,
+    language: options.includePrivate ? user.language || "en" : undefined,
+    notificationEnabled: options.includePrivate ? user.notificationEnabled !== false : undefined,
     createdAt: user.createdAt,
   };
 };
@@ -574,6 +577,15 @@ const payPlatformAccess = async (req, res, next) => {
   }
 };
 
+const deleteMyAccount = async (req, res, next) => {
+  try {
+    await User.findByIdAndDelete(req.user._id);
+    return res.json({ message: "Account deleted" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const contactUser = async (req, res, next) => {
   try {
     const message = typeof req.body.message === "string" ? req.body.message.trim() : "";
@@ -601,11 +613,6 @@ const contactUser = async (req, res, next) => {
     if (!userToContact) {
       return res.status(404).json({ message: "User not found" });
     }
-
-    console.log(
-      `User contact request: ${req.user.name} (${req.user._id}) contacted ${userToContact.name} (${userToContact._id})`
-    );
-    console.log(`Contact message: ${message}`);
 
     let notification = { sent: false, reason: "NOT_ATTEMPTED" };
 
@@ -644,4 +651,5 @@ module.exports = {
   unlikeProfile,
   unlockProfileContact,
   contactUser,
+  deleteMyAccount,
 };

@@ -7,6 +7,7 @@ import { useAuth } from "./context/AuthContext.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Bookings from "./pages/Bookings.jsx";
 import Chat from "./pages/Chat.jsx";
+import Admin from "./pages/Admin.jsx";
 import Drafts from "./pages/Drafts.jsx";
 import Home from "./pages/Home.jsx";
 import Inbox from "./pages/Inbox.jsx";
@@ -14,6 +15,7 @@ import Login from "./pages/Login.jsx";
 import Profile from "./pages/Profile.jsx";
 import Register from "./pages/Register.jsx";
 import Search from "./pages/Search.jsx";
+import Settings from "./pages/Settings.jsx";
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -69,6 +71,14 @@ const App = () => {
             }
           />
           <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <Chat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/chat/:userId"
             element={
               <ProtectedRoute>
@@ -89,6 +99,22 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Bookings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute>
+                <Admin />
               </ProtectedRoute>
             }
           />

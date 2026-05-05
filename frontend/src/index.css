@@ -17,6 +17,13 @@
   textarea {
     font: inherit;
   }
+
+  button,
+  a,
+  input,
+  select {
+    min-width: 0;
+  }
 }
 
 @layer components {
@@ -25,11 +32,11 @@
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-lg bg-brand px-5 py-3 text-sm font-semibold text-navy shadow-sm transition hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2;
+    @apply inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-lg bg-brand px-5 py-3 text-sm font-semibold text-navy shadow-sm transition hover:bg-green-400 focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-brand hover:text-navy focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2;
+    @apply inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-lg border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-brand hover:text-navy focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2;
   }
 
   .field {
@@ -38,5 +45,11 @@
 
   .label {
     @apply text-sm font-semibold text-slate-700;
+  }
+
+  .truncate-one {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }

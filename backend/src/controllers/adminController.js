@@ -3,6 +3,8 @@ const Rule = require("../models/Rule");
 const User = require("../models/User");
 const Booking = require("../models/Booking");
 const ChatMessage = require("../models/ChatMessage");
+const Feed = require("../models/Feed");
+const Payment = require("../models/Payment");
 const VisitorStat = require("../models/VisitorStat");
 const { getOnlineUsersCount } = require("../socket");
 
@@ -19,12 +21,17 @@ const getAllUsers = async (req, res, next) => {
 
 const getStats = async (req, res, next) => {
   try {
-    const [totalUsers, totalDancers, totalArtists, totalBookings, totalChats, dailyVisitors] = await Promise.all([
+    const [totalUsers, totalDancers, totalArtists, totalBookings, totalChats, totalUploads, revenue, dailyVisitors] = await Promise.all([
       User.countDocuments(),
       User.countDocuments({ role: "dancer" }),
       User.countDocuments({ role: "artist" }),
       Booking.countDocuments(),
       ChatMessage.countDocuments(),
+      Feed.countDocuments(),
+      Payment.aggregate([
+        { $match: { status: "succeeded" } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
       VisitorStat.findOne({ dateKey: getDateKey() }),
     ]);
 
@@ -34,6 +41,8 @@ const getStats = async (req, res, next) => {
       totalArtists,
       totalBookings,
       totalChats,
+      totalUploads,
+      revenue: revenue?.[0]?.total || 0,
       onlineUsers: getOnlineUsersCount(),
       dailyVisitors: dailyVisitors?.visitors || 0,
     });
@@ -44,10 +53,15 @@ const getStats = async (req, res, next) => {
 
 const getDashboardStats = async (req, res, next) => {
   try {
-    const [totalUsers, totalBookings, totalChats, dailyVisitors] = await Promise.all([
+    const [totalUsers, totalBookings, totalChats, totalUploads, revenue, dailyVisitors] = await Promise.all([
       User.countDocuments(),
       Booking.countDocuments(),
       ChatMessage.countDocuments(),
+      Feed.countDocuments(),
+      Payment.aggregate([
+        { $match: { status: "succeeded" } },
+        { $group: { _id: null, total: { $sum: "$amount" } } },
+      ]),
       VisitorStat.findOne({ dateKey: getDateKey() }),
     ]);
 
@@ -55,6 +69,8 @@ const getDashboardStats = async (req, res, next) => {
       totalUsers,
       totalBookings,
       totalChats,
+      totalUploads,
+      revenue: revenue?.[0]?.total || 0,
       onlineUsers: getOnlineUsersCount(),
       dailyVisitors: dailyVisitors?.visitors || 0,
     });
@@ -130,6 +146,28 @@ const verifyUser = async (req, res, next) => {
   }
 };
 
+const featureProfile = async (req, res, next) => {
+  try {
+    const featured = req.body.featured !== false;
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      {
+        isPremium: featured,
+        premiumBadge: featured,
+      },
+      { returnDocument: "after", runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    return res.json({ user });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const createRule = async (req, res, next) => {
   try {
     const { title, description } = req.body;
@@ -153,5 +191,6 @@ module.exports = {
   blockUser,
   unblockUser,
   verifyUser,
+  featureProfile,
   createRule,
 };

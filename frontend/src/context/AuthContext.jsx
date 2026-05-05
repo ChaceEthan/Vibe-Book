@@ -96,23 +96,8 @@ export const AuthProvider = ({ children }) => {
     return syncUser(data.user);
   };
 
-  const uploadProfileImages = async (files) => {
-    const { data } = await userApi.uploadImages(files);
-    return syncUser(data.user);
-  };
-
-  const uploadProfileImage = async (file) => {
-    const { data } = await userApi.uploadProfileImage(file);
-    return syncUser(data.user);
-  };
-
-  const uploadProfileVideos = async (files) => {
-    const { data } = await userApi.uploadVideos(files);
-    return syncUser(data.user);
-  };
-
-  const uploadMedia = async (formData) => {
-    const { data } = await userApi.uploadMedia(formData);
+  const uploadMedia = async (formData, type) => {
+    const { data } = await userApi.uploadMedia(formData, type);
     if (data.user) {
       syncUser(data.user);
     }
@@ -135,9 +120,6 @@ export const AuthProvider = ({ children }) => {
       logout: clearSession,
       refreshProfile,
       updateProfile,
-      uploadProfileImage,
-      uploadProfileImages,
-      uploadProfileVideos,
       uploadMedia,
       payAccess,
     }),

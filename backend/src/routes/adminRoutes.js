@@ -4,6 +4,7 @@ const {
   blockUser,
   createRule,
   deleteUser,
+  featureProfile,
   getAllUsers,
   getDashboardStats,
   getStats,
@@ -24,6 +25,7 @@ router.delete("/delete/:id", deleteUser);
 router.patch("/block/:id", blockUser);
 router.patch("/unblock/:id", unblockUser);
 router.patch("/verify/:id", verifyUser);
+router.patch("/feature/:id", featureProfile);
 router.post("/rules", createRule);
 
 module.exports = router;

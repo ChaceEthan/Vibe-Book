@@ -9,9 +9,9 @@ const imageUploadDir = path.join(uploadRoot, "images");
 const videoUploadDir = path.join(uploadRoot, "videos");
 
 const imageMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-const videoMimeTypes = ["video/mp4", "video/quicktime"];
+const videoMimeTypes = ["video/mp4", "video/quicktime", "video/webm"];
 const maxImageSize = 5 * 1024 * 1024;
-const maxVideoSize = 50 * 1024 * 1024;
+const maxVideoSize = 30 * 1024 * 1024;
 
 const ensureUploadFolders = () => {
   [imageUploadDir, videoUploadDir].forEach((directory) => {
@@ -43,6 +43,15 @@ const createStorage = (directory) =>
     },
   });
 
+const mediaUploadStorage = multer.diskStorage({
+  destination(req, file, callback) {
+    callback(null, file.mimetype.startsWith("video/") ? videoUploadDir : imageUploadDir);
+  },
+  filename(req, file, callback) {
+    callback(null, safeName(file.originalname));
+  },
+});
+
 const genericUploadStorage = multer.diskStorage({
   destination(req, file, callback) {
     callback(null, uploadRoot);
@@ -71,6 +80,33 @@ const uploadFiles = multer({
   fileFilter: createFileFilter([...imageMimeTypes, ...videoMimeTypes], "image or video"),
 });
 
+const uploadSingleMedia = multer({
+  storage: mediaUploadStorage,
+  limits: {
+    fileSize: maxVideoSize,
+    files: 1,
+  },
+  fileFilter: createFileFilter([...imageMimeTypes, ...videoMimeTypes], "image or video"),
+}).single("file");
+
+const uploadFeedImage = multer({
+  storage: createStorage(imageUploadDir),
+  limits: {
+    fileSize: maxImageSize,
+    files: 1,
+  },
+  fileFilter: createFileFilter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image"),
+}).single("file");
+
+const uploadFeedVideo = multer({
+  storage: createStorage(videoUploadDir),
+  limits: {
+    fileSize: maxVideoSize,
+    files: 1,
+  },
+  fileFilter: createFileFilter(videoMimeTypes, "MP4, MOV, or WEBM video"),
+}).single("file");
+
 const uploadImages = multer({
   storage: createStorage(imageUploadDir),
   limits: {
@@ -95,7 +131,7 @@ const uploadVideos = multer({
     fileSize: maxVideoSize,
     files: 3,
   },
-  fileFilter: createFileFilter(videoMimeTypes, "MP4 or MOV video"),
+  fileFilter: createFileFilter(videoMimeTypes, "MP4, MOV, or WEBM video"),
 }).array("videos", 3);
 
 module.exports = {
@@ -104,8 +140,11 @@ module.exports = {
   imageUploadDir,
   maxImageSize,
   maxVideoSize,
+  uploadFeedImage,
+  uploadFeedVideo,
   uploadImages,
   uploadSingleImage,
+  uploadSingleMedia,
   uploadRoot,
   uploadVideos,
   videoUploadDir,

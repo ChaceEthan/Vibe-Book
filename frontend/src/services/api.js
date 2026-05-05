@@ -18,6 +18,7 @@ api.interceptors.request.use((config) => {
   const token = localStorage.getItem("vibebook_token");
 
   if (token) {
+    config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
 
@@ -29,16 +30,18 @@ export const authApi = {
   register: (payload) => api.post("/auth/register", payload),
 };
 
-export const uploadMedia = (formData) =>
-  api.post("/upload", formData, {
+export const uploadMedia = (formData, type) => {
+  const mediaType = type || formData.get?.("type") || "image";
+
+  return api.post(`/upload/${mediaType === "video" ? "video" : "image"}`, formData, {
     headers: { "Content-Type": "multipart/form-data" },
   });
+};
 
 export const userApi = {
   search: async (params) => {
     const endpoint = "/search";
     const response = await api.get(endpoint, { params });
-    console.log("[VibeBook API] GET", api.getUri({ url: endpoint, params }), response.data);
     return response;
   },
   getById: (id) => api.get(`/users/${id}`),
@@ -55,25 +58,16 @@ export const userApi = {
     }
   },
   uploadMedia,
-  uploadImages: (files) => {
-    const formData = new FormData();
-    files.forEach((file) => formData.append("images", file));
-    return api.post("/users/profile/images", formData);
-  },
-  uploadProfileImage: (file) => {
-    const formData = new FormData();
-    formData.append("image", file);
-    return api.post("/users/profile/image", formData);
-  },
-  uploadVideos: (files) => {
-    const formData = new FormData();
-    files.forEach((file) => formData.append("videos", file));
-    return api.post("/users/profile/videos", formData);
-  },
   payAccess: (payload = {}) => api.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
-  unlockContact: (id, payload) => api.post(`/users/${id}/unlock-contact`, payload),
   likeProfile: (id) => api.post(`/users/${id}/like`),
   unlikeProfile: (id) => api.delete(`/users/${id}/like`),
+  deleteMe: () => api.delete("/users/me"),
+};
+
+export const feedApi = {
+  get: () => api.get("/feed"),
+  toggleLike: (id) => api.post(`/feed/${id}/like`),
+  addComment: (id, payload) => api.post(`/feed/${id}/comments`, payload),
 };
 
 export const bookingApi = {
@@ -82,6 +76,12 @@ export const bookingApi = {
   payAccess: (id, payload) => api.patch(`/bookings/${id}/pay`, payload),
   sendOffer: (payload) => api.post("/bookings/offers", payload),
   updateStatus: (id, payload) => api.patch(`/bookings/${id}/status`, payload),
+};
+
+export const paymentApi = {
+  options: () => api.get("/payments/options"),
+  create: (payload) => api.post("/payments/create", payload),
+  verify: (payload) => api.post("/payments/verify", payload),
 };
 
 export const messageApi = {
@@ -97,6 +97,22 @@ export const messageApi = {
   reply: (id, payload) => api.post(`/messages/${id}/reply`, payload),
   saveDraft: (payload) => api.post("/messages/drafts", payload),
   updateDraft: (id, payload) => api.patch(`/messages/drafts/${id}`, payload),
+};
+
+export const groupChatApi = {
+  list: () => api.get("/chat/groups"),
+  create: (payload) => api.post("/chat/group", payload),
+  getMessages: (groupId) => api.get(`/chat/group/${groupId}/messages`),
+  send: (groupId, payload) => api.post(`/chat/group/${groupId}/messages`, payload),
+};
+
+export const adminApi = {
+  stats: () => api.get("/admin/dashboard"),
+  users: () => api.get("/admin/users"),
+  deleteUser: (id) => api.delete(`/admin/delete/${id}`),
+  blockUser: (id) => api.patch(`/admin/block/${id}`),
+  unblockUser: (id) => api.patch(`/admin/unblock/${id}`),
+  featureProfile: (id, featured = true) => api.patch(`/admin/feature/${id}`, { featured }),
 };
 
 export const ratingApi = {

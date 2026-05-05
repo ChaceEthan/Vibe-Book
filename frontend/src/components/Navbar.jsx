@@ -6,6 +6,7 @@ import {
   LogOut,
   MessageCircle,
   Plus,
+  Settings,
   User,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
@@ -24,7 +25,7 @@ const navClass = ({ isActive }) =>
 const Navbar = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
   const { language, languages, setLanguage } = useLanguage();
   const navigate = useNavigate();
 
@@ -32,7 +33,7 @@ const Navbar = () => {
     () => [
       { to: "/", label: "Home", icon: Home },
       { to: "/search", label: "Explore", icon: Compass },
-      { to: isAuthenticated ? "/inbox" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
+      { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
       { to: isAuthenticated ? "/dashboard" : "/login", label: "Profile", icon: User },
     ],
     [isAuthenticated, unreadCount]
@@ -103,9 +104,19 @@ const Navbar = () => {
               ))}
             </select>
             {isAuthenticated ? (
-              <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={handleLogout} aria-label="Logout">
-                <LogOut className="h-5 w-5" />
-              </button>
+              <>
+                {user?.role === "admin" && (
+                  <Link to="/admin" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Admin">
+                    <User className="h-5 w-5" />
+                  </Link>
+                )}
+                <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings">
+                  <Settings className="h-5 w-5" />
+                </Link>
+                <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={handleLogout} aria-label="Logout">
+                  <LogOut className="h-5 w-5" />
+                </button>
+              </>
             ) : (
               <Link to="/login" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Login">
                 <LogIn className="h-5 w-5" />

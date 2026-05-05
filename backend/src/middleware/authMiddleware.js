@@ -3,17 +3,27 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { syncTrialState } = require("../utils/accessControl");
 
+const getBearerToken = (req) => {
+  const authHeader = req.headers.authorization || req.headers.Authorization || "";
+
+  if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+
+  return req.headers["x-auth-token"] || "";
+};
+
 const authMiddleware = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
+    const token = getBearerToken(req);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    if (!token) {
       return res.status(401).json({ message: "Not authorized, token missing" });
     }
 
-    const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(decoded.id).select("-password");
+    const userId = decoded.id || decoded._id || decoded.userId || decoded.sub;
+    const user = await User.findById(userId).select("-password");
 
     if (!user) {
       return res.status(401).json({ message: "Not authorized, user not found" });

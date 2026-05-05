@@ -2,6 +2,7 @@ const User = require("../models/User");
 
 const publicRoles = User.allowedRoles.filter((role) => role !== "admin");
 const allowedGenders = ["male", "female", "mixed", "other"];
+const allowedLanguages = ["en", "rw", "sw", "fr", "lg"];
 const defaultCategoryByRole = {
   dancer: "Modern Dance",
   dj: "DJs",
@@ -71,6 +72,18 @@ const normalizeType = (value) => {
   }
 
   return { value: type };
+};
+
+const normalizeAccountType = (value) => {
+  const accountType = normalizeLowerText(value);
+
+  if (!User.allowedAccountTypes.includes(accountType)) {
+    return {
+      error: `Account type must be one of: ${User.allowedAccountTypes.join(", ")}`,
+    };
+  }
+
+  return { value: accountType };
 };
 
 const normalizeGender = (value) => {
@@ -162,6 +175,12 @@ const normalizeProfileFields = (body, options = {}) => {
     else data.type = result.value;
   }
 
+  if (hasOwn(body, "accountType")) {
+    const result = normalizeAccountType(body.accountType);
+    if (result.error) errors.push(result.error);
+    else data.accountType = result.value;
+  }
+
   if (hasOwn(body, "gender")) {
     const result = normalizeGender(body.gender);
     if (result.error) errors.push(result.error);
@@ -234,6 +253,15 @@ const normalizeProfileFields = (body, options = {}) => {
     else data.availability = result.value;
   }
 
+  if (hasOwn(body, "language")) {
+    const language = normalizeLowerText(body.language);
+    data.language = allowedLanguages.includes(language) ? language : "en";
+  }
+
+  if (hasOwn(body, "notificationEnabled")) {
+    data.notificationEnabled = body.notificationEnabled === true || body.notificationEnabled === "true";
+  }
+
   if (data.role && !data.category) {
     data.category = defaultCategoryByRole[data.role];
   }
@@ -247,9 +275,11 @@ const normalizeProfileFields = (body, options = {}) => {
 
 module.exports = {
   allowedGenders,
+  allowedLanguages,
   defaultCategoryByRole,
   findAllowedValue,
   normalizeAvailability,
+  normalizeAccountType,
   normalizeCategory,
   normalizeEmail,
   normalizeGender,

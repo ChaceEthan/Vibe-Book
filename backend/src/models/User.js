@@ -11,6 +11,7 @@ const allowedCategories = [
   "Crew groups",
 ];
 const allowedAvailability = ["available", "busy", "unavailable"];
+const allowedAccountTypes = ["user", "talent"];
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -40,6 +41,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: allowedTypes,
     default: "single",
+  },
+  accountType: {
+    type: String,
+    enum: allowedAccountTypes,
+    default: "talent",
   },
   gender: {
     type: String,
@@ -198,6 +204,15 @@ const userSchema = new mongoose.Schema({
   acceptedTermsAt: {
     type: Date,
   },
+  language: {
+    type: String,
+    trim: true,
+    default: "en",
+  },
+  notificationEnabled: {
+    type: Boolean,
+    default: true,
+  },
   isPremium: {
     type: Boolean,
     default: false,
@@ -273,5 +288,6 @@ User.allowedRoles = allowedRoles;
 User.allowedTypes = allowedTypes;
 User.allowedCategories = allowedCategories;
 User.allowedAvailability = allowedAvailability;
+User.allowedAccountTypes = allowedAccountTypes;
 
 module.exports = User;

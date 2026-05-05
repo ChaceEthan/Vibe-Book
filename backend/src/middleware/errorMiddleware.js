@@ -32,8 +32,9 @@ const errorMiddleware = (err, req, res, next) => {
     message = err.code === "LIMIT_FILE_SIZE" ? "Uploaded file is too large" : err.message;
   }
 
-  if (message === "Not allowed by CORS") {
+  if (message === "Not allowed by CORS" || message === "Origin not allowed") {
     statusCode = 403;
+    message = "Origin not allowed";
   }
 
   return res.status(statusCode).json({

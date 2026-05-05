@@ -19,12 +19,7 @@ const createTransporter = () => {
 };
 
 const sendContactNotification = async ({ to, contactedUser, fromUser, message }) => {
-  console.log(
-    `Contact notification prepared: ${fromUser.name} (${fromUser.email}) contacted ${contactedUser.name} (${contactedUser.email})`
-  );
-
   if (!hasSmtpConfig()) {
-    console.log("Contact email not sent: SMTP configuration is missing");
     return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
   }
 
@@ -49,12 +44,7 @@ const sendContactNotification = async ({ to, contactedUser, fromUser, message })
 };
 
 const sendBookingNotification = async ({ to, talent, requester, booking, whatsappLink }) => {
-  console.log(
-    `Booking notification prepared: ${requester.name} (${requester.email}) booked ${talent.name} (${talent.email})`
-  );
-
   if (!hasSmtpConfig()) {
-    console.log("Booking email not sent: SMTP configuration is missing");
     return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
   }
 

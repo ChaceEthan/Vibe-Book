@@ -1,10 +1,10 @@
 // @ts-nocheck
-import { Heart, Lock, Mail, MessageCircle, Phone, Star, X } from "lucide-react";
+import { CreditCard, Heart, Lock, Mail, MessageCircle, Phone, Star, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
-import { bookingApi, mediaUrl, ratingApi, userApi } from "../services/api";
+import { bookingApi, mediaUrl, paymentApi, ratingApi, userApi } from "../services/api";
 
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
 
@@ -35,6 +35,14 @@ const formatPrice = (price) => {
   }).format(amount);
 };
 
+const PAYMENT_OPTIONS = [
+  { value: "USDT", label: "USDT" },
+  { value: "USDC", label: "USDC" },
+  { value: "USD", label: "USD" },
+  { value: "MTN_MOMO", label: "MTN MoMo" },
+  { value: "AIRTEL_MONEY", label: "Airtel Money" },
+];
+
 const toEmbedUrl = (url) => {
   try {
     const parsed = new URL(url);
@@ -63,7 +71,7 @@ const toEmbedUrl = (url) => {
 
 const Profile = () => {
   const { id } = useParams();
-  const { user: currentUser } = useAuth();
+  const { refreshProfile, user: currentUser } = useAuth();
   const [user, setUser] = useState(null);
   const [activeImage, setActiveImage] = useState(0);
   const [previewImage, setPreviewImage] = useState("");
@@ -81,6 +89,10 @@ const Profile = () => {
   const [offerStatus, setOfferStatus] = useState("");
   const [offerError, setOfferError] = useState("");
   const [offerSending, setOfferSending] = useState(false);
+  const [paymentAction, setPaymentAction] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+  const [processingPayment, setProcessingPayment] = useState("");
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingStatus, setRatingStatus] = useState("");
   const [ratingError, setRatingError] = useState("");
@@ -115,6 +127,9 @@ const Profile = () => {
     setOfferStatus("");
     setOfferError("");
     setOfferForm({ eventDate: "", offerPrice: "", message: "" });
+    setPaymentAction(null);
+    setPaymentStatus("");
+    setPaymentError("");
   }, [id, currentUser]);
 
   useEffect(() => {
@@ -157,30 +172,45 @@ const Profile = () => {
     setBookingForm((current) => ({ ...current, [event.target.name]: event.target.value }));
   };
 
+  const buildBookingPayload = () => ({
+    talentId: user._id,
+    userName: bookingForm.userName.trim() || currentUser?.name || "",
+    businessName: bookingForm.businessName.trim(),
+    location: bookingForm.location.trim(),
+    eventDate: bookingForm.eventDate || undefined,
+    eventType: bookingForm.eventType.trim(),
+    durationValue: bookingForm.durationValue ? Number(bookingForm.durationValue) : undefined,
+    durationUnit: bookingForm.durationUnit,
+    offeredPrice: Number(bookingForm.offeredPrice),
+    finalAgreedPrice: bookingForm.finalAgreedPrice ? Number(bookingForm.finalAgreedPrice) : undefined,
+    message: bookingForm.message.trim(),
+  });
+
+  const getAccessPayment = (requestError) => ({
+    amount: requestError.response?.data?.data?.access?.unlockAmount || 1000,
+    currency: requestError.response?.data?.data?.access?.unlockCurrency || "RWF",
+  });
+
   const handleBookingSubmit = async (event) => {
     event.preventDefault();
     setBookingSending(true);
     setBookingStatus("");
     setBookingError("");
+    setPaymentStatus("");
+    setPaymentError("");
+    setPaymentAction(null);
 
     try {
-      await bookingApi.create({
-        talentId: user._id,
-        userName: bookingForm.userName.trim() || currentUser?.name || "",
-        businessName: bookingForm.businessName.trim(),
-        location: bookingForm.location.trim(),
-        eventDate: bookingForm.eventDate || undefined,
-        eventType: bookingForm.eventType.trim(),
-        durationValue: bookingForm.durationValue ? Number(bookingForm.durationValue) : undefined,
-        durationUnit: bookingForm.durationUnit,
-        offeredPrice: Number(bookingForm.offeredPrice),
-        finalAgreedPrice: bookingForm.finalAgreedPrice ? Number(bookingForm.finalAgreedPrice) : undefined,
-        message: bookingForm.message.trim(),
-      });
+      await bookingApi.create(buildBookingPayload());
       setBookingStatus("Booking request sent.");
       setBookingForm(initialBookingForm(currentUser));
     } catch (requestError) {
-      setBookingError(requestError.response?.data?.message || "Booking request failed.");
+      if (requestError.response?.status === 402) {
+        setPaymentAction({ type: "booking", payload: buildBookingPayload(), ...getAccessPayment(requestError) });
+        setBookingError("Payment or free trial access is required before this booking is sent.");
+      } else {
+        setBookingError(requestError.response?.data?.message || "Booking request failed.");
+      }
     } finally {
       setBookingSending(false);
     }
@@ -220,19 +250,17 @@ const Profile = () => {
   const handleUnlockContact = async () => {
     setUnlockingContact(true);
     setContactError("");
+    setPaymentStatus("");
+    setPaymentError("");
 
-    try {
-      const { data } = await userApi.unlockContact(id, {
-        amount: 1000,
-        currency: "RWF",
-        paymentReference: `contact-unlock-${id}-${Date.now()}`,
-      });
-      setUser(data.user);
-    } catch (requestError) {
-      setContactError(requestError.response?.data?.message || "Unable to unlock contact.");
-    } finally {
-      setUnlockingContact(false);
-    }
+    setPaymentAction({
+      type: "contact",
+      profileId: id,
+      amount: 1000,
+      currency: "RWF",
+    });
+    setContactError("Choose a payment option to unlock contact.");
+    setUnlockingContact(false);
   };
 
   const handleOfferChange = (event) => {
@@ -244,20 +272,88 @@ const Profile = () => {
     setOfferSending(true);
     setOfferStatus("");
     setOfferError("");
+    setPaymentStatus("");
+    setPaymentError("");
+    setPaymentAction(null);
 
     try {
-      await bookingApi.sendOffer({
+      const payload = {
         talentId: user._id,
         eventDate: offerForm.eventDate || undefined,
         offerPrice: Number(offerForm.offerPrice),
         message: offerForm.message.trim(),
-      });
+      };
+      await bookingApi.sendOffer(payload);
       setOfferStatus("Offer sent.");
       setOfferForm({ eventDate: "", offerPrice: "", message: "" });
     } catch (requestError) {
-      setOfferError(requestError.response?.data?.message || "Offer failed.");
+      if (requestError.response?.status === 402) {
+        setPaymentAction({
+          type: "offer",
+          payload: {
+            talentId: user._id,
+            eventDate: offerForm.eventDate || undefined,
+            offerPrice: Number(offerForm.offerPrice),
+            message: offerForm.message.trim(),
+          },
+          ...getAccessPayment(requestError),
+        });
+        setOfferError("Payment or free trial access is required before this offer is sent.");
+      } else {
+        setOfferError(requestError.response?.data?.message || "Offer failed.");
+      }
     } finally {
       setOfferSending(false);
+    }
+  };
+
+  const handlePayment = async (method) => {
+    if (!paymentAction) {
+      return;
+    }
+
+    setProcessingPayment(method);
+    setPaymentStatus("");
+    setPaymentError("");
+
+    try {
+      const { data: created } = await paymentApi.create({
+        method,
+        purpose: "platform_access",
+        amount: paymentAction.amount,
+        currency: paymentAction.currency,
+        profileId: user._id,
+      });
+      await paymentApi.verify({
+        paymentId: created.payment?._id,
+        reference: created.payment?.reference,
+      });
+      await refreshProfile();
+
+      if (paymentAction.type === "booking") {
+        await bookingApi.create(paymentAction.payload);
+        setBookingStatus("Payment verified. Booking request sent.");
+        setBookingForm(initialBookingForm(currentUser));
+      }
+
+      if (paymentAction.type === "offer") {
+        await bookingApi.sendOffer(paymentAction.payload);
+        setOfferStatus("Payment verified. Offer sent.");
+        setOfferForm({ eventDate: "", offerPrice: "", message: "" });
+      }
+
+      if (paymentAction.type === "contact") {
+        const { data } = await userApi.getById(id);
+        setUser(data.user);
+        setContactError("");
+      }
+
+      setPaymentAction(null);
+      setPaymentStatus("Sandbox payment verified.");
+    } catch (requestError) {
+      setPaymentError(requestError.response?.data?.message || "Payment failed.");
+    } finally {
+      setProcessingPayment("");
     }
   };
 
@@ -460,6 +556,30 @@ const Profile = () => {
             </div>
             {likeStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{likeStatus}</div>}
             {contactError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{contactError}</div>}
+            {paymentStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{paymentStatus}</div>}
+            {paymentError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{paymentError}</div>}
+
+            {paymentAction && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-center gap-3 text-sm font-bold text-amber-900">
+                  <CreditCard className="h-5 w-5" />
+                  Unlock action
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {PAYMENT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className="btn-secondary justify-start"
+                      onClick={() => handlePayment(option.value)}
+                      disabled={Boolean(processingPayment)}
+                    >
+                      {processingPayment === option.value ? "Verifying..." : option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {!isOwnProfile && (
               <div className="mt-6 rounded-lg bg-surface p-4">
@@ -494,7 +614,7 @@ const Profile = () => {
                   <input className="field" name="userName" value={bookingForm.userName} onChange={handleBookingChange} required />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Business name</span>
+                  <span className="label">Event place (bar/hotel/etc)</span>
                   <input className="field" name="businessName" value={bookingForm.businessName} onChange={handleBookingChange} required />
                 </label>
                 <label className="space-y-2">

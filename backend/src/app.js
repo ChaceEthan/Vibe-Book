@@ -11,6 +11,8 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
+const feedRoutes = require("./routes/feedRoutes");
+const paymentRoutes = require("./routes/paymentRoutes");
 const { createBooking } = require("./controllers/bookingController");
 const { getProfile, searchUsers, updateProfile } = require("./controllers/userController");
 const optionalAuthMiddleware = require("./middleware/optionalAuthMiddleware");
@@ -26,7 +28,6 @@ ensureUploadFolders();
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
-  "http://localhost:5175",
   "http://localhost:3000",
   "https://vibe-book-kappa.vercel.app",
 ];
@@ -57,7 +58,11 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    return callback(new Error(`CORS BLOCKED: ${origin}`));
+    if (process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Origin not allowed"));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -73,12 +78,6 @@ app.use(express.urlencoded({ extended: true }));
 app.use(responseMiddleware);
 app.use(visitorMiddleware);
 
-// Simple request logger for local debugging.
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
-  next();
-});
-
 app.get("/", (req, res) => {
   res.json({ message: "VibeBook API is running" });
 });
@@ -90,10 +89,12 @@ app.patch("/api/profile", authMiddleware, updateProfile);
 app.use("/api/users", userRoutes);
 app.use("/api/profiles", userRoutes);
 app.get("/api/search", optionalAuthMiddleware, searchUsers);
+app.use("/api/feed", feedRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);
+app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/rules", ruleRoutes);
 app.use("/api/health", healthRoutes);

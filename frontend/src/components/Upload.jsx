@@ -7,7 +7,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl } from "../services/api";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 30 * 1024 * 1024;
 
 const Upload = ({ open, onClose }) => {
   const { uploadMedia, user } = useAuth();
@@ -78,7 +78,7 @@ const Upload = ({ open, onClose }) => {
     }
 
     if (!isImage && (!selectedFile.type.startsWith("video/") || selectedFile.size > MAX_VIDEO_SIZE)) {
-      setError("Choose a video under 50MB.");
+      setError("Choose a video under 30MB.");
       event.target.value = "";
       return;
     }
@@ -106,7 +106,7 @@ const Upload = ({ open, onClose }) => {
     setStatus("");
 
     try {
-      const data = await uploadMedia(formData);
+      const data = await uploadMedia(formData, type);
       const nextUrl = data.url || data.file?.url || data.files?.[0]?.url || "";
       setUploadedUrl(nextUrl);
       setStatus(isImage ? "Image uploaded." : "Video uploaded.");
