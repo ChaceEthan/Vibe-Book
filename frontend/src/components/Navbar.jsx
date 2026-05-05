@@ -25,6 +25,7 @@ const navClass = ({ isActive }) =>
 const Navbar = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadType, setUploadType] = useState("image");
   const { isAuthenticated, logout, user } = useAuth();
   const { language, languages, setLanguage } = useLanguage();
   const navigate = useNavigate();
@@ -67,12 +68,22 @@ const Navbar = () => {
     };
   }, [isAuthenticated]);
 
-  const openUpload = () => {
+  useEffect(() => {
+    const openFromEvent = (event) => {
+      openUpload(event.detail?.type || "image");
+    };
+
+    window.addEventListener("vibebook:open-upload", openFromEvent);
+    return () => window.removeEventListener("vibebook:open-upload", openFromEvent);
+  }, [isAuthenticated]);
+
+  const openUpload = (nextType = "image") => {
     if (!isAuthenticated) {
       navigate("/login");
       return;
     }
 
+    setUploadType(nextType);
     setUploadOpen(true);
   };
 
@@ -126,7 +137,7 @@ const Navbar = () => {
         </nav>
       </header>
 
-      <Upload open={uploadOpen} onClose={() => setUploadOpen(false)} />
+      <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-3 pb-[calc(0.6rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="mx-auto grid max-w-lg grid-cols-5 items-end gap-1">
@@ -143,7 +154,7 @@ const Navbar = () => {
           <button
             type="button"
             className="-mt-8 flex flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-bold text-navy"
-            onClick={openUpload}
+            onClick={() => openUpload("image")}
           >
             <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand text-navy shadow-lg ring-4 ring-white">
               <Plus className="h-8 w-8" />

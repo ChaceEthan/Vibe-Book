@@ -16,9 +16,6 @@ const initialForm = () => ({
   availability: "available",
 });
 
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-const MAX_VIDEO_SIZE = 30 * 1024 * 1024;
-
 const initialMediaState = {
   profilePicture: "",
   images: [],
@@ -32,16 +29,13 @@ const descriptionFor = (items = [], url = "") => {
 };
 
 const Dashboard = () => {
-  const { deleteMedia, refreshProfile, updateProfile, uploadMedia, uploadProfilePicture, user } = useAuth();
+  const { deleteMedia, refreshProfile, updateProfile, user } = useAuth();
   const { t } = useLanguage();
   const [form, setForm] = useState(initialForm);
   const [mediaState, setMediaState] = useState(initialMediaState);
-  const [imageDescription, setImageDescription] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState("");
-  const [uploadProgress, setUploadProgress] = useState({ profile: 0, image: 0, video: 0 });
   const [deletingMedia, setDeletingMedia] = useState("");
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
   const profileImage = mediaUrl(mediaState.profilePicture || user?.profilePicture || user?.profileImage || "");
@@ -115,124 +109,10 @@ const Dashboard = () => {
     });
   };
 
-  const setProgress = (key, event) => {
-    if (!event.total) {
-      return;
-    }
-
-    setUploadProgress((current) => ({
-      ...current,
-      [key]: Math.round((event.loaded * 100) / event.total),
-    }));
-  };
-
-  const uploadProfileFile = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/") || file.size > MAX_IMAGE_SIZE) {
-      setError("Choose an image under 5MB.");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("image", file);
-    setUploading("profile");
-    setUploadProgress((current) => ({ ...current, profile: 0 }));
+  const openUpload = (type) => {
     setStatus("");
     setError("");
-
-    try {
-      const data = await uploadProfilePicture(formData, {
-        onUploadProgress: (progressEvent) => setProgress("profile", progressEvent),
-      });
-      syncMedia(data.user);
-      setUploadProgress((current) => ({ ...current, profile: 100 }));
-      setStatus("Profile picture updated.");
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || "Profile picture upload failed.");
-    } finally {
-      setUploading("");
-    }
-  };
-
-  const uploadGalleryFile = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/") || file.size > MAX_IMAGE_SIZE) {
-      setError("Choose an image under 5MB.");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("type", "image");
-    if (imageDescription.trim()) {
-      formData.append("description", imageDescription.trim());
-    }
-
-    setUploading("image");
-    setUploadProgress((current) => ({ ...current, image: 0 }));
-    setStatus("");
-    setError("");
-
-    try {
-      const data = await uploadMedia(formData, "image", {
-        onUploadProgress: (progressEvent) => setProgress("image", progressEvent),
-      });
-      syncMedia(data.user);
-      setImageDescription("");
-      setUploadProgress((current) => ({ ...current, image: 100 }));
-      setStatus("Gallery image uploaded.");
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || "Image upload failed.");
-    } finally {
-      setUploading("");
-    }
-  };
-
-  const uploadVideoFile = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("video/") || file.size > MAX_VIDEO_SIZE) {
-      setError("Choose a video under 30MB.");
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("type", "video");
-    setUploading("video");
-    setUploadProgress((current) => ({ ...current, video: 0 }));
-    setStatus("");
-    setError("");
-
-    try {
-      const data = await uploadMedia(formData, "video", {
-        onUploadProgress: (progressEvent) => setProgress("video", progressEvent),
-      });
-      syncMedia(data.user);
-      setUploadProgress((current) => ({ ...current, video: 100 }));
-      setStatus("Video uploaded.");
-    } catch (requestError) {
-      setError(requestError.response?.data?.message || "Video upload failed.");
-    } finally {
-      setUploading("");
-    }
+    window.dispatchEvent(new CustomEvent("vibebook:open-upload", { detail: { type } }));
   };
 
   const removeMedia = async (url, kind) => {
@@ -265,19 +145,6 @@ const Dashboard = () => {
     }
   };
 
-  const progressBar = (key) =>
-    uploading === key ? (
-      <div className="mt-3">
-        <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-500">
-          <span>Uploading...</span>
-          <span>{uploadProgress[key]}%</span>
-        </div>
-        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-          <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${uploadProgress[key]}%` }} />
-        </div>
-      </div>
-    ) : null;
-
   return (
     <section className="container-page py-6 sm:py-10">
       <div className="mb-6 rounded-lg bg-navy p-5 text-white shadow-soft">
@@ -298,11 +165,10 @@ const Dashboard = () => {
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-lg font-black text-navy">Profile Picture</h2>
-            <label className="btn-secondary cursor-pointer gap-2 px-4 py-2">
+            <button type="button" className="btn-secondary gap-2 px-4 py-2" onClick={() => openUpload("profile")}>
               <Edit3 className="h-4 w-4" />
               Edit
-              <input className="hidden" type="file" accept="image/*" onChange={uploadProfileFile} />
-            </label>
+            </button>
           </div>
           <div className="relative mx-auto h-44 w-44 overflow-hidden rounded-full bg-slate-100 shadow-soft">
             <img src={profileImage} alt="" className="h-full w-full object-cover" />
@@ -318,7 +184,6 @@ const Dashboard = () => {
               </button>
             )}
           </div>
-          {progressBar("profile")}
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
@@ -327,22 +192,11 @@ const Dashboard = () => {
               <h2 className="text-lg font-black text-navy">Gallery</h2>
               <p className="mt-1 text-sm text-slate-500">{mediaState.images.length} images</p>
             </div>
-            <label className="btn-primary cursor-pointer gap-2">
+            <button type="button" className="btn-primary gap-2" onClick={() => openUpload("image")}>
               <ImagePlus className="h-4 w-4" />
               Upload Image
-              <input className="hidden" type="file" accept="image/*" onChange={uploadGalleryFile} />
-            </label>
+            </button>
           </div>
-          <label className="mb-4 block space-y-2">
-            <span className="label">Image description</span>
-            <input
-              className="field"
-              value={imageDescription}
-              onChange={(event) => setImageDescription(event.target.value)}
-              placeholder="Optional description for the next image"
-            />
-          </label>
-          {progressBar("image")}
           <div className="mt-4 grid max-h-[400px] gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
             {mediaState.images.length ? (
               mediaState.images.map((image) => (
@@ -377,13 +231,11 @@ const Dashboard = () => {
             <h2 className="text-lg font-black text-navy">Videos</h2>
             <p className="mt-1 text-sm text-slate-500">Videos must be 60 seconds or shorter.</p>
           </div>
-          <label className="btn-primary cursor-pointer gap-2">
+          <button type="button" className="btn-primary gap-2" onClick={() => openUpload("video")}>
             <Video className="h-4 w-4" />
             Upload Video
-            <input className="hidden" type="file" accept="video/*" onChange={uploadVideoFile} />
-          </label>
+          </button>
         </div>
-        {progressBar("video")}
         <div className="mt-4 grid max-h-[400px] gap-3 overflow-y-auto pr-1 md:grid-cols-2">
           {mediaState.videos.length ? (
             mediaState.videos.map((videoUrl) => (

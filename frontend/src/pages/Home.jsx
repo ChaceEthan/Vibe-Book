@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { CalendarCheck, Heart, MessageCircle, Search, Send, Star } from "lucide-react";
+import { CalendarCheck, Heart, MessageCircle, Search, Send, Star, UserMinus, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -106,6 +106,47 @@ const Home = () => {
       replaceFeedItem(data.feedItem);
     } catch {
       navigate(`/profile/${item.userId?._id}`);
+    }
+  };
+
+  const handleFollow = async (item) => {
+    if (!isAuthenticated) {
+      navigate("/login");
+      return;
+    }
+
+    const profileId = item.userId?._id;
+
+    if (!profileId || profileId === currentUser?._id) {
+      return;
+    }
+
+    setError("");
+
+    try {
+      const isFollowing = Boolean(item.userId?.isFollowing);
+      const { data } = isFollowing ? await userApi.unfollow(profileId) : await userApi.follow(profileId);
+      const nextUser = data.user || {};
+
+      setFeed((current) =>
+        current.map((feedItem) =>
+          feedItem.userId?._id === profileId
+            ? {
+                ...feedItem,
+                userId: {
+                  ...feedItem.userId,
+                  ...nextUser,
+                  isFollowing: !isFollowing,
+                  followerCount: Number(
+                    nextUser.followerCount ?? feedItem.userId?.followerCount ?? feedItem.userId?.followers?.length ?? 0
+                  ),
+                },
+              }
+            : feedItem
+        )
+      );
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to update follow.");
     }
   };
 
@@ -258,6 +299,20 @@ const Home = () => {
                     <MessageCircle className="h-6 w-6" />
                   </button>
                   <span className="-mt-3 max-w-12 truncate text-xs font-bold text-white">{Number(item.commentCount || 0)}</span>
+
+                  <button
+                    type="button"
+                    className={`flex h-12 w-12 items-center justify-center rounded-full backdrop-blur ${
+                      profile.isFollowing ? "bg-white text-navy" : "bg-brand text-navy"
+                    }`}
+                    onClick={() => handleFollow(item)}
+                    aria-label={profile.isFollowing ? "Unfollow profile" : "Follow profile"}
+                  >
+                    {profile.isFollowing ? <UserMinus className="h-6 w-6" /> : <UserPlus className="h-6 w-6" />}
+                  </button>
+                  <span className="-mt-3 max-w-16 truncate text-xs font-bold text-white">
+                    {profile.isFollowing ? "Following" : Number(profile.followerCount || 0)}
+                  </span>
 
                   <Link
                     to={isAuthenticated ? `/profile/${profile._id}` : "/login"}

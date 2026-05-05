@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Image as ImageIcon, Trash2, UploadCloud, Video, X } from "lucide-react";
+import { Image as ImageIcon, Trash2, UploadCloud, UserRound, Video, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useAuth } from "../context/AuthContext.jsx";
@@ -8,8 +8,8 @@ import { mediaUrl } from "../services/api";
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 30 * 1024 * 1024;
 
-const Upload = ({ open, onClose }) => {
-  const { deleteMedia, uploadMedia } = useAuth();
+const Upload = ({ open, initialType = "image", onClose }) => {
+  const { deleteMedia, uploadMedia, uploadProfilePicture } = useAuth();
   const [type, setType] = useState("image");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState("");
@@ -28,6 +28,12 @@ const Upload = ({ open, onClose }) => {
       }
     };
   }, [preview]);
+
+  useEffect(() => {
+    if (open) {
+      setType(initialType || "image");
+    }
+  }, [initialType, open]);
 
   useEffect(() => {
     if (!open) {
@@ -49,7 +55,8 @@ const Upload = ({ open, onClose }) => {
     return null;
   }
 
-  const isImage = type === "image";
+  const isProfile = type === "profile";
+  const isImage = type === "image" || isProfile;
 
   const switchType = (nextType) => {
     setType(nextType);
@@ -107,9 +114,13 @@ const Upload = ({ open, onClose }) => {
     }
 
     const formData = new FormData();
-    formData.append("file", file);
-    formData.append("type", type);
-    if (description.trim()) {
+    if (isProfile) {
+      formData.append("image", file);
+    } else {
+      formData.append("file", file);
+      formData.append("type", type);
+    }
+    if (type === "image" && description.trim()) {
       formData.append("description", description.trim());
     }
 
@@ -119,19 +130,27 @@ const Upload = ({ open, onClose }) => {
     setProgress(0);
 
     try {
-      const data = await uploadMedia(formData, type, {
-        onUploadProgress: (event) => {
-          if (event.total) {
-            setProgress(Math.round((event.loaded * 100) / event.total));
-          }
-        },
-      });
-      const nextUrl = data.url || data.file?.url || data.files?.[0]?.url || "";
-      const nextPath = data.path || data.file?.path || data.files?.[0]?.path || nextUrl;
+      const data = isProfile
+        ? await uploadProfilePicture(formData, {
+            onUploadProgress: (event) => {
+              if (event.total) {
+                setProgress(Math.round((event.loaded * 100) / event.total));
+              }
+            },
+          })
+        : await uploadMedia(formData, type, {
+            onUploadProgress: (event) => {
+              if (event.total) {
+                setProgress(Math.round((event.loaded * 100) / event.total));
+              }
+            },
+          });
+      const nextPath = data.path || data.file?.path || data.files?.[0]?.path || data.user?.profilePicture || "";
+      const nextUrl = data.url || data.file?.url || data.files?.[0]?.url || nextPath;
       setUploadedUrl(nextUrl);
       setUploadedPath(nextPath);
       setProgress(100);
-      setStatus(isImage ? "Image uploaded." : "Video uploaded.");
+      setStatus(isProfile ? "Profile picture updated." : isImage ? "Image uploaded." : "Video uploaded.");
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Upload failed.");
     } finally {
@@ -176,27 +195,27 @@ const Upload = ({ open, onClose }) => {
           </button>
         </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2 rounded-lg bg-surface p-1">
-          <button
-            type="button"
-            className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold ${
-              isImage ? "bg-white text-navy shadow-sm" : "text-slate-500"
-            }`}
-            onClick={() => switchType("image")}
-          >
-            <ImageIcon className="h-4 w-4" />
-            Upload Image
-          </button>
-          <button
-            type="button"
-            className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold ${
-              !isImage ? "bg-white text-navy shadow-sm" : "text-slate-500"
-            }`}
-            onClick={() => switchType("video")}
-          >
-            <Video className="h-4 w-4" />
-            Upload Video
-          </button>
+        <div className="mt-5 grid grid-cols-3 gap-2 rounded-lg bg-surface p-1">
+          {[
+            { value: "profile", label: "Profile", icon: UserRound },
+            { value: "image", label: "Image", icon: ImageIcon },
+            { value: "video", label: "Video", icon: Video },
+          ].map((option) => {
+            const Icon = option.icon;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-bold ${
+                  type === option.value ? "bg-white text-navy shadow-sm" : "text-slate-500"
+                }`}
+                onClick={() => switchType(option.value)}
+              >
+                <Icon className="h-4 w-4" />
+                {option.label}
+              </button>
+            );
+          })}
         </div>
 
         {error && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -204,11 +223,13 @@ const Upload = ({ open, onClose }) => {
 
         <label className="mt-5 flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-brand hover:bg-brand/5">
           <UploadCloud className="h-8 w-8 text-slate-400" />
-          <span className="mt-3 text-sm font-bold text-navy">{isImage ? "Choose image" : "Choose video"}</span>
+          <span className="mt-3 text-sm font-bold text-navy">
+            {isProfile ? "Choose profile picture" : isImage ? "Choose image" : "Choose video"}
+          </span>
           <input className="hidden" type="file" accept={isImage ? "image/*" : "video/*"} onChange={handleSelect} />
         </label>
 
-        {isImage && (
+        {type === "image" && (
           <label className="mt-4 block space-y-2">
             <span className="label">Image description</span>
             <input
