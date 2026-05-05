@@ -13,10 +13,12 @@ const readStoredUser = () => {
   }
 };
 
+const readStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(readStoredUser);
-  const [token, setToken] = useState(() => localStorage.getItem("vibebook_token"));
-  const [loading, setLoading] = useState(Boolean(localStorage.getItem("vibebook_token")));
+  const [token, setToken] = useState(readStoredToken);
+  const [loading, setLoading] = useState(Boolean(readStoredToken()));
 
   const syncUser = useCallback((nextUser) => {
     setUser(nextUser);
@@ -27,6 +29,7 @@ export const AuthProvider = ({ children }) => {
   const saveSession = (nextUser, nextToken) => {
     syncUser(nextUser);
     setToken(nextToken);
+    localStorage.setItem("token", nextToken);
     localStorage.setItem("vibebook_token", nextToken);
   };
 
@@ -35,11 +38,12 @@ export const AuthProvider = ({ children }) => {
     setToken(null);
     setLoading(false);
     localStorage.removeItem("vibebook_user");
+    localStorage.removeItem("token");
     localStorage.removeItem("vibebook_token");
   };
 
   const refreshProfile = useCallback(async () => {
-    if (!localStorage.getItem("vibebook_token")) {
+    if (!readStoredToken()) {
       setLoading(false);
       return null;
     }

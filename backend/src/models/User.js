@@ -53,7 +53,10 @@ const userSchema = new mongoose.Schema({
   },
   category: {
     type: String,
-    enum: allowedCategories,
+    enum: {
+      values: allowedCategories,
+      message: `Category must be one of: ${allowedCategories.join(", ")}`,
+    },
     trim: true,
   },
   price: {
@@ -142,6 +145,32 @@ const userSchema = new mongoose.Schema({
       },
     },
   ],
+  followers: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  following: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  balance: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  isMonetized: {
+    type: Boolean,
+    default: false,
+  },
+  monetizationScore: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   referralCode: {
     type: String,
     unique: true,

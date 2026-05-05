@@ -1,7 +1,7 @@
 // @ts-nocheck
-import { CreditCard, Heart, Lock, Mail, MessageCircle, Phone, Star, X } from "lucide-react";
+import { CreditCard, Heart, Lock, Mail, MessageCircle, Phone, Star, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { bookingApi, mediaUrl, paymentApi, ratingApi, userApi } from "../services/api";
@@ -97,6 +97,9 @@ const Profile = () => {
   const [ratingStatus, setRatingStatus] = useState("");
   const [ratingError, setRatingError] = useState("");
   const [likeStatus, setLikeStatus] = useState("");
+  const [followStatus, setFollowStatus] = useState("");
+  const [followUpdating, setFollowUpdating] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -130,6 +133,8 @@ const Profile = () => {
     setPaymentAction(null);
     setPaymentStatus("");
     setPaymentError("");
+    setFollowStatus("");
+    setFollowUpdating(false);
   }, [id, currentUser]);
 
   useEffect(() => {
@@ -145,8 +150,12 @@ const Profile = () => {
     [profilePicture, user]
   );
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
-  const images = useMemo(() => (premiumActive ? allImages : allImages.slice(0, 3)), [allImages, premiumActive]);
-  const lockedImageCount = premiumActive ? 0 : Math.max(Number(user?.galleryImageCount || allImages.length) - images.length, 0);
+  const isOwnProfile = currentUser?._id && user?._id && currentUser._id === user._id;
+  const isFollowing = Boolean(user?.isFollowing);
+  const contentUnlocked = Boolean(isOwnProfile || user?.isUnlocked || user?.contentUnlocked);
+  const contentLocked = Boolean(!isOwnProfile && !contentUnlocked);
+  const images = allImages;
+  const lockedImageCount = contentLocked ? Math.max(Number(user?.galleryImageCount || allImages.length) - images.length, 0) : 0;
   const activeImageUrl = images[activeImage] || images[0] || "/logo.png";
   const videoUrls = useMemo(() => {
     const videos = Array.isArray(user?.videos) && user.videos.length ? user.videos : user?.videoUrls || [];
@@ -154,8 +163,7 @@ const Profile = () => {
   }, [user]);
   const whatsapp = cleanPhone(user?.whatsappNumber || user?.socialLinks?.whatsapp || user?.phone || "");
   const phone = cleanPhone(user?.phone || "");
-  const isOwnProfile = currentUser?._id && user?._id && currentUser._id === user._id;
-  const contactUnlocked = Boolean(isOwnProfile || user?.contactUnlocked);
+  const contactUnlocked = Boolean(isOwnProfile || user?.contactUnlocked || contentUnlocked);
   const contactLocked = Boolean(!isOwnProfile && user?.contactLocked);
 
   const goToImage = (direction) => {
@@ -202,6 +210,8 @@ const Profile = () => {
 
     try {
       await bookingApi.create(buildBookingPayload());
+      const { data } = await userApi.getById(id);
+      setUser(data.user);
       setBookingStatus("Booking request sent.");
       setBookingForm(initialBookingForm(currentUser));
     } catch (requestError) {
@@ -247,6 +257,28 @@ const Profile = () => {
     }
   };
 
+  const handleFollowToggle = async () => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    setFollowUpdating(true);
+    setFollowStatus("");
+    setContactError("");
+
+    try {
+      const { data } = isFollowing ? await userApi.unfollow(user._id) : await userApi.follow(user._id);
+      setUser(data.user);
+      await refreshProfile();
+      setFollowStatus(data.message || (isFollowing ? "Profile unfollowed." : "Profile followed."));
+    } catch (requestError) {
+      setFollowStatus(requestError.response?.data?.message || "Unable to update follow.");
+    } finally {
+      setFollowUpdating(false);
+    }
+  };
+
   const handleUnlockContact = async () => {
     setUnlockingContact(true);
     setContactError("");
@@ -284,6 +316,8 @@ const Profile = () => {
         message: offerForm.message.trim(),
       };
       await bookingApi.sendOffer(payload);
+      const { data } = await userApi.getById(id);
+      setUser(data.user);
       setOfferStatus("Offer sent.");
       setOfferForm({ eventDate: "", offerPrice: "", message: "" });
     } catch (requestError) {
@@ -332,12 +366,16 @@ const Profile = () => {
 
       if (paymentAction.type === "booking") {
         await bookingApi.create(paymentAction.payload);
+        const { data } = await userApi.getById(id);
+        setUser(data.user);
         setBookingStatus("Payment verified. Booking request sent.");
         setBookingForm(initialBookingForm(currentUser));
       }
 
       if (paymentAction.type === "offer") {
         await bookingApi.sendOffer(paymentAction.payload);
+        const { data } = await userApi.getById(id);
+        setUser(data.user);
         setOfferStatus("Payment verified. Offer sent.");
         setOfferForm({ eventDate: "", offerPrice: "", message: "" });
       }
@@ -397,8 +435,20 @@ const Profile = () => {
         <div className="space-y-4">
           <div className="relative overflow-hidden rounded-lg bg-slate-100 shadow-soft">
             <button type="button" className="block h-[420px] w-full" onClick={() => setPreviewImage(activeImageUrl)}>
-              <img src={mediaUrl(activeImageUrl)} alt={user.name} className="h-full w-full object-cover" />
+              <img
+                src={mediaUrl(activeImageUrl)}
+                alt={user.name}
+                className={`h-full w-full object-cover ${contentLocked ? "scale-[1.02] blur-sm" : ""}`}
+              />
             </button>
+            {contentLocked && (
+              <div className="absolute inset-x-6 bottom-6 rounded-lg bg-slate-950/75 p-4 text-center text-white backdrop-blur">
+                <div className="flex items-center justify-center gap-2 text-sm font-black">
+                  <Lock className="h-4 w-4" />
+                  Follow to unlock content
+                </div>
+              </div>
+            )}
             {images.length > 1 && (
               <div className="absolute inset-x-4 top-1/2 flex -translate-y-1/2 justify-between">
                 <button type="button" className="rounded-full bg-white/90 px-4 py-3 text-sm font-black text-navy shadow" onClick={() => goToImage(-1)} aria-label="Previous image">
@@ -431,30 +481,46 @@ const Profile = () => {
 
           {lockedImageCount > 0 && (
             <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-600 shadow-soft">
-              {lockedImageCount} premium gallery images locked
+              {lockedImageCount} gallery {lockedImageCount === 1 ? "item is" : "items are"} locked. Follow to unlock content.
             </div>
           )}
 
-          {videoUrls.length > 0 && (
+          {(videoUrls.length > 0 || (contentLocked && Number(user?.videoCount || 0) > 0)) && (
             <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
               <h2 className="text-lg font-black text-navy">Videos</h2>
               <div className="mt-4 grid gap-4">
-                {videoUrls.map((videoUrl, index) => (
-                  <div key={videoUrl} className="aspect-video overflow-hidden rounded-lg bg-slate-100">
-                    {videoUrl.startsWith("/uploads") ? (
-                      <video src={mediaUrl(videoUrl)} className="h-full w-full" controls preload="metadata" />
-                    ) : (
-                      <iframe
-                        src={toEmbedUrl(videoUrl)}
-                        title={`${user.name} video ${index + 1}`}
-                        className="h-full w-full"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                        loading="lazy"
-                      />
-                    )}
+                {contentLocked && !videoUrls.length ? (
+                  <div className="flex aspect-video items-center justify-center rounded-lg bg-slate-100 p-5 text-center text-sm font-bold text-slate-600">
+                    <span className="inline-flex items-center gap-2">
+                      <Lock className="h-4 w-4" />
+                      Follow to unlock content
+                    </span>
                   </div>
-                ))}
+                ) : (
+                  videoUrls.map((videoUrl, index) => (
+                    <div key={videoUrl} className="aspect-video overflow-hidden rounded-lg bg-slate-100">
+                      {videoUrl.startsWith("/uploads") ? (
+                        <video
+                          src={mediaUrl(videoUrl)}
+                          className="h-full bg-slate-900"
+                          controls
+                          playsInline
+                          preload="metadata"
+                          style={{ width: "100%", borderRadius: "12px" }}
+                        />
+                      ) : (
+                        <iframe
+                          src={toEmbedUrl(videoUrl)}
+                          title={`${user.name} video ${index + 1}`}
+                          className="h-full w-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                          loading="lazy"
+                        />
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           )}
@@ -475,6 +541,9 @@ const Profile = () => {
                 </div>
                 <h1 className="mt-2 text-3xl font-black text-navy">{user.name}</h1>
                 <p className="mt-2 text-sm text-slate-500">{user.category || "Entertainment professional"}</p>
+                <p className="mt-2 text-xs font-bold uppercase text-slate-400">
+                  {Number(user.followerCount || 0)} followers
+                </p>
               </div>
               <div className="rounded-lg bg-slate-100 px-4 py-3 text-center">
                 <p className="text-xs font-semibold uppercase text-slate-500">Rating</p>
@@ -497,11 +566,22 @@ const Profile = () => {
             <div className="mt-6">
               <h2 className="text-lg font-bold text-navy">Bio</h2>
               <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-600">
-                {user.bio || "This performer has not added a bio yet."}
+                {contentLocked ? "Follow to unlock content" : user.bio || "This performer has not added a bio yet."}
               </p>
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {!isOwnProfile && (
+                <button
+                  type="button"
+                  className={`${isFollowing ? "btn-secondary" : "btn-primary"} gap-2`}
+                  onClick={handleFollowToggle}
+                  disabled={followUpdating}
+                >
+                  {isFollowing ? <UserMinus className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+                  {followUpdating ? "Updating..." : isFollowing ? "Unfollow" : "Follow"}
+                </button>
+              )}
               {!isOwnProfile && (
                 <button type="button" className="btn-secondary gap-2" onClick={handleLikeToggle}>
                   <Heart className={`h-4 w-4 ${user.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
@@ -518,7 +598,7 @@ const Profile = () => {
                 <div className="rounded-lg border border-slate-200 bg-surface p-4 sm:col-span-2">
                   <div className="flex items-center gap-3 text-sm font-bold text-slate-700">
                     <Lock className="h-5 w-5 text-slate-500" />
-                    Unlock contact to view
+                    Follow or unlock contact to view
                   </div>
                   <button type="button" className="btn-primary mt-3 w-full" onClick={handleUnlockContact} disabled={unlockingContact}>
                     {unlockingContact ? "Unlocking..." : "Unlock contact"}
@@ -554,6 +634,7 @@ const Profile = () => {
                 </button>
               )}
             </div>
+            {followStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{followStatus}</div>}
             {likeStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{likeStatus}</div>}
             {contactError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{contactError}</div>}
             {paymentStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{paymentStatus}</div>}

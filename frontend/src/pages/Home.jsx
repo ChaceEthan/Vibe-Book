@@ -10,7 +10,19 @@ const FeedMedia = ({ item }) => {
   const src = mediaUrl(item.mediaUrl);
 
   if (item.type === "video") {
-    return <video src={src} className="h-full w-full object-cover" muted loop playsInline controls autoPlay preload="metadata" />;
+    return (
+      <video
+        src={src}
+        className="h-full w-full object-cover"
+        muted
+        loop
+        playsInline
+        controls
+        autoPlay
+        preload="metadata"
+        style={{ width: "100%", borderRadius: "12px" }}
+      />
+    );
   }
 
   return <img src={src} alt={item.userId?.name || "VibeBook media"} className="h-full w-full object-cover" />;
@@ -19,6 +31,7 @@ const FeedMedia = ({ item }) => {
 const Home = () => {
   const { isAuthenticated, user: currentUser } = useAuth();
   const [feed, setFeed] = useState([]);
+  const [feedMode, setFeedMode] = useState("for-you");
   const [commentOpen, setCommentOpen] = useState("");
   const [commentText, setCommentText] = useState("");
   const [loading, setLoading] = useState(true);
@@ -30,22 +43,33 @@ const Home = () => {
     setError("");
 
     try {
-      const { data } = await feedApi.get();
+      const { data } = await feedApi.get(feedMode === "following" ? { mode: "following" } : {});
       setFeed(Array.isArray(data?.feed) ? data.feed : []);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to load feed.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [feedMode]);
 
   useEffect(() => {
     loadFeed();
   }, [loadFeed]);
 
   const visibleFeed = useMemo(
-    () => feed.filter((item) => item?.userId?._id !== currentUser?._id),
-    [feed, currentUser?._id]
+    () =>
+      feed.filter((item) => {
+        if (item?.userId?._id === currentUser?._id) {
+          return false;
+        }
+
+        if (feedMode === "following") {
+          return Boolean(item?.userId?.isFollowing);
+        }
+
+        return true;
+      }),
+    [feed, currentUser?._id, feedMode]
   );
 
   const replaceFeedItem = (nextItem) => {
@@ -123,7 +147,29 @@ const Home = () => {
   }
 
   return (
-    <section className="bg-slate-950">
+    <section className="relative bg-slate-950">
+      <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 rounded-lg bg-slate-950/60 p-1 text-xs font-black text-white backdrop-blur">
+        {[
+          { value: "for-you", label: "For You" },
+          { value: "following", label: "Following" },
+        ].map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`rounded-lg px-4 py-2 ${feedMode === option.value ? "bg-brand text-navy" : "text-white/75"}`}
+            onClick={() => {
+              if (option.value === "following" && !isAuthenticated) {
+                navigate("/login");
+                return;
+              }
+
+              setFeedMode(option.value);
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
       <div className="mx-auto h-[calc(100dvh-9rem)] min-h-[560px] max-w-xl snap-y snap-mandatory overflow-y-auto">
         {visibleFeed.length ? (
           visibleFeed.map((item) => {

@@ -7,11 +7,11 @@ const {
   PLATFORM_ACCESS_AMOUNT,
   PLATFORM_ACCESS_CURRENCY,
   buildAccessState,
-  hasPlatformAccess,
 } = require("../utils/accessControl");
 const { removeFiles } = require("../utils/fileCleanup");
+const { addMonetizationScore } = require("../utils/monetization");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
-const { toUploadPath } = require("../utils/storagePaths");
+const { normalizeStoredUploadPath, normalizeStoredUploadPaths, toUploadPath } = require("../utils/storagePaths");
 const {
   normalizeAvailability,
   normalizeGender,
@@ -63,12 +63,32 @@ const hasPaidForProfile = (viewer, profileId) => {
   });
 };
 
+const sameId = (left, right) => {
+  return Boolean(left && right && left.toString() === right.toString());
+};
+
+const hasId = (items, id) => {
+  if (!Array.isArray(items) || !id) {
+    return false;
+  }
+
+  return items.some((item) => sameId(item?._id || item, id));
+};
+
+const viewerFollowsProfile = (viewer, profile) => {
+  if (!viewer || !profile) {
+    return false;
+  }
+
+  return hasId(viewer.following, profile._id) || hasId(profile.followers, viewer._id);
+};
+
 const canViewContact = (viewer, profile) => {
   if (!viewer || !profile) {
     return false;
   }
 
-  return viewer._id.toString() === profile._id.toString() || hasPaidForProfile(viewer, profile._id);
+  return sameId(viewer._id, profile._id) || viewerFollowsProfile(viewer, profile) || hasPaidForProfile(viewer, profile._id);
 };
 
 const hasBookingOrPaymentAccess = async (viewer, profileId) => {
@@ -97,23 +117,30 @@ const hasBookingOrPaymentAccess = async (viewer, profileId) => {
 };
 
 const profileResponse = (user, viewer = null, options = {}) => {
-  const contactUnlocked = Boolean(options.includePrivate || options.contactUnlocked || canViewContact(viewer, user));
+  const isOwnProfile = Boolean(viewer && sameId(viewer._id, user?._id));
+  const isFollowing = viewerFollowsProfile(viewer, user);
+  const paidUnlocked = hasPaidForProfile(viewer, user?._id);
+  const bookingUnlocked = Boolean(options.bookingStarted || options.contactUnlocked);
+  const isUnlocked = Boolean(options.includePrivate || isOwnProfile || isFollowing || paidUnlocked || bookingUnlocked);
+  const contactUnlocked = Boolean(isUnlocked || canViewContact(viewer, user));
   const access = viewer ? buildAccessState(viewer) : null;
-  const storedGallery = Array.isArray(user.gallery) ? user.gallery.filter(Boolean) : [];
+  const storedGallery = normalizeStoredUploadPaths(user.gallery);
   const storedImages = storedGallery.length
     ? storedGallery
-    : Array.isArray(user.images)
-      ? user.images.filter(Boolean)
-      : [];
+    : normalizeStoredUploadPaths(user.images);
   const allImages = storedImages;
-  const storedVideos = Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || [];
-  const profileImage = user.profilePicture || user.profileImage || allImages[0] || DEFAULT_PROFILE_IMAGE_PATH;
-  const fullGalleryUnlocked = Boolean(options.includePrivate || user.isPremium || user.premiumBadge);
-  const visibleImages = fullGalleryUnlocked ? allImages : allImages.slice(0, 3);
+  const storedVideos = normalizeStoredUploadPaths(
+    Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || []
+  );
+  const profileImage =
+    normalizeStoredUploadPath(user.profilePicture || user.profileImage) || allImages[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const visibleImages = isUnlocked ? allImages : [profileImage].filter(Boolean);
   const socialLinks = {
     instagram: user.socialLinks?.instagram || "",
     whatsapp: contactUnlocked ? user.whatsapp || user.whatsappNumber || user.socialLinks?.whatsapp || "" : "",
   };
+  const followerCount = Array.isArray(user.followers) ? user.followers.length : 0;
+  const followingCount = Array.isArray(user.following) ? user.following.length : 0;
 
   return {
     _id: user._id,
@@ -136,9 +163,10 @@ const profileResponse = (user, viewer = null, options = {}) => {
     images: visibleImages,
     gallery: visibleImages,
     galleryImageCount: storedImages.length,
-    videoUrls: storedVideos,
-    videos: storedVideos,
-    bio: user.bio,
+    videoUrls: isUnlocked ? storedVideos : [],
+    videos: isUnlocked ? storedVideos : [],
+    videoCount: storedVideos.length,
+    bio: isUnlocked ? user.bio : "",
     socialLinks,
     availability: user.availability,
     rating: user.averageRating || user.rating || 0,
@@ -155,6 +183,17 @@ const profileResponse = (user, viewer = null, options = {}) => {
     premiumBadge: user.premiumBadge || user.isPremium,
     isVerified: user.isVerified,
     verified: user.isVerified,
+    followers: options.includePrivate ? user.followers || [] : undefined,
+    following: options.includePrivate ? user.following || [] : undefined,
+    followerCount,
+    followingCount,
+    isFollowing,
+    isUnlocked,
+    contentUnlocked: isUnlocked,
+    contentLocked: !isUnlocked,
+    balance: options.includePrivate ? user.balance || 0 : undefined,
+    isMonetized: Boolean(user.isMonetized),
+    monetizationScore: options.includePrivate ? user.monetizationScore || 0 : undefined,
     referralCode: options.includePrivate ? user.referralCode : undefined,
     referralLink: options.includePrivate ? getReferralLink(user.referralCode) : undefined,
     referredUsers: options.includePrivate ? user.referredUsers : undefined,
@@ -195,9 +234,9 @@ const getUserById = async (req, res, next) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const contactUnlocked = await hasBookingOrPaymentAccess(req.user, user._id);
+    const bookingStarted = await hasBookingOrPaymentAccess(req.user, user._id);
 
-    return res.json({ user: profileResponse(user, req.user, { contactUnlocked }) });
+    return res.json({ user: profileResponse(user, req.user, { bookingStarted }) });
   } catch (error) {
     return next(error);
   }
@@ -241,13 +280,17 @@ const searchUsers = async (req, res, next) => {
     if (category) {
       const categoryText = normalizeText(category);
       const exactCategory = User.allowedCategories.find(
-        (allowedCategory) =>
-          allowedCategory.toLowerCase() === categoryText.toLowerCase() ||
-          allowedCategory.toLowerCase().includes(categoryText.toLowerCase())
+        (allowedCategory) => allowedCategory.toLowerCase() === categoryText.toLowerCase()
       );
 
       if (categoryText) {
-        filters.category = new RegExp(escapeRegex(exactCategory || categoryText), "i");
+        if (!exactCategory) {
+          return res.status(400).json({
+            message: `Please choose a valid category: ${User.allowedCategories.join(", ")}`,
+          });
+        }
+
+        filters.category = exactCategory;
       }
     }
 
@@ -449,22 +492,29 @@ const likeProfile = async (req, res, next) => {
       return res.status(400).json({ message: "You cannot like your own profile" });
     }
 
-    const user = await User.findOneAndUpdate(
-      {
-        _id: req.params.id,
-        isBlocked: false,
-        role: { $ne: "admin" },
-      },
+    const existingUser = await User.findOne({
+      _id: req.params.id,
+      isBlocked: false,
+      role: { $ne: "admin" },
+    }).select("-password");
+
+    if (!existingUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const alreadyLiked = hasId(existingUser.likedBy, req.user._id);
+    const user = await User.findByIdAndUpdate(
+      existingUser._id,
       { $addToSet: { likedBy: req.user._id } },
       { returnDocument: "after", runValidators: true }
     ).select("-password");
 
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
     user.likes = Array.isArray(user.likedBy) ? user.likedBy.length : 0;
     await user.save();
+
+    if (!alreadyLiked) {
+      await addMonetizationScore(user._id, "like");
+    }
 
     return res.json({ user: profileResponse(user, req.user), message: "Profile liked" });
   } catch (error) {
@@ -492,6 +542,84 @@ const unlikeProfile = async (req, res, next) => {
     await user.save();
 
     return res.json({ user: profileResponse(user, req.user), message: "Profile unliked" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const followProfile = async (req, res, next) => {
+  try {
+    if (sameId(req.user._id, req.params.id)) {
+      return res.status(400).json({ message: "You cannot follow your own profile" });
+    }
+
+    const target = await User.findOne({
+      _id: req.params.id,
+      isBlocked: false,
+      role: { $ne: "admin" },
+    }).select("-password");
+
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const alreadyFollowing = hasId(req.user.following, target._id) || hasId(target.followers, req.user._id);
+
+    await Promise.all([
+      User.findByIdAndUpdate(req.user._id, { $addToSet: { following: target._id } }, { runValidators: true }),
+      User.findByIdAndUpdate(target._id, { $addToSet: { followers: req.user._id } }, { runValidators: true }),
+    ]);
+
+    if (!alreadyFollowing) {
+      await addMonetizationScore(target._id, "follower");
+    }
+
+    const [viewer, user] = await Promise.all([
+      User.findById(req.user._id).select("-password"),
+      User.findById(target._id).select("-password"),
+    ]);
+
+    return res.json({
+      user: profileResponse(user, viewer),
+      currentUser: profileResponse(viewer, viewer, { includePrivate: true }),
+      message: alreadyFollowing ? "Already following" : "Profile followed",
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const unfollowProfile = async (req, res, next) => {
+  try {
+    if (sameId(req.user._id, req.params.id)) {
+      return res.status(400).json({ message: "You cannot unfollow your own profile" });
+    }
+
+    const target = await User.findOne({
+      _id: req.params.id,
+      isBlocked: false,
+      role: { $ne: "admin" },
+    }).select("-password");
+
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    await Promise.all([
+      User.findByIdAndUpdate(req.user._id, { $pull: { following: target._id } }, { runValidators: true }),
+      User.findByIdAndUpdate(target._id, { $pull: { followers: req.user._id } }, { runValidators: true }),
+    ]);
+
+    const [viewer, user] = await Promise.all([
+      User.findById(req.user._id).select("-password"),
+      User.findById(target._id).select("-password"),
+    ]);
+
+    return res.json({
+      user: profileResponse(user, viewer),
+      currentUser: profileResponse(viewer, viewer, { includePrivate: true }),
+      message: "Profile unfollowed",
+    });
   } catch (error) {
     return next(error);
   }
@@ -590,13 +718,6 @@ const contactUser = async (req, res, next) => {
   try {
     const message = typeof req.body.message === "string" ? req.body.message.trim() : "";
 
-    if (!hasPlatformAccess(req.user)) {
-      return res.status(402).json({
-        message: `Pay ${PLATFORM_ACCESS_AMOUNT} ${PLATFORM_ACCESS_CURRENCY} to unlock contact after your trial`,
-        data: { access: buildAccessState(req.user) },
-      });
-    }
-
     if (!message) {
       return res.status(400).json({ message: "Message is required" });
     }
@@ -612,6 +733,12 @@ const contactUser = async (req, res, next) => {
 
     if (!userToContact) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    const profileUnlocked = canViewContact(req.user, userToContact) || (await hasBookingOrPaymentAccess(req.user, userToContact._id));
+
+    if (!profileUnlocked) {
+      return res.status(403).json({ message: "Follow, pay, or start a booking to contact this profile" });
     }
 
     let notification = { sent: false, reason: "NOT_ATTEMPTED" };
@@ -647,6 +774,8 @@ module.exports = {
   uploadProfileImages,
   uploadProfileVideos,
   payPlatformAccess,
+  followProfile,
+  unfollowProfile,
   likeProfile,
   unlikeProfile,
   unlockProfileContact,

@@ -4,6 +4,7 @@ const User = require("../models/User");
 const { buildAccessState, syncTrialState } = require("../utils/accessControl");
 const generateToken = require("../utils/generateToken");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
+const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
 const {
   normalizeEmail,
   normalizeProfileFields,
@@ -31,9 +32,11 @@ const getReferralLink = (referralCode) => {
 
 const userResponse = (user) => {
   const gallery = Array.isArray(user.gallery) && user.gallery.length ? user.gallery : user.images || [];
-  const images = Array.isArray(gallery) ? gallery.filter(Boolean) : [];
-  const videos = Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || [];
-  const profileImage = user.profilePicture || user.profileImage || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const images = normalizeStoredUploadPaths(gallery);
+  const videos = normalizeStoredUploadPaths(Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || []);
+  const profileImage = normalizeStoredUploadPath(user.profilePicture || user.profileImage) || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const followerCount = Array.isArray(user.followers) ? user.followers.length : 0;
+  const followingCount = Array.isArray(user.following) ? user.following.length : 0;
 
   return {
     _id: user._id,
@@ -66,6 +69,13 @@ const userResponse = (user) => {
     premiumBadge: user.premiumBadge || user.isPremium,
     likes: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
     likeCount: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
+    followers: user.followers || [],
+    following: user.following || [],
+    followerCount,
+    followingCount,
+    balance: user.balance || 0,
+    isMonetized: Boolean(user.isMonetized),
+    monetizationScore: user.monetizationScore || 0,
     isVerified: user.isVerified,
     isBlocked: user.isBlocked,
     language: user.language || "en",

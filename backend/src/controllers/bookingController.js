@@ -2,6 +2,7 @@ const Booking = require("../models/Booking");
 const Message = require("../models/Message");
 const User = require("../models/User");
 const { sendBookingNotification } = require("../utils/emailService");
+const { addMonetizationScore } = require("../utils/monetization");
 const {
   PLATFORM_ACCESS_AMOUNT,
   PLATFORM_ACCESS_CURRENCY,
@@ -196,6 +197,7 @@ const createBooking = async (req, res, next) => {
     });
 
     const notification = await triggerBookingNotifications({ booking, talent, requester: req.user });
+    await addMonetizationScore(talent._id, "booking");
 
     await booking.populate([
       { path: "requester", select: "name role" },
@@ -271,6 +273,7 @@ const sendOffer = async (req, res, next) => {
     });
 
     const notification = await triggerBookingNotifications({ booking, talent, requester: req.user });
+    await addMonetizationScore(talent._id, "booking");
 
     await booking.populate([
       { path: "requester", select: "name role" },

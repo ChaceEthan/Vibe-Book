@@ -171,7 +171,15 @@ const Upload = ({ open, onClose }) => {
             {isImage ? (
               <img src={uploadedUrl ? mediaUrl(uploadedUrl) : preview} alt="" className="max-h-72 w-full object-cover" />
             ) : (
-              <video src={uploadedUrl ? mediaUrl(uploadedUrl) : preview} className="max-h-72 w-full bg-slate-900" controls muted />
+              <video
+                src={uploadedUrl ? mediaUrl(uploadedUrl) : preview}
+                className="max-h-72 bg-slate-900"
+                controls
+                muted
+                playsInline
+                preload="metadata"
+                style={{ width: "100%", borderRadius: "12px" }}
+              />
             )}
           </div>
         )}

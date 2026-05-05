@@ -1,16 +1,28 @@
 const Feed = require("../models/Feed");
 const User = require("../models/User");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
+const { addMonetizationScore } = require("../utils/monetization");
+const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
 const { validateChatMessage } = require("../utils/chatModeration");
 
-const userSelect = "name role category profileImage profilePicture images gallery videos videoUrls averageRating rating likes likedBy isPremium premiumBadge province district createdAt";
+const userSelect = "name role category profileImage profilePicture images gallery videos videoUrls averageRating rating likes likedBy followers following isPremium premiumBadge province district createdAt";
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
 
-const buildProfile = (user) => {
-  const images = Array.isArray(user?.images) && user.images.length ? user.images : user?.gallery || [];
-  const videos = Array.isArray(user?.videos) && user.videos.length ? user.videos : user?.videoUrls || [];
-  const profilePicture = user?.profilePicture || user?.profileImage || images?.[0] || DEFAULT_PROFILE_IMAGE_PATH;
+const hasId = (items, id) => {
+  if (!Array.isArray(items) || !id) {
+    return false;
+  }
+
+  const targetId = idOf(id);
+  return items.some((item) => idOf(item) === targetId);
+};
+
+const buildProfile = (user, viewer = null) => {
+  const images = normalizeStoredUploadPaths(Array.isArray(user?.images) && user.images.length ? user.images : user?.gallery || []);
+  const videos = normalizeStoredUploadPaths(Array.isArray(user?.videos) && user.videos.length ? user.videos : user?.videoUrls || []);
+  const profilePicture = normalizeStoredUploadPath(user?.profilePicture || user?.profileImage) || images?.[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const isFollowing = Boolean(viewer && (hasId(viewer.following, user?._id) || hasId(user?.followers, viewer._id)));
 
   return {
     _id: user?._id,
@@ -25,6 +37,9 @@ const buildProfile = (user) => {
     averageRating: user?.averageRating || user?.rating || 0,
     likes: Array.isArray(user?.likedBy) ? user.likedBy.length : Number(user?.likes || 0),
     likeCount: Array.isArray(user?.likedBy) ? user.likedBy.length : Number(user?.likes || 0),
+    followerCount: Array.isArray(user?.followers) ? user.followers.length : 0,
+    followingCount: Array.isArray(user?.following) ? user.following.length : 0,
+    isFollowing,
     isPremium: user?.isPremium,
     premiumBadge: user?.premiumBadge || user?.isPremium,
     province: user?.province || "",
@@ -39,8 +54,8 @@ const serializeFeedItem = (item, viewer = null, virtual = false) => {
 
   return {
     _id: item._id,
-    userId: buildProfile(user),
-    mediaUrl: item.mediaUrl,
+    userId: buildProfile(user, viewer),
+    mediaUrl: normalizeStoredUploadPath(item.mediaUrl),
     type: item.type,
     likes: virtual ? Number(item.likes || 0) : likedBy.length,
     likeCount: virtual ? Number(item.likes || 0) : likedBy.length,
@@ -53,8 +68,8 @@ const serializeFeedItem = (item, viewer = null, virtual = false) => {
 };
 
 const getUserMedia = (user) => {
-  const videos = Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || [];
-  const images = Array.isArray(user.images) && user.images.length ? user.images : user.gallery || [];
+  const videos = normalizeStoredUploadPaths(Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || []);
+  const images = normalizeStoredUploadPaths(Array.isArray(user.images) && user.images.length ? user.images : user.gallery || []);
 
   return [
     ...videos.filter(Boolean).map((mediaUrl) => ({ mediaUrl, type: "video" })),
@@ -64,6 +79,8 @@ const getUserMedia = (user) => {
 
 const getFeed = async (req, res, next) => {
   try {
+    const followedIds = new Set((req.user?.following || []).map((id) => idOf(id)));
+    const followingOnly = req.query.mode === "following" || req.query.filter === "following";
     const feedDocs = await Feed.find()
       .populate("userId", userSelect)
       .sort({ createdAt: -1 })
@@ -73,7 +90,7 @@ const getFeed = async (req, res, next) => {
     const feedItems = feedDocs
       .filter((item) => item.userId)
       .map((item) => {
-        feedByKey.set(`${idOf(item.userId)}:${item.mediaUrl}`, true);
+        feedByKey.set(`${idOf(item.userId)}:${normalizeStoredUploadPath(item.mediaUrl)}`, true);
         return serializeFeedItem(item, req.user);
       });
 
@@ -117,7 +134,18 @@ const getFeed = async (req, res, next) => {
       });
     });
 
-    feedItems.sort((a, b) => {
+    const filteredFeedItems = followingOnly
+      ? feedItems.filter((item) => followedIds.has(idOf(item.userId?._id)))
+      : feedItems;
+
+    filteredFeedItems.sort((a, b) => {
+      const aFollowed = followedIds.has(idOf(a.userId?._id));
+      const bFollowed = followedIds.has(idOf(b.userId?._id));
+
+      if (aFollowed !== bFollowed) {
+        return aFollowed ? -1 : 1;
+      }
+
       if (a.type !== b.type) {
         return a.type === "video" ? -1 : 1;
       }
@@ -125,7 +153,7 @@ const getFeed = async (req, res, next) => {
       return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
     });
 
-    return res.json({ feed: feedItems });
+    return res.json({ feed: filteredFeedItems });
   } catch (error) {
     return next(error);
   }
@@ -151,6 +179,10 @@ const toggleFeedLike = async (req, res, next) => {
     item.likes = item.likedBy.length;
     await item.save();
     await item.populate("userId", userSelect);
+
+    if (!liked && idOf(item.userId) !== userId) {
+      await addMonetizationScore(item.userId, "like");
+    }
 
     return res.json({ feedItem: serializeFeedItem(item, req.user), message: liked ? "Like removed" : "Liked" });
   } catch (error) {
@@ -193,4 +225,3 @@ module.exports = {
   toggleFeedLike,
   userSelect,
 };
-

@@ -30,10 +30,36 @@ const normalizeStringArray = (value) => {
     .slice(0, 25);
 };
 
+const normalizeMediaPath = (value) => {
+  const mediaPath = normalizeText(value);
+
+  if (!mediaPath) {
+    return "";
+  }
+
+  if (mediaPath.startsWith("/uploads/")) {
+    return mediaPath;
+  }
+
+  try {
+    const parsed = new URL(mediaPath);
+
+    if (parsed.pathname.startsWith("/uploads/")) {
+      return parsed.pathname;
+    }
+
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return mediaPath;
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+};
+
 const normalizeMediaArray = (value, field) => {
-  const values = normalizeStringArray(value).filter((item) => {
-    return item.startsWith("/uploads/") || /^https?:\/\//i.test(item);
-  });
+  const values = normalizeStringArray(value).map(normalizeMediaPath).filter(Boolean);
 
   if (Array.isArray(value) && values.length !== value.filter(Boolean).length) {
     return {
@@ -284,6 +310,7 @@ module.exports = {
   normalizeEmail,
   normalizeGender,
   normalizeLowerText,
+  normalizeMediaPath,
   normalizePrice,
   normalizeProfileFields,
   normalizeRole,

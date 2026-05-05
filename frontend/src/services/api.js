@@ -14,8 +14,10 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
+const getStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
+
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("vibebook_token");
+  const token = getStoredToken();
 
   if (token) {
     config.headers = config.headers || {};
@@ -59,13 +61,15 @@ export const userApi = {
   },
   uploadMedia,
   payAccess: (payload = {}) => api.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
+  follow: (id) => api.post(`/follow/${id}`),
+  unfollow: (id) => api.post(`/unfollow/${id}`),
   likeProfile: (id) => api.post(`/users/${id}/like`),
   unlikeProfile: (id) => api.delete(`/users/${id}/like`),
   deleteMe: () => api.delete("/users/me"),
 };
 
 export const feedApi = {
-  get: () => api.get("/feed"),
+  get: (params = {}) => api.get("/feed", { params }),
   toggleLike: (id) => api.post(`/feed/${id}/like`),
   addComment: (id, payload) => api.post(`/feed/${id}/comments`, payload),
 };
