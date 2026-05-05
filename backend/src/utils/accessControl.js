@@ -69,7 +69,7 @@ const syncTrialState = async (user) => {
     user.trialActive = trialActive;
 
     if (typeof user.save === "function") {
-      await user.save();
+      await user.save({ validateBeforeSave: false });
     }
   }
 

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Camera, MapPin, SlidersHorizontal } from "lucide-react";
+import { MapPin, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { GENDER_OPTIONS, PROFILE_CATEGORIES } from "../constants/profile";
@@ -150,8 +150,7 @@ const Dashboard = () => {
           </label>
         </div>
 
-        <button type="submit" className="btn-primary mt-5 w-full gap-2" disabled={saving}>
-          <Camera className="h-4 w-4" />
+        <button type="submit" className="btn-primary mt-5 w-full" disabled={saving}>
           {saving ? t("saving") : t("saveProfile")}
         </button>
       </form>

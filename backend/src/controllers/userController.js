@@ -510,7 +510,7 @@ const likeProfile = async (req, res, next) => {
     ).select("-password");
 
     user.likes = Array.isArray(user.likedBy) ? user.likedBy.length : 0;
-    await user.save();
+    await user.save({ validateBeforeSave: false });
 
     if (!alreadyLiked) {
       await addMonetizationScore(user._id, "like");
@@ -539,7 +539,7 @@ const unlikeProfile = async (req, res, next) => {
     }
 
     user.likes = Array.isArray(user.likedBy) ? user.likedBy.length : 0;
-    await user.save();
+    await user.save({ validateBeforeSave: false });
 
     return res.json({ user: profileResponse(user, req.user), message: "Profile unliked" });
   } catch (error) {

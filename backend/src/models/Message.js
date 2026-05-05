@@ -12,6 +12,10 @@ const messageSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    receiver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
@@ -25,6 +29,11 @@ const messageSchema = new mongoose.Schema(
       type: String,
       trim: true,
       required: true,
+    },
+    text: {
+      type: String,
+      trim: true,
+      default: "",
     },
     type: {
       type: String,
@@ -49,5 +58,25 @@ const messageSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+messageSchema.pre("validate", function syncMessageAliases(next) {
+  if (!this.recipient && this.receiver) {
+    this.recipient = this.receiver;
+  }
+
+  if (!this.receiver && this.recipient) {
+    this.receiver = this.recipient;
+  }
+
+  if (!this.message && this.text) {
+    this.message = this.text;
+  }
+
+  if (!this.text && this.message) {
+    this.text = this.message;
+  }
+
+  next();
+});
 
 module.exports = mongoose.model("Message", messageSchema);

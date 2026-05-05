@@ -10,6 +10,7 @@ const {
 } = require("../utils/accessControl");
 
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
+const getMessageText = (body = {}) => trimText(body.message || body.text);
 
 const requireMessageAccess = (req, res) => {
   return true;
@@ -39,11 +40,12 @@ const populateMessage = (query) => {
   return query
     .populate("sender", "name role profileImage profilePicture images gallery")
     .populate("recipient", "name role profileImage profilePicture images gallery")
+    .populate("receiver", "name role profileImage profilePicture images gallery")
     .populate("booking", "businessName location offeredPrice offerPrice status createdAt");
 };
 
 const participantFilter = (userId) => ({
-  $or: [{ sender: userId }, { recipient: userId }],
+  $or: [{ sender: userId }, { recipient: userId }, { receiver: userId }],
   hiddenFor: { $ne: userId },
 });
 
@@ -69,8 +71,8 @@ const getInbox = async (req, res, next) => {
 
     messages.forEach((message) => {
       const senderId = idOf(message.sender);
-      const recipientId = idOf(message.recipient);
-      const otherUser = senderId === currentUserId ? message.recipient : message.sender;
+      const recipientId = idOf(message.recipient || message.receiver);
+      const otherUser = senderId === currentUserId ? message.recipient || message.receiver : message.sender;
       const otherUserId = idOf(otherUser);
 
       if (!otherUserId) {
@@ -102,7 +104,7 @@ const getInbox = async (req, res, next) => {
 const getUnreadCount = async (req, res, next) => {
   try {
     const unreadCount = await Message.countDocuments({
-      recipient: req.user._id,
+      $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
       isDraft: false,
       readAt: { $exists: false },
       hiddenFor: { $ne: req.user._id },
@@ -133,7 +135,7 @@ const getConversation = async (req, res, next) => {
     await Message.updateMany(
       {
         sender: otherUser._id,
-        recipient: req.user._id,
+        $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
         isDraft: false,
         readAt: { $exists: false },
       },
@@ -146,7 +148,9 @@ const getConversation = async (req, res, next) => {
         hiddenFor: { $ne: req.user._id },
         $or: [
           { sender: req.user._id, recipient: otherUser._id },
+          { sender: req.user._id, receiver: otherUser._id },
           { sender: otherUser._id, recipient: req.user._id },
+          { sender: otherUser._id, receiver: req.user._id },
         ],
       }).sort({ createdAt: 1 })
     );
@@ -163,7 +167,7 @@ const getConversation = async (req, res, next) => {
 
 const sendDirectMessage = async (req, res, next) => {
   try {
-    const text = trimText(req.body.message);
+    const text = getMessageText(req.body);
 
     if (!text) {
       return res.status(400).json({ message: "Message is required" });
@@ -196,15 +200,21 @@ const sendDirectMessage = async (req, res, next) => {
     const message = await Message.create({
       sender: req.user._id,
       recipient: recipient._id,
+      receiver: recipient._id,
       subject: "VibeBook chat",
       message: text,
+      text,
       type: "reply",
     });
 
     const populatedMessage = await populateMessage(Message.findById(message._id));
     getIo()?.to(recipient._id.toString()).emit("direct:message", populatedMessage);
 
-    return res.status(201).json({ inboxMessage: populatedMessage });
+    return res.status(201).json({
+      message: "Message sent",
+      inboxMessage: populatedMessage,
+      chatMessage: populatedMessage,
+    });
   } catch (error) {
     return next(error);
   }
@@ -243,7 +253,9 @@ const getMessageById = async (req, res, next) => {
       return res.status(404).json({ message: "Message not found" });
     }
 
-    if (message.recipient?._id?.toString() === req.user._id.toString() && !message.readAt) {
+    const recipientId = idOf(message.recipient || message.receiver);
+
+    if (recipientId === req.user._id.toString() && !message.readAt) {
       message.readAt = new Date();
       await message.save();
     }
@@ -260,7 +272,7 @@ const replyToMessage = async (req, res, next) => {
       return null;
     }
 
-    const text = trimText(req.body.message);
+    const text = getMessageText(req.body);
 
     if (!text) {
       return res.status(400).json({ message: "Reply message is required" });
@@ -283,9 +295,11 @@ const replyToMessage = async (req, res, next) => {
     const reply = await Message.create({
       sender: req.user._id,
       recipient,
+      receiver: recipient,
       booking: original.booking,
       subject: original.subject ? `Re: ${original.subject.replace(/^Re:\s*/i, "")}` : "VibeBook reply",
       message: text,
+      text,
       type: "reply",
     });
 
@@ -306,7 +320,7 @@ const markMessageRead = async (req, res, next) => {
     const message = await Message.findOneAndUpdate(
       {
         _id: req.params.id,
-        recipient: req.user._id,
+        $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
         hiddenFor: { $ne: req.user._id },
       },
       { readAt: new Date() },
@@ -332,7 +346,7 @@ const markMessageUnread = async (req, res, next) => {
     const message = await Message.findOneAndUpdate(
       {
         _id: req.params.id,
-        recipient: req.user._id,
+        $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
         hiddenFor: { $ne: req.user._id },
       },
       { $unset: { readAt: "" } },
@@ -352,7 +366,7 @@ const markMessageUnread = async (req, res, next) => {
 const saveDraft = async (req, res, next) => {
   try {
     const recipient = trimText(req.body.recipient || req.body.recipientId);
-    const message = trimText(req.body.message);
+    const message = getMessageText(req.body);
     const subject = trimText(req.body.subject);
 
     if (!recipient || !message) {
@@ -362,8 +376,10 @@ const saveDraft = async (req, res, next) => {
     const draft = await Message.create({
       sender: req.user._id,
       recipient,
+      receiver: recipient,
       subject,
       message,
+      text: message,
       type: "draft",
       isDraft: true,
     });
@@ -381,6 +397,12 @@ const updateDraft = async (req, res, next) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body, "message")) {
       updates.message = trimText(req.body.message);
+      updates.text = updates.message;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "text") && !Object.prototype.hasOwnProperty.call(req.body, "message")) {
+      updates.text = trimText(req.body.text);
+      updates.message = updates.text;
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "subject")) {

@@ -14,9 +14,11 @@ const {
 } = require("../middleware/uploadMiddleware");
 const { removeFiles } = require("../utils/fileCleanup");
 const { toUploadPath } = require("../utils/storagePaths");
+const { getMp4DurationSeconds } = require("../utils/videoDuration");
 const { serializeFeedItem, userSelect } = require("../controllers/feedController");
 
 const router = express.Router();
+const MAX_VIDEO_SECONDS = 60;
 
 const buildUploadedFiles = (files = []) => {
   return files.map((file) => ({
@@ -48,6 +50,15 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     if (type === "image" && file.size > maxImageSize) {
       await removeFiles([file]);
       return res.status(400).json({ message: "Images must be under 5MB" });
+    }
+
+    if (type === "video") {
+      const duration = await getMp4DurationSeconds(file.path);
+
+      if (duration && duration > MAX_VIDEO_SECONDS) {
+        await removeFiles([file]);
+        return res.status(400).json({ message: "Videos must be 60 seconds or shorter" });
+      }
     }
 
     const url = toUploadPath(file, type === "video" ? "videos" : "images");

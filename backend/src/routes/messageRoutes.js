@@ -28,9 +28,11 @@ router.patch("/drafts/:id", updateDraft);
 router.get("/conversation/:userId", getConversation);
 router.post("/conversation/:userId", sendDirectMessage);
 router.post("/", sendDirectMessage);
-router.get("/:id", getMessageById);
+router.get("/id/:id", getMessageById);
 router.post("/:id/reply", replyToMessage);
 router.patch("/:id/read", markMessageRead);
 router.patch("/:id/unread", markMessageUnread);
+router.get("/:userId", getConversation);
+router.post("/:userId", sendDirectMessage);
 
 module.exports = router;

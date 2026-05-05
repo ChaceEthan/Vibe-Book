@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "build": "node -e \"require('./src/app'); console.log('backend build ok')\""
   },
   "repository": {
     "type": "git",
