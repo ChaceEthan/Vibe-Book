@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 
+const Booking = require("../models/Booking");
 const User = require("../models/User");
 const { sendContactNotification } = require("../utils/emailService");
 const {
@@ -23,7 +24,8 @@ const { getMp4DurationSeconds } = require("../utils/videoDuration");
 
 const CONTACT_UNLOCK_PRICE = PLATFORM_ACCESS_AMOUNT;
 const CONTACT_UNLOCK_CURRENCY = PLATFORM_ACCESS_CURRENCY;
-const MAX_IMAGES_PER_USER = 5;
+const MAX_IMAGES_PER_USER = 3;
+const FREE_VIDEO_LIMIT = 1;
 const MAX_VIDEO_SECONDS = 60;
 const searchRoleAliases = {
   djs: "dj",
@@ -66,16 +68,46 @@ const canViewContact = (viewer, profile) => {
     return false;
   }
 
-  return viewer._id.toString() === profile._id.toString() || hasPlatformAccess(viewer) || hasPaidForProfile(viewer, profile._id);
+  return viewer._id.toString() === profile._id.toString() || hasPaidForProfile(viewer, profile._id);
+};
+
+const hasBookingOrPaymentAccess = async (viewer, profileId) => {
+  if (!viewer || !profileId) {
+    return false;
+  }
+
+  const booking = await Booking.findOne({
+    $and: [
+      {
+        $or: [
+          { requester: viewer._id, talent: profileId },
+          { requester: profileId, talent: viewer._id },
+        ],
+      },
+      {
+        $or: [
+          { paymentStatus: "paid" },
+          { status: { $in: ["pending", "accepted", "completed"] } },
+        ],
+      },
+    ],
+  }).select("_id");
+
+  return Boolean(booking);
 };
 
 const profileResponse = (user, viewer = null, options = {}) => {
-  const contactUnlocked = Boolean(options.includePrivate || canViewContact(viewer, user));
+  const contactUnlocked = Boolean(options.includePrivate || options.contactUnlocked || canViewContact(viewer, user));
   const access = viewer ? buildAccessState(viewer) : null;
-  const storedImages = Array.isArray(user.images) ? user.images.filter(Boolean) : [];
-  const allImages = storedImages.length ? storedImages : [DEFAULT_PROFILE_IMAGE_PATH];
+  const storedGallery = Array.isArray(user.gallery) ? user.gallery.filter(Boolean) : [];
+  const storedImages = storedGallery.length
+    ? storedGallery
+    : Array.isArray(user.images)
+      ? user.images.filter(Boolean)
+      : [];
+  const allImages = storedImages;
   const storedVideos = Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || [];
-  const profileImage = user.profileImage || allImages[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const profileImage = user.profilePicture || user.profileImage || allImages[0] || DEFAULT_PROFILE_IMAGE_PATH;
   const fullGalleryUnlocked = Boolean(options.includePrivate || user.isPremium || user.premiumBadge);
   const visibleImages = fullGalleryUnlocked ? allImages : allImages.slice(0, 3);
   const socialLinks = {
@@ -99,16 +131,25 @@ const profileResponse = (user, viewer = null, options = {}) => {
     province: user.province,
     district: user.district,
     profileImage,
+    profilePicture: profileImage,
     images: visibleImages,
+    gallery: visibleImages,
     galleryImageCount: storedImages.length,
     videoUrls: storedVideos,
     videos: storedVideos,
     bio: user.bio,
     socialLinks,
     availability: user.availability,
-    rating: user.averageRating,
-    averageRating: user.averageRating,
+    rating: user.averageRating || user.rating || 0,
+    averageRating: user.averageRating || user.rating || 0,
     ratings: user.ratings,
+    likes: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
+    likeCount: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
+    likedByViewer: Boolean(
+      viewer &&
+        Array.isArray(user.likedBy) &&
+        user.likedBy.some((likedUserId) => likedUserId.toString() === viewer._id.toString())
+    ),
     isPremium: user.isPremium,
     premiumBadge: user.premiumBadge || user.isPremium,
     isVerified: user.isVerified,
@@ -151,7 +192,9 @@ const getUserById = async (req, res, next) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    return res.json({ user: profileResponse(user, req.user) });
+    const contactUnlocked = await hasBookingOrPaymentAccess(req.user, user._id);
+
+    return res.json({ user: profileResponse(user, req.user, { contactUnlocked }) });
   } catch (error) {
     return next(error);
   }
@@ -285,7 +328,11 @@ const uploadProfileImages = async (req, res, next) => {
       return res.status(400).json({ message: "At least one image file is required" });
     }
 
-    const currentImages = Array.isArray(req.user.images) ? req.user.images : [];
+    const currentImages = Array.isArray(req.user.gallery) && req.user.gallery.length
+      ? req.user.gallery
+      : Array.isArray(req.user.images)
+        ? req.user.images
+        : [];
 
     const isPremium = Boolean(req.user.isPremium || req.user.premiumBadge);
     if (!isPremium && currentImages.length + files.length > MAX_IMAGES_PER_USER) {
@@ -298,7 +345,9 @@ const uploadProfileImages = async (req, res, next) => {
       req.user._id,
       {
         images: isPremium ? [...currentImages, ...imagePaths] : [...currentImages, ...imagePaths].slice(0, MAX_IMAGES_PER_USER),
-        profileImage: req.user.profileImage || imagePaths[0],
+        gallery: isPremium ? [...currentImages, ...imagePaths] : [...currentImages, ...imagePaths].slice(0, MAX_IMAGES_PER_USER),
+        profileImage: req.user.profileImage || req.user.profilePicture || imagePaths[0],
+        profilePicture: req.user.profilePicture || req.user.profileImage || imagePaths[0],
       },
       { returnDocument: "after", runValidators: true }
     ).select("-password");
@@ -319,20 +368,11 @@ const uploadProfileImage = async (req, res, next) => {
     }
 
     const imagePath = toUploadPath(file, "images");
-    const currentImages = Array.isArray(req.user.images) ? req.user.images : [];
-    const isPremium = Boolean(req.user.isPremium || req.user.premiumBadge);
-    const nextImages = currentImages.includes(imagePath) ? currentImages : [imagePath, ...currentImages];
-
-    if (!isPremium && nextImages.length > MAX_IMAGES_PER_USER) {
-      await removeFiles([file]);
-      return res.status(400).json({ message: `Free profiles can have a maximum of ${MAX_IMAGES_PER_USER} images` });
-    }
-
     const user = await User.findByIdAndUpdate(
       req.user._id,
       {
         profileImage: imagePath,
-        images: isPremium ? nextImages : nextImages.slice(0, MAX_IMAGES_PER_USER),
+        profilePicture: imagePath,
       },
       { returnDocument: "after", runValidators: true }
     ).select("-password");
@@ -367,6 +407,12 @@ const uploadProfileVideos = async (req, res, next) => {
         ? req.user.videoUrls
         : [];
 
+    const isPremium = Boolean(req.user.isPremium || req.user.premiumBadge);
+    if (!isPremium && currentVideos.length + files.length > FREE_VIDEO_LIMIT) {
+      await removeFiles(files);
+      return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 60 seconds` });
+    }
+
     const videoPaths = files.map((file) => toUploadPath(file, "videos"));
     const nextVideos = [...currentVideos, ...videoPaths];
     const user = await User.findByIdAndUpdate(
@@ -381,6 +427,60 @@ const uploadProfileVideos = async (req, res, next) => {
     return res.status(201).json({ user: profileResponse(user, user, { includePrivate: true }) });
   } catch (error) {
     await removeFiles(req.files || []);
+    return next(error);
+  }
+};
+
+const likeProfile = async (req, res, next) => {
+  try {
+    if (req.user._id.toString() === req.params.id) {
+      return res.status(400).json({ message: "You cannot like your own profile" });
+    }
+
+    const user = await User.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        isBlocked: false,
+        role: { $ne: "admin" },
+      },
+      { $addToSet: { likedBy: req.user._id } },
+      { returnDocument: "after", runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.likes = Array.isArray(user.likedBy) ? user.likedBy.length : 0;
+    await user.save();
+
+    return res.json({ user: profileResponse(user, req.user), message: "Profile liked" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const unlikeProfile = async (req, res, next) => {
+  try {
+    const user = await User.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        isBlocked: false,
+        role: { $ne: "admin" },
+      },
+      { $pull: { likedBy: req.user._id } },
+      { returnDocument: "after", runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.likes = Array.isArray(user.likedBy) ? user.likedBy.length : 0;
+    await user.save();
+
+    return res.json({ user: profileResponse(user, req.user), message: "Profile unliked" });
+  } catch (error) {
     return next(error);
   }
 };
@@ -530,6 +630,8 @@ module.exports = {
   uploadProfileImages,
   uploadProfileVideos,
   payPlatformAccess,
+  likeProfile,
+  unlikeProfile,
   unlockProfileContact,
   contactUser,
 };

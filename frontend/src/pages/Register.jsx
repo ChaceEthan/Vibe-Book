@@ -155,8 +155,9 @@ const Register = () => {
           </label>
 
           <label className="space-y-2">
-            <span className="label">Price</span>
+            <span className="label">Starting Price (Negotiable)</span>
             <input className="field" type="number" min="0" name="price" value={form.price} onChange={handleChange} />
+            <span className="text-xs text-slate-500">Final price is agreed between client and talent after negotiation.</span>
           </label>
 
           <label className="space-y-2">

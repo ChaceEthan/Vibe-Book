@@ -3,11 +3,13 @@ const User = require("../models/User");
 const calculateAverageRating = (user) => {
   if (!user.ratings.length) {
     user.averageRating = 0;
+    user.rating = 0;
     return user.averageRating;
   }
 
   const total = user.ratings.reduce((sum, rating) => sum + rating.value, 0);
   user.averageRating = Math.round((total / user.ratings.length) * 10) / 10;
+  user.rating = user.averageRating;
   return user.averageRating;
 };
 

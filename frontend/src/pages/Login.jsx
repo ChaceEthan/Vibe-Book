@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { useState } from "react";
-import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 
@@ -10,7 +10,6 @@ const Login = () => {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
   if (isAuthenticated) {
     return <Navigate to="/dashboard" replace />;
@@ -27,9 +26,7 @@ const Login = () => {
 
     try {
       await login(form);
-      const from = location.state?.from;
-      const redirectTo = from ? `${from.pathname}${from.search || ""}` : "/dashboard";
-      navigate(redirectTo, { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Login failed. Please check your details.");
     } finally {

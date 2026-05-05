@@ -15,12 +15,12 @@ const Search = () => {
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [activeProvince, setActiveProvince] = useState("");
 
   const initialFilters = useMemo(
     () => ({
       gender: searchParams.get("gender") || "",
       category: searchParams.get("category") || "",
-      type: searchParams.get("type") || "",
       province: searchParams.get("province") || "",
       district: searchParams.get("district") || "",
     }),
@@ -30,6 +30,8 @@ const Search = () => {
   const fetchUsers = useCallback(async (filters = initialFilters) => {
     setLoading(true);
     setError("");
+
+    setActiveProvince(filters.province);
 
     try {
       const params = Object.fromEntries(
@@ -57,7 +59,7 @@ const Search = () => {
           <p className="text-sm font-semibold uppercase text-brand">Search</p>
           <h1 className="mt-2 text-3xl font-black text-navy">Find talent for your next event</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Browse performers and crews by gender, category, booking type, province, and district.
+            Browse performers and crews by province, district, category, and gender.
           </p>
         </div>
         <p className="text-sm font-semibold text-slate-500">{users.length} profiles found</p>
@@ -84,7 +86,7 @@ const Search = () => {
       {!loading && !users.length && !error && (
         <div className="mt-8 rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
           <h2 className="text-lg font-bold text-navy">No profiles found</h2>
-          <p className="mt-2 text-sm text-slate-600">Try clearing filters or searching a broader category.</p>
+          <p className="mt-2 text-sm text-slate-600">Try a broader category, district, or province.</p>
         </div>
       )}
     </section>

@@ -6,6 +6,8 @@ const {
   getUserById,
   searchUsers,
   payPlatformAccess,
+  likeProfile,
+  unlikeProfile,
   unlockProfileContact,
   updateProfile,
   uploadProfileImage,
@@ -29,6 +31,8 @@ router.post("/profile/videos", authMiddleware, uploadVideos, uploadProfileVideos
 router.put("/update", authMiddleware, updateProfile);
 router.patch("/update", authMiddleware, updateProfile);
 router.post("/pay-access", authMiddleware, payPlatformAccess);
+router.post("/:id/like", authMiddleware, likeProfile);
+router.delete("/:id/like", authMiddleware, unlikeProfile);
 router.post("/:id/unlock-contact", authMiddleware, unlockProfileContact);
 router.post("/:id/contact", authMiddleware, contactUser);
 router.get("/:id", optionalAuthMiddleware, getUserById);

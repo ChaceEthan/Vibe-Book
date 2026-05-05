@@ -1,3 +1,4 @@
+// @ts-nocheck
 const Rule = require("../models/Rule");
 const User = require("../models/User");
 const Booking = require("../models/Booking");

@@ -1,13 +1,12 @@
 // @ts-nocheck
 import { useEffect, useState } from "react";
 
-import { GENDER_OPTIONS, PROFILE_CATEGORIES, TALENT_TYPES } from "../constants/profile";
+import { GENDER_OPTIONS, PROFILE_CATEGORIES } from "../constants/profile";
 import { RWANDA_PROVINCES, getDistrictsForProvince } from "../constants/rwanda";
 
 const defaultFilters = {
   gender: "",
   category: "",
-  type: "",
   province: "",
   district: "",
 };
@@ -37,7 +36,7 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
 
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border border-slate-200 bg-white p-4 shadow-soft">
-      <div className="grid gap-4 md:grid-cols-6">
+      <div className="grid gap-4 md:grid-cols-5">
         <label className="space-y-2">
           <span className="label">Gender</span>
           <select className="field" value={filters.gender} onChange={(event) => updateField("gender", event.target.value)}>
@@ -63,18 +62,6 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
         </label>
 
         <label className="space-y-2">
-          <span className="label">Type</span>
-          <select className="field" value={filters.type} onChange={(event) => updateField("type", event.target.value)}>
-            <option value="">Any type</option>
-            {TALENT_TYPES.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="space-y-2">
           <span className="label">Province</span>
           <select
             className="field"
@@ -84,7 +71,7 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
               updateField("district", "");
             }}
           >
-            <option value="">Any province</option>
+            <option value="">Select province</option>
             {RWANDA_PROVINCES.map((province) => (
               <option key={province} value={province}>
                 {province}
@@ -98,6 +85,7 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
           <select
             className="field"
             value={filters.district}
+            disabled={!filters.province}
             onChange={(event) => updateField("district", event.target.value)}
           >
             <option value="">Any district</option>

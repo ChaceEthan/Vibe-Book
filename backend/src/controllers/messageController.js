@@ -1,4 +1,7 @@
 const Message = require("../models/Message");
+const Booking = require("../models/Booking");
+const User = require("../models/User");
+const { getIo, isUserOnline } = require("../socket");
 const {
   PLATFORM_ACCESS_AMOUNT,
   PLATFORM_ACCESS_CURRENCY,
@@ -9,21 +12,33 @@ const {
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
 
 const requireMessageAccess = (req, res) => {
-  if (hasPlatformAccess(req.user)) {
-    return true;
+  return true;
+};
+
+const hasBookingAccessBetweenUsers = async (currentUserId, otherUserId) => {
+  if (!otherUserId) {
+    return false;
   }
 
-  res.status(402).json({
-    message: `Pay ${PLATFORM_ACCESS_AMOUNT} ${PLATFORM_ACCESS_CURRENCY} to open messages after your trial`,
-    data: { access: buildAccessState(req.user) },
-  });
-  return false;
+  const booking = await Booking.findOne({
+    $or: [
+      { requester: currentUserId, talent: otherUserId },
+      { requester: otherUserId, talent: currentUserId },
+    ],
+    status: { $ne: "cancelled" },
+  }).select("_id");
+
+  return Boolean(booking);
+};
+
+const requireConversationAccess = async (req, res, otherUserId) => {
+  return true;
 };
 
 const populateMessage = (query) => {
   return query
-    .populate("sender", "name role profileImage images")
-    .populate("recipient", "name role profileImage images")
+    .populate("sender", "name role profileImage profilePicture images gallery")
+    .populate("recipient", "name role profileImage profilePicture images gallery")
     .populate("booking", "businessName location offeredPrice offerPrice status createdAt");
 };
 
@@ -31,6 +46,10 @@ const participantFilter = (userId) => ({
   $or: [{ sender: userId }, { recipient: userId }],
   hiddenFor: { $ne: userId },
 });
+
+const idOf = (value) => {
+  return value?._id?.toString?.() || value?.toString?.() || "";
+};
 
 const getInbox = async (req, res, next) => {
   try {
@@ -40,13 +59,152 @@ const getInbox = async (req, res, next) => {
 
     const messages = await populateMessage(
       Message.find({
-        recipient: req.user._id,
+        ...participantFilter(req.user._id),
         isDraft: false,
-        hiddenFor: { $ne: req.user._id },
       }).sort({ createdAt: -1 })
     );
 
-    return res.json({ messages });
+    const conversationsByUser = new Map();
+    const currentUserId = req.user._id.toString();
+
+    messages.forEach((message) => {
+      const senderId = idOf(message.sender);
+      const recipientId = idOf(message.recipient);
+      const otherUser = senderId === currentUserId ? message.recipient : message.sender;
+      const otherUserId = idOf(otherUser);
+
+      if (!otherUserId) {
+        return;
+      }
+
+      const existing = conversationsByUser.get(otherUserId);
+      const isUnread = recipientId === currentUserId && !message.readAt;
+
+      if (existing) {
+        existing.unreadCount += isUnread ? 1 : 0;
+        return;
+      }
+
+      conversationsByUser.set(otherUserId, {
+        user: otherUser,
+        lastMessage: message,
+        unreadCount: isUnread ? 1 : 0,
+        online: isUserOnline(otherUserId),
+      });
+    });
+
+    return res.json({ messages, conversations: Array.from(conversationsByUser.values()) });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getUnreadCount = async (req, res, next) => {
+  try {
+    const unreadCount = await Message.countDocuments({
+      recipient: req.user._id,
+      isDraft: false,
+      readAt: { $exists: false },
+      hiddenFor: { $ne: req.user._id },
+    });
+
+    return res.json({ unreadCount });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getConversation = async (req, res, next) => {
+  try {
+    const otherUser = await User.findOne({
+      _id: req.params.userId,
+      isBlocked: false,
+      role: { $ne: "admin" },
+    }).select("name role profileImage profilePicture images gallery");
+
+    if (!otherUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!(await requireConversationAccess(req, res, otherUser._id))) {
+      return null;
+    }
+
+    await Message.updateMany(
+      {
+        sender: otherUser._id,
+        recipient: req.user._id,
+        isDraft: false,
+        readAt: { $exists: false },
+      },
+      { readAt: new Date() }
+    );
+
+    const messages = await populateMessage(
+      Message.find({
+        isDraft: false,
+        hiddenFor: { $ne: req.user._id },
+        $or: [
+          { sender: req.user._id, recipient: otherUser._id },
+          { sender: otherUser._id, recipient: req.user._id },
+        ],
+      }).sort({ createdAt: 1 })
+    );
+
+    return res.json({
+      messages,
+      otherUser,
+      online: isUserOnline(otherUser._id),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const sendDirectMessage = async (req, res, next) => {
+  try {
+    const text = trimText(req.body.message);
+
+    if (!text) {
+      return res.status(400).json({ message: "Message is required" });
+    }
+
+    const recipientId = req.params.userId || req.body.recipientId || req.body.recipient || req.body.userId;
+
+    if (!recipientId) {
+      return res.status(400).json({ message: "Recipient user id is required" });
+    }
+
+    if (req.user._id.toString() === recipientId) {
+      return res.status(400).json({ message: "You cannot message yourself" });
+    }
+
+    const recipient = await User.findOne({
+      _id: recipientId,
+      isBlocked: false,
+      role: { $ne: "admin" },
+    }).select("name role profileImage profilePicture images gallery");
+
+    if (!recipient) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (!(await requireConversationAccess(req, res, recipient._id))) {
+      return null;
+    }
+
+    const message = await Message.create({
+      sender: req.user._id,
+      recipient: recipient._id,
+      subject: "VibeBook chat",
+      message: text,
+      type: "reply",
+    });
+
+    const populatedMessage = await populateMessage(Message.findById(message._id));
+    getIo()?.to(recipient._id.toString()).emit("direct:message", populatedMessage);
+
+    return res.status(201).json({ inboxMessage: populatedMessage });
   } catch (error) {
     return next(error);
   }
@@ -259,10 +417,13 @@ const updateDraft = async (req, res, next) => {
 module.exports = {
   getDrafts,
   getInbox,
+  getConversation,
   getMessageById,
+  getUnreadCount,
   markMessageRead,
   markMessageUnread,
   replyToMessage,
   saveDraft,
+  sendDirectMessage,
   updateDraft,
 };

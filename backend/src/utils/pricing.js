@@ -1,3 +1,4 @@
+// @ts-nocheck
 const BOOKING_ACCESS_FEE = 1000;
 const BOOKING_ACCESS_CURRENCY = "RWF";
 

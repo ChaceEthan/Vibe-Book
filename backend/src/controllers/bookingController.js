@@ -30,6 +30,15 @@ const parsePositiveNumber = (value) => {
   return Number.isFinite(amount) && amount > 0 ? amount : undefined;
 };
 
+const parseDurationValue = (value) => {
+  const duration = Number(value);
+  return Number.isFinite(duration) && duration > 0 ? duration : undefined;
+};
+
+const parseDurationUnit = (value) => {
+  return value === "hours" ? "hours" : "days";
+};
+
 const requireBookingAccess = (req, res) => {
   if (hasPlatformAccess(req.user)) {
     return true;
@@ -169,6 +178,9 @@ const createBooking = async (req, res, next) => {
       userName: trimText(req.body.userName) || req.user.name,
       businessName: trimText(req.body.businessName),
       location: trimText(req.body.location),
+      eventType: trimText(req.body.eventType),
+      durationValue: parseDurationValue(req.body.durationValue || req.body.eventDuration),
+      durationUnit: parseDurationUnit(req.body.durationUnit),
       eventDate: startDate,
       startDate,
       endDate,
@@ -176,6 +188,8 @@ const createBooking = async (req, res, next) => {
       message: trimText(req.body.message),
       offerPrice: parsePositiveNumber(req.body.offerPrice || req.body.offeredPrice),
       offeredPrice: parsePositiveNumber(req.body.offeredPrice || req.body.offerPrice),
+      finalAgreedPrice: parsePositiveNumber(req.body.finalAgreedPrice),
+      finalPriceStatus: parsePositiveNumber(req.body.finalAgreedPrice) ? "agreed" : "pending_negotiation",
       paymentStatus: "pending",
       amount: getBookingAccessAmount(talent.role),
       currency: BOOKING_ACCESS_CURRENCY,
@@ -239,6 +253,9 @@ const sendOffer = async (req, res, next) => {
       userName: trimText(req.body.userName) || req.user.name,
       businessName: trimText(req.body.businessName),
       location: trimText(req.body.location),
+      eventType: trimText(req.body.eventType),
+      durationValue: parseDurationValue(req.body.durationValue || req.body.eventDuration),
+      durationUnit: parseDurationUnit(req.body.durationUnit),
       eventDate: startDate,
       startDate,
       endDate,
@@ -246,6 +263,8 @@ const sendOffer = async (req, res, next) => {
       message,
       offerPrice,
       offeredPrice: offerPrice,
+      finalAgreedPrice: parsePositiveNumber(req.body.finalAgreedPrice),
+      finalPriceStatus: parsePositiveNumber(req.body.finalAgreedPrice) ? "agreed" : "pending_negotiation",
       paymentStatus: "pending",
       amount: getBookingAccessAmount(talent.role),
       currency: BOOKING_ACCESS_CURRENCY,
@@ -354,6 +373,11 @@ const updateBookingStatus = async (req, res, next) => {
     }
 
     booking.status = status;
+    const finalAgreedPrice = parsePositiveNumber(req.body.finalAgreedPrice);
+    if (finalAgreedPrice) {
+      booking.finalAgreedPrice = finalAgreedPrice;
+      booking.finalPriceStatus = "agreed";
+    }
     await booking.save();
     await booking.populate([
       { path: "requester", select: "name role" },

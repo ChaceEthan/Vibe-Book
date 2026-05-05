@@ -21,33 +21,29 @@ const { ensureUploadFolders, uploadRoot } = require("./middleware/uploadMiddlewa
 const app = express();
 ensureUploadFolders();
 
-const getAllowedOrigins = () => {
-  const configuredOrigins = [
-    process.env.FRONTEND_URL,
-    process.env.CLIENT_URL,
-    process.env.CORS_ORIGIN,
-  ]
-    .filter(Boolean)
-    .flatMap((value) => value.split(","))
-    .map((value) => value.trim())
-    .filter(Boolean);
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:3000",
+  "https://vibe-book-kappa.vercel.app",
+];
 
-  return [...new Set(configuredOrigins)];
-};
+if (process.env.CLIENT_URL && !allowedOrigins.includes(process.env.CLIENT_URL)) {
+  allowedOrigins.push(process.env.CLIENT_URL);
+}
 
-const allowedOrigins = getAllowedOrigins();
-const corsOptions = {
-  credentials: true,
-  origin(origin, callback) {
-    if (!origin || !allowedOrigins.length || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error("Not allowed by CORS"));
-  },
-};
-
-app.use(cors(corsOptions));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS BLOCKED: ${origin}`));
+      }
+    },
+    credentials: true,
+  })
+);
 app.use("/uploads", express.static("uploads"));
 app.use("/uploads", express.static(uploadRoot));
 app.use(express.json());

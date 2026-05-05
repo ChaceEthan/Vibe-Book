@@ -6,7 +6,7 @@ const http = require("http");
 const connectDB = require("./src/config/db");
 const { initSocket } = require("./src/socket");
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
 
 const logError = (label, error) => {

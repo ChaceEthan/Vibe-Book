@@ -1,3 +1,4 @@
+// @ts-nocheck
 const VisitorStat = require("../models/VisitorStat");
 
 const seenVisitors = new Set();

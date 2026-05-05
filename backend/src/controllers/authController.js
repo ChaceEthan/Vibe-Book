@@ -30,9 +30,10 @@ const getReferralLink = (referralCode) => {
 };
 
 const userResponse = (user) => {
-  const images = Array.isArray(user.images) && user.images.length ? user.images : [DEFAULT_PROFILE_IMAGE_PATH];
+  const gallery = Array.isArray(user.gallery) && user.gallery.length ? user.gallery : user.images || [];
+  const images = Array.isArray(gallery) ? gallery.filter(Boolean) : [];
   const videos = Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || [];
-  const profileImage = user.profileImage || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const profileImage = user.profilePicture || user.profileImage || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
 
   return {
     _id: user._id,
@@ -50,15 +51,20 @@ const userResponse = (user) => {
     province: user.province,
     district: user.district,
     profileImage,
+    profilePicture: profileImage,
     images,
+    gallery: images,
     videoUrls: videos,
     videos,
     bio: user.bio,
     socialLinks: user.socialLinks,
     availability: user.availability,
-    averageRating: user.averageRating,
+    rating: user.averageRating || user.rating || 0,
+    averageRating: user.averageRating || user.rating || 0,
     isPremium: user.isPremium,
     premiumBadge: user.premiumBadge || user.isPremium,
+    likes: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
+    likeCount: Array.isArray(user.likedBy) ? user.likedBy.length : Number(user.likes || 0),
     isVerified: user.isVerified,
     isBlocked: user.isBlocked,
     referralCode: user.referralCode,

@@ -27,6 +27,20 @@ const bookingSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    eventType: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    durationValue: {
+      type: Number,
+      min: 0,
+    },
+    durationUnit: {
+      type: String,
+      enum: ["hours", "days"],
+      default: "days",
+    },
     eventDate: {
       type: Date,
     },
@@ -53,6 +67,15 @@ const bookingSchema = new mongoose.Schema(
     offeredPrice: {
       type: Number,
       min: 0,
+    },
+    finalAgreedPrice: {
+      type: Number,
+      min: 0,
+    },
+    finalPriceStatus: {
+      type: String,
+      enum: ["pending_negotiation", "agreed"],
+      default: "pending_negotiation",
     },
     whatsappLink: {
       type: String,

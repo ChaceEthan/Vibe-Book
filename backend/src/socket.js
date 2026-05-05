@@ -13,6 +13,10 @@ const getDateKey = () => new Date().toISOString().slice(0, 10);
 
 const getOnlineUsersCount = () => onlineUsers.size;
 
+const isUserOnline = (userId) => {
+  return onlineUsers.has(userId?.toString());
+};
+
 const emitStats = async () => {
   if (!ioInstance) {
     return;
@@ -71,6 +75,7 @@ const initSocket = (server, corsOptions = {}) => {
   ioInstance.on("connection", async (socket) => {
     onlineUsers.set(socket.user._id.toString(), socket.id);
     socket.join("global");
+    socket.join(socket.user._id.toString());
     await emitStats();
 
     socket.on("global:send", async (payload = {}, callback) => {
@@ -111,4 +116,5 @@ module.exports = {
   getIo,
   getOnlineUsersCount,
   initSocket,
+  isUserOnline,
 };

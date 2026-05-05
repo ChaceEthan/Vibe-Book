@@ -88,7 +88,16 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: "",
   },
+  profilePicture: {
+    type: String,
+    trim: true,
+    default: "",
+  },
   images: {
+    type: [String],
+    default: [],
+  },
+  gallery: {
     type: [String],
     default: [],
   },
@@ -236,6 +245,21 @@ const userSchema = new mongoose.Schema({
   averageRating: {
     type: Number,
     default: 0,
+  },
+  rating: {
+    type: Number,
+    default: 0,
+  },
+  likedBy: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  likes: {
+    type: Number,
+    default: 0,
+    min: 0,
   },
   createdAt: {
     type: Date,

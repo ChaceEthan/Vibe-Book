@@ -6,6 +6,10 @@ const {
   getGlobalMessages,
   sendGlobalMessage,
 } = require("../controllers/chatController");
+const {
+  getConversation,
+  sendDirectMessage,
+} = require("../controllers/messageController");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -16,5 +20,7 @@ router.get("/global", getGlobalMessages);
 router.post("/global", sendGlobalMessage);
 router.delete("/global/me", clearMyChatView);
 router.get("/stats", getChatStats);
+router.get("/:userId", getConversation);
+router.post("/:userId", sendDirectMessage);
 
 module.exports = router;

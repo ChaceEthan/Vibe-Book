@@ -1,7 +1,7 @@
 // @ts-nocheck
 import axios from "axios";
 
-const API_ROOT = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://localhost:5000" : "");
+const API_ROOT = import.meta.env.DEV ? "http://localhost:5000" : import.meta.env.VITE_API_URL || "";
 const API = API_ROOT ? `${API_ROOT.replace(/\/+$/, "")}/api` : "";
 const API_BASE_URL = API.replace(/\/api\/api$/i, "/api");
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
@@ -66,6 +66,8 @@ export const userApi = {
   },
   payAccess: (payload = {}) => api.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
   unlockContact: (id, payload) => api.post(`/users/${id}/unlock-contact`, payload),
+  likeProfile: (id) => api.post(`/users/${id}/like`),
+  unlikeProfile: (id) => api.delete(`/users/${id}/like`),
 };
 
 export const bookingApi = {
@@ -73,17 +75,27 @@ export const bookingApi = {
   getMine: () => api.get("/bookings/me"),
   payAccess: (id, payload) => api.patch(`/bookings/${id}/pay`, payload),
   sendOffer: (payload) => api.post("/bookings/offers", payload),
+  updateStatus: (id, payload) => api.patch(`/bookings/${id}/status`, payload),
 };
 
 export const messageApi = {
   getInbox: () => api.get("/messages/inbox"),
+  getUnreadCount: () => api.get("/messages/unread-count"),
   getDrafts: () => api.get("/messages/drafts"),
   getById: (id) => api.get(`/messages/${id}`),
+  getConversation: (userId) => api.get(`/chat/${userId}`),
+  sendDirect: (userId, payload) => api.post(`/chat/${userId}`, payload),
+  sendMessage: (payload) => api.post("/messages", payload),
   markRead: (id) => api.patch(`/messages/${id}/read`),
   markUnread: (id) => api.patch(`/messages/${id}/unread`),
   reply: (id, payload) => api.post(`/messages/${id}/reply`, payload),
   saveDraft: (payload) => api.post("/messages/drafts", payload),
   updateDraft: (id, payload) => api.patch(`/messages/drafts/${id}`, payload),
+};
+
+export const ratingApi = {
+  add: (userId, payload) => api.post(`/ratings/${userId}`, payload),
+  get: (userId) => api.get(`/ratings/${userId}`),
 };
 
 export const mediaUrl = (path) => {
