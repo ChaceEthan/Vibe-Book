@@ -19,6 +19,7 @@ const ensureMember = (group, userId) => {
 
 const serializeGroup = (group) => {
   const members = Array.isArray(group.members) ? group.members : [];
+  const activeUsers = members.filter((member) => isUserOnline(member?._id || member));
 
   return {
     _id: group._id,
@@ -27,11 +28,23 @@ const serializeGroup = (group) => {
     createdBy: group.createdBy,
     adminId: group.adminId || group.createdBy,
     members,
-    onlineUsersCount: members.filter((member) => isUserOnline(member?._id || member)).length,
+    activeUsers,
+    onlineUsersCount: activeUsers.length,
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
   };
 };
+
+const serializeGroupMessage = (message) => ({
+  _id: message._id,
+  group: message.group,
+  groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
+  sender: message.sender,
+  senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
+  message: message.message,
+  type: message.type || "message",
+  createdAt: message.createdAt,
+});
 
 const listGroups = async (req, res, next) => {
   try {
@@ -137,7 +150,7 @@ const joinGroup = async (req, res, next) => {
       getIo()?.to((memberId?._id || memberId).toString()).emit("group:member-joined", {
         groupId: group._id,
         userId: req.user._id,
-        message: groupMessage,
+        message: serializeGroupMessage(groupMessage),
       });
     });
 
@@ -191,7 +204,7 @@ const leaveGroup = async (req, res, next) => {
       getIo()?.to(memberId.toString()).emit("group:member-left", {
         groupId: group._id,
         userId: req.user._id,
-        message: groupMessage,
+        message: serializeGroupMessage(groupMessage),
       });
     });
 
@@ -258,14 +271,17 @@ const sendGroupMessage = async (req, res, next) => {
     await group.save();
     await groupMessage.populate("sender", memberSelect);
 
+    const messagePayload = serializeGroupMessage(groupMessage);
+
     group.members.forEach((memberId) => {
       getIo()?.to(memberId.toString()).emit("group:message", {
         groupId: group._id,
-        message: groupMessage,
+        message: messagePayload,
       });
+      getIo()?.to(memberId.toString()).emit("receive_group_message", messagePayload);
     });
 
-    return res.status(201).json({ groupMessage, message: "Message sent" });
+    return res.status(201).json({ groupMessage: messagePayload, message: "Message sent" });
   } catch (error) {
     return next(error);
   }

@@ -2,6 +2,8 @@ const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 
 const ChatMessage = require("./models/ChatMessage");
+const ChatGroup = require("./models/ChatGroup");
+const GroupMessage = require("./models/GroupMessage");
 const Message = require("./models/Message");
 const User = require("./models/User");
 const VisitorStat = require("./models/VisitorStat");
@@ -48,6 +50,7 @@ const removeOnlineUser = (userId, socketId) => {
 };
 
 const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
+const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 
 const serializeDirectMessage = (message) => ({
   _id: message._id,
@@ -61,6 +64,34 @@ const serializeDirectMessage = (message) => ({
   recipient: message.recipient,
   receiver: message.receiver || message.recipient,
 });
+
+const serializeGroupMessage = (message) => ({
+  _id: message._id,
+  group: message.group,
+  groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
+  sender: message.sender,
+  senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
+  message: message.message,
+  type: message.type || "message",
+  createdAt: message.createdAt,
+});
+
+const userIsGroupMember = (group, userId) => {
+  const id = userId?.toString?.() || String(userId || "");
+  return Array.isArray(group?.members) && group.members.some((member) => {
+    const memberId = member?._id?.toString?.() || member?.toString?.() || "";
+    return memberId === id;
+  });
+};
+
+const joinUserGroupRooms = async (socket, userId) => {
+  const groups = await ChatGroup.find({
+    members: userId,
+    isActive: true,
+  }).select("_id");
+
+  groups.forEach((group) => socket.join(groupRoomFor(group._id)));
+};
 
 const emitStats = async () => {
   if (!ioInstance) {
@@ -124,6 +155,7 @@ const initSocket = (server, corsOptions = {}) => {
     addOnlineUser(userId, socket.id);
     socket.join("global");
     socket.join(userId);
+    await joinUserGroupRooms(socket, userId);
     console.log(`Socket connected: ${userId}`);
     await emitStats();
 
@@ -210,6 +242,67 @@ const initSocket = (server, corsOptions = {}) => {
         chatId: payload.chatId || chatIdFor(userId, receiverId),
         typing: Boolean(payload.typing),
       });
+    });
+
+    socket.on("join_group", async (payload = {}, callback) => {
+      try {
+        const groupId = payload.groupId?.toString?.() || payload?.toString?.() || "";
+        const group = await ChatGroup.findOne({ _id: groupId, isActive: true }).select("members");
+
+        if (!group || !userIsGroupMember(group, userId)) {
+          callback?.({ success: false, message: "You are not a member of this group" });
+          return;
+        }
+
+        socket.join(groupRoomFor(group._id));
+        callback?.({ success: true, groupId: group._id.toString() });
+      } catch (error) {
+        callback?.({ success: false, message: "Unable to join group room" });
+      }
+    });
+
+    socket.on("send_group_message", async (payload = {}, callback) => {
+      try {
+        const groupId = payload.groupId?.toString?.() || "";
+        const validation = validateChatMessage(payload.message);
+
+        if (validation.error) {
+          callback?.({ success: false, message: validation.error });
+          return;
+        }
+
+        const group = await ChatGroup.findOne({
+          _id: groupId,
+          isActive: true,
+          members: userId,
+        });
+
+        if (!group) {
+          callback?.({ success: false, message: "You are not a member of this group" });
+          return;
+        }
+
+        const groupMessage = await GroupMessage.create({
+          group: group._id,
+          sender: socket.user._id,
+          message: validation.message,
+        });
+
+        group.updatedAt = new Date();
+        await group.save();
+        await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
+
+        const messagePayload = serializeGroupMessage(groupMessage);
+        ioInstance.to(groupRoomFor(group._id)).emit("receive_group_message", messagePayload);
+        ioInstance.to(groupRoomFor(group._id)).emit("group:message", {
+          groupId: group._id,
+          message: messagePayload,
+        });
+        callback?.({ success: true, message: "Message sent", data: messagePayload });
+      } catch (error) {
+        console.error(`Socket send_group_message failed: ${error.message}`);
+        callback?.({ success: false, message: "Group message failed" });
+      }
     });
 
     socket.on("global:send", async (payload = {}, callback) => {

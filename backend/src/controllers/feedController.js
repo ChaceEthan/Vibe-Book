@@ -3,6 +3,7 @@ const User = require("../models/User");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { addMonetizationScore } = require("../utils/monetization");
 const {
+  isCloudinarySecureUrl,
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
   toPublicUploadUrl,
@@ -31,7 +32,8 @@ const normalizeDescriptionFor = (items = [], mediaUrl = "") => {
 };
 
 const inferOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
-const hasMediaUrl = (value) => Boolean(normalizeStoredUploadPath(value));
+const hasMediaUrl = (value) => isCloudinarySecureUrl(normalizeStoredUploadPath(value));
+const cloudinaryMediaQuery = { $regex: /^https:\/\/res\.cloudinary\.com\//i };
 
 const parsePositiveInt = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number.parseInt(value, 10);
@@ -76,12 +78,6 @@ const scoreFeedItem = (item) => {
 
 const rankedPosts = (items = []) =>
   [...items].sort((left, right) => {
-    const scoreDelta = scoreFeedItem(right) - scoreFeedItem(left);
-
-    if (scoreDelta !== 0) {
-      return scoreDelta;
-    }
-
     return new Date(right.createdAt || 0) - new Date(left.createdAt || 0);
   });
 
@@ -234,7 +230,10 @@ const getFeed = async (req, res, next) => {
 
     await ensureMediaPosts(users);
 
-    const query = followingOnly ? { userId: { $in: Array.from(followedIds) } } : {};
+    const query = {
+      mediaUrl: cloudinaryMediaQuery,
+      ...(followingOnly ? { userId: { $in: Array.from(followedIds) } } : {}),
+    };
     const feedDocs = await Feed.find(query).populate("userId", userSelect).sort({ createdAt: -1 }).limit(1000);
     const rankedFeedDocs = rankedPosts(feedDocs.filter((item) => item.userId && hasMediaUrl(item.mediaUrl)));
     const total = rankedFeedDocs.length;
@@ -284,6 +283,7 @@ const getRecommendations = async (req, res, next) => {
       )
     );
     const query = {
+      mediaUrl: cloudinaryMediaQuery,
       likedBy: { $ne: requestedUserId },
       ...(likedTags.length ? { tags: { $in: likedTags } } : {}),
     };

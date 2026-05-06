@@ -3,7 +3,7 @@ import { Image as ImageIcon, Trash2, UploadCloud, UserRound, Video, X } from "lu
 import { useEffect, useState } from "react";
 
 import { useAuth } from "../context/AuthContext.jsx";
-import { mediaUrl } from "../services/api";
+import { feedApi, mediaUrl } from "../services/api";
 import { isValidPost, usePostStore } from "../store/postStore";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -59,6 +59,28 @@ const compressImageFile = async (sourceFile) => {
   } finally {
     URL.revokeObjectURL(imageUrl);
   }
+};
+
+const shouldRetryUpload = (error) => {
+  const status = error?.response?.status;
+  return !status || status >= 500;
+};
+
+const withUploadRetry = async (operation, attempts = 2) => {
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !shouldRetryUpload(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
 };
 
 const Upload = ({ open, initialType = "image", onClose }) => {
@@ -238,44 +260,46 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       }
 
       const data = isProfile
-        ? await uploadProfilePicture(formData, {
+        ? await withUploadRetry(() => uploadProfilePicture(formData, {
             onUploadProgress: (event) => {
               if (event.total) {
                 setProgress(Math.round((event.loaded * 100) / event.total));
               }
             },
-          })
-        : await uploadMedia(formData, type, {
+          }))
+        : await withUploadRetry(() => uploadMedia(formData, type, {
             onUploadProgress: (event) => {
               if (event.total) {
                 setProgress(Math.round((event.loaded * 100) / event.total));
               }
             },
-      });
+      }));
       const nextUrl =
-        uploadUrl(data.secure_url) ||
         uploadUrl(data.url) ||
-        uploadUrl(data.file?.secure_url) ||
-        uploadUrl(data.file?.url) ||
-        uploadUrl(data.file?.path) ||
-        uploadUrl(data.files?.[0]?.secure_url) ||
-        uploadUrl(data.files?.[0]?.url) ||
-        uploadUrl(data.files?.[0]?.path) ||
-        uploadUrl(data.path) ||
         uploadUrl(data.user?.profilePicture);
       const nextPath = nextUrl;
       setUploadedUrl(nextUrl);
       setUploadedPath(nextPath);
       setProgress(100);
       setStatus(isProfile ? "Profile picture updated." : isImage ? "Image uploaded." : "Video uploaded.");
+
+      if (!isProfile && nextUrl) {
+        const { data: feedData } = await feedApi.get({ page: 1, limit: 10 });
+        const uploadedFeedItem = (Array.isArray(feedData?.posts) ? feedData.posts : Array.isArray(feedData?.feed) ? feedData.feed : [])
+          .find((post) => post?.url === nextUrl);
+
+        if (uploadedFeedItem && isValidPost(uploadedFeedItem)) {
+          prependPost(uploadedFeedItem);
+          window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: uploadedFeedItem } }));
+        }
+      }
+
       if (data.feedItem && isValidPost(data.feedItem)) {
         const uploadedPost = {
           ...data.feedItem,
           url: uploadUrl(data.feedItem.url) || nextUrl,
-          mediaUrl: uploadUrl(data.feedItem.mediaUrl) || nextUrl,
         };
         prependPost(uploadedPost);
-        console.log("[VibeBook upload] post saved and added to state", uploadedPost);
         window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: uploadedPost } }));
       }
     } catch (requestError) {

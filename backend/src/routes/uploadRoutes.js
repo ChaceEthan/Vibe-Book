@@ -1,8 +1,5 @@
 const express = require("express");
 
-const {
-  profileResponse,
-} = require("../controllers/userController");
 const Feed = require("../models/Feed");
 const User = require("../models/User");
 const authMiddleware = require("../middleware/authMiddleware");
@@ -14,9 +11,8 @@ const {
   uploadSingleMedia,
 } = require("../middleware/uploadMiddleware");
 const { removeFiles } = require("../utils/fileCleanup");
-const { toPublicUploadUrl, toUploadPath } = require("../utils/storagePaths");
+const { toUploadPath } = require("../utils/storagePaths");
 const { getUploadedVideoDurationSeconds } = require("../utils/videoDuration");
-const { serializeFeedItem, userSelect } = require("../controllers/feedController");
 
 const router = express.Router();
 const MAX_VIDEO_SECONDS = 120;
@@ -51,16 +47,6 @@ const parseTags = (value) => {
     .filter(Boolean)
     .filter((tag, index, tags) => tags.indexOf(tag) === index)
     .slice(0, 10);
-};
-
-const buildUploadedFiles = (req, files = []) => {
-  return files.map((file) => ({
-    path: toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images"),
-    url: toPublicUploadUrl(req, toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images")),
-    secure_url: toPublicUploadUrl(req, toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images")),
-    type: file.mimetype,
-    originalName: file.originalname,
-  }));
 };
 
 const getUploadedFile = (req) => {
@@ -122,7 +108,6 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     }
 
     const url = toUploadPath(file, type === "video" ? "videos" : "images");
-    const publicUrl = toPublicUploadUrl(req, url);
     const mediaField = type === "video" ? "videos" : "images";
     const mirrorField = type === "video" ? "videoUrls" : "gallery";
     const caption = cleanDescription(req.body.caption || req.body.description);
@@ -152,12 +137,12 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       };
     }
 
-    const user = await User.findByIdAndUpdate(req.user._id, update, {
+    await User.findByIdAndUpdate(req.user._id, update, {
       returnDocument: "after",
       runValidators: true,
     }).select("-password");
 
-    const feed = await Feed.findOneAndUpdate(
+    await Feed.findOneAndUpdate(
       { userId: req.user._id, mediaUrl: url },
       {
         $set: {
@@ -177,24 +162,12 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
         },
       },
       { new: true, upsert: true, runValidators: true }
-    ).populate("userId", userSelect);
+    );
 
     return res.status(201).json({
       success: true,
-      url: publicUrl,
-      secure_url: publicUrl,
-      path: url,
-      type,
-      file: {
-        url: publicUrl,
-        secure_url: publicUrl,
-        path: url,
-        type: file.mimetype,
-        originalName: file.originalname,
-      },
-      files: buildUploadedFiles(req, [file]),
-      feedItem: serializeFeedItem(feed, req.user, false, { req }),
-      user: profileResponse(user, user, { includePrivate: true }),
+      url,
+      public_id: file.filename,
     });
   } catch (error) {
     if (file) {

@@ -2,10 +2,10 @@ const Feed = require("../models/Feed");
 const User = require("../models/User");
 const { serializeFeedItem, userSelect } = require("./feedController");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
-const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
+const { isCloudinarySecureUrl, normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
 
 const mediaQuery = {
-  mediaUrl: { $exists: true, $ne: "" },
+  mediaUrl: { $regex: /^https:\/\/res\.cloudinary\.com\//i },
 };
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -65,7 +65,7 @@ const getExplore = async (req, res, next) => {
         .limit(24),
     ]);
 
-    const validPosts = posts.filter((post) => post.userId && normalizeStoredUploadPath(post.mediaUrl));
+    const validPosts = posts.filter((post) => post.userId && isCloudinarySecureUrl(normalizeStoredUploadPath(post.mediaUrl)));
     const enrichedPosts = validPosts
       .map((post) => {
         const counts = engagementFor(post);

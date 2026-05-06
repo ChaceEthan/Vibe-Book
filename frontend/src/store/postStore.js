@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
-const isValidPost = (post) => Boolean(String(post?.url || "").trim());
+const isCloudinaryUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(String(value || "").trim());
+const isValidPost = (post) => isCloudinaryUrl(post?.url);
 
 const newestFirst = (items) =>
   [...items].sort((left, right) => {
@@ -54,4 +55,4 @@ export const usePostStore = create((set) => ({
     })),
 }));
 
-export { isValidPost };
+export { isCloudinaryUrl, isValidPost };

@@ -20,9 +20,8 @@ const PostMedia = ({
   const mediaRef = useRef(null);
   const viewedRef = useRef(false);
   const [failed, setFailed] = useState(false);
-  const rawUrl = post?.url || post?.mediaUrl || post?.path || "";
-  const isLegacy = [post?.url, rawUrl].some((value) => String(value || "").includes("/uploads"));
-  const src = mediaUrl(rawUrl);
+  const rawUrl = post?.url || "";
+  const src = rawUrl ? mediaUrl(rawUrl) : "";
 
   const markViewed = () => {
     if (viewedRef.current) {
@@ -37,11 +36,6 @@ const PostMedia = ({
     viewedRef.current = false;
     setFailed(false);
   }, [post?._id, rawUrl]);
-
-  useEffect(() => {
-    console.log("Media URL:", post?.url || rawUrl);
-    console.log("Legacy:", isLegacy);
-  }, [isLegacy, post?.url, rawUrl]);
 
   const handleMediaError = (event) => {
     console.error("Media failed to render:", {
@@ -58,12 +52,6 @@ const PostMedia = ({
     if (post?.type !== "video") {
       return undefined;
     }
-
-    console.log("[VibeBook media] video render url", {
-      rawUrl,
-      src,
-      post,
-    });
 
     if (!autoPlay || !mediaRef.current || failed || !window.IntersectionObserver) {
       return undefined;
@@ -131,7 +119,6 @@ const PostMedia = ({
         controls={controls}
         autoPlay={autoPlay}
         preload="metadata"
-        onLoadedData={() => console.log("video loaded", rawUrl)}
         onError={handleMediaError}
         onTimeUpdate={(event) => {
           if (event.currentTarget.currentTime >= 3) {

@@ -13,6 +13,7 @@ const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const {
+  isCloudinarySecureUrl,
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
   toPublicUploadUrl,
@@ -33,6 +34,7 @@ const CONTACT_UNLOCK_CURRENCY = PLATFORM_ACCESS_CURRENCY;
 const MAX_IMAGES_PER_USER = 3;
 const FREE_VIDEO_LIMIT = 1;
 const MAX_VIDEO_SECONDS = 120;
+const cloudinaryMediaQuery = { $regex: /^https:\/\/res\.cloudinary\.com\//i };
 const searchRoleAliases = {
   djs: "dj",
   dj: "dj",
@@ -154,7 +156,7 @@ const profileMediaItems = (user) => {
       type: "image",
       caption: descriptionFor(user.imageDescriptions, mediaUrl),
     })),
-  ].filter((media) => normalizeStoredUploadPath(media.mediaUrl));
+  ].filter((media) => isCloudinarySecureUrl(normalizeStoredUploadPath(media.mediaUrl)));
 };
 
 const ensureProfilePosts = async (user) => {
@@ -193,7 +195,7 @@ const serializeProfilePost = (post, viewer = null, req = null) => {
   const viewerId = viewer?._id?.toString?.() || "";
   const mediaPath = normalizeStoredUploadPath(post.mediaUrl);
 
-  if (!mediaPath) {
+  if (!isCloudinarySecureUrl(mediaPath)) {
     return null;
   }
 
@@ -223,7 +225,7 @@ const getProfilePosts = async (user, viewer = null, req = null) => {
   await ensureProfilePosts(user);
   const posts = await Feed.find({
     userId: user._id,
-    mediaUrl: { $exists: true, $ne: "" },
+    mediaUrl: cloudinaryMediaQuery,
   })
     .sort({ createdAt: -1 })
     .limit(100);

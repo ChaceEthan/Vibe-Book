@@ -39,6 +39,21 @@ const normalizeSocketMessage = (item = {}) => ({
   createdAt: item.createdAt || new Date().toISOString(),
 });
 
+const groupMessageKey = (item) =>
+  item?._id ||
+  item?.clientId ||
+  `${item?.groupId || idOf(item?.group)}:${idOf(item?.sender) || item?.senderId || ""}:${item?.createdAt || ""}:${item?.message || ""}`;
+
+const normalizeGroupMessage = (item = {}) => ({
+  ...item,
+  groupId: item.groupId || idOf(item.group),
+  senderId: item.senderId || idOf(item.sender),
+  sender: item.sender || item.senderId,
+  message: item.message || "",
+  type: item.type || "message",
+  createdAt: item.createdAt || new Date().toISOString(),
+});
+
 const Chat = () => {
   const { userId } = useParams();
   const { user, token, payAccess } = useAuth();
@@ -80,6 +95,33 @@ const Chat = () => {
           messageSenderId(item) === normalized.senderId &&
           messageReceiverId(item) === normalized.receiverId &&
           (item.message || item.text) === normalized.message
+        );
+      });
+
+      if (pendingIndex >= 0) {
+        return current.map((item, index) => (index === pendingIndex ? { ...normalized, pending: false } : item));
+      }
+
+      return [...current, normalized];
+    });
+  };
+
+  const appendGroupMessage = (nextMessage) => {
+    const normalized = normalizeGroupMessage(nextMessage);
+
+    setGroupMessages((current) => {
+      const existingIndex = current.findIndex((item) => groupMessageKey(item) === groupMessageKey(normalized));
+
+      if (existingIndex >= 0) {
+        return current.map((item, index) => (index === existingIndex ? { ...item, ...normalized, pending: false } : item));
+      }
+
+      const pendingIndex = current.findIndex((item) => {
+        return (
+          item.pending &&
+          (item.groupId || idOf(item.group)) === normalized.groupId &&
+          (idOf(item.sender) || item.senderId) === normalized.senderId &&
+          item.message === normalized.message
         );
       });
 
@@ -250,8 +292,6 @@ const Chat = () => {
 
     loadGroups();
     loadMembers();
-    const timer = setInterval(loadGroups, 10000);
-    return () => clearInterval(timer);
   }, [activeTab]);
 
   useEffect(() => {
@@ -260,9 +300,90 @@ const Chat = () => {
     }
 
     loadGroupMessages(selectedGroup);
-    const timer = setInterval(() => loadGroupMessages(selectedGroup, { silent: true }), 7000);
-    return () => clearInterval(timer);
   }, [activeTab, selectedGroup]);
+
+  useEffect(() => {
+    if (!token || !user?._id || activeTab !== "groups") {
+      return undefined;
+    }
+
+    const socket = connectSocket(token);
+
+    if (!socket) {
+      return undefined;
+    }
+
+    const register = () => {
+      socket.emit("register_user", { userId: user._id }, (response) => {
+        setSocketConnected(Boolean(response?.success));
+      });
+    };
+
+    const joinSelectedGroup = () => {
+      if (selectedGroup) {
+        socket.emit("join_group", { groupId: selectedGroup });
+      }
+    };
+
+    const handleConnect = () => {
+      setSocketConnected(true);
+      register();
+      joinSelectedGroup();
+    };
+
+    const handleDisconnect = () => {
+      setSocketConnected(false);
+    };
+
+    const handleGroupMessage = (payload = {}) => {
+      const messagePayload = payload.message || payload;
+      const normalized = normalizeGroupMessage(messagePayload);
+
+      if (selectedGroup && normalized.groupId === selectedGroup) {
+        appendGroupMessage(normalized);
+      }
+
+      loadGroups();
+    };
+
+    const handleGroupMembership = (payload = {}) => {
+      const messagePayload = payload.message || {};
+
+      if (selectedGroup && idOf(payload.groupId) === selectedGroup && messagePayload.message) {
+        appendGroupMessage(messagePayload);
+      }
+
+      loadGroups();
+    };
+
+    const handleStats = () => {
+      loadGroups();
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("receive_group_message", handleGroupMessage);
+    socket.on("group:message", handleGroupMessage);
+    socket.on("group:member-joined", handleGroupMembership);
+    socket.on("group:member-left", handleGroupMembership);
+    socket.on("global:stats", handleStats);
+
+    if (socket.connected) {
+      register();
+      joinSelectedGroup();
+    }
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("receive_group_message", handleGroupMessage);
+      socket.off("group:message", handleGroupMessage);
+      socket.off("group:member-joined", handleGroupMembership);
+      socket.off("group:member-left", handleGroupMembership);
+      socket.off("global:stats", handleStats);
+      disconnectSocket();
+    };
+  }, [activeTab, selectedGroup, token, user?._id]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -343,14 +464,42 @@ const Chat = () => {
       return;
     }
 
+    const text = groupMessage.trim();
+    const pendingId = `pending-group-${Date.now()}`;
+    appendGroupMessage({
+      _id: pendingId,
+      clientId: pendingId,
+      group: selectedGroup,
+      groupId: selectedGroup,
+      sender: user,
+      senderId: user?._id,
+      message: text,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    });
+    setGroupMessage("");
     setSending(true);
     setStatus("");
     setError("");
 
     try {
-      await groupChatApi.send(selectedGroup, { message: groupMessage.trim() });
-      setGroupMessage("");
-      await loadGroupMessages(selectedGroup, { silent: true });
+      const socket = connectSocket(token);
+
+      if (socket?.connected) {
+        socket.emit("send_group_message", { groupId: selectedGroup, senderId: user?._id, message: text }, (response) => {
+          if (response?.success && response.data) {
+            appendGroupMessage(response.data);
+          } else if (response && !response.success) {
+            setError(response.message || "Group message failed.");
+            loadGroupMessages(selectedGroup, { silent: true });
+          }
+        });
+      } else {
+        const { data } = await groupChatApi.send(selectedGroup, { message: text });
+        if (data?.groupMessage) {
+          appendGroupMessage(data.groupMessage);
+        }
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Group message failed.");
     } finally {
@@ -619,6 +768,11 @@ const Chat = () => {
                     <p className="mt-1 inline-flex max-w-full items-center gap-1 truncate text-xs font-semibold text-slate-500">
                       <Users className="h-3.5 w-3.5 shrink-0" />
                       {selectedGroupInfo.members.map((member) => member.name || "Member").join(", ")}
+                    </p>
+                  ) : null}
+                  {selectedGroupInfo?.activeUsers?.length ? (
+                    <p className="mt-1 truncate text-xs font-bold text-green-700">
+                      Active now: {selectedGroupInfo.activeUsers.map((member) => member.name || "Member").join(", ")}
                     </p>
                   ) : null}
                 </div>

@@ -50,9 +50,7 @@ const Home = () => {
         ...(feedMode === "following" ? { mode: "following" } : {}),
       };
       const { data } = await feedApi.get(params);
-      const nextPosts = (Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : []).filter(
-        (post) => post.url && post.url !== ""
-      );
+      const nextPosts = (Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : []).filter(isValidPost);
 
       if (append) {
         mergePosts(nextPosts);
@@ -63,12 +61,6 @@ const Home = () => {
 
       setPage(nextPage);
       setHasMore(Boolean(data?.hasMore));
-      console.log("Valid posts:", nextPosts.length);
-      nextPosts.forEach((post) => console.log("Feed post URL:", post.url));
-      console.log("[VibeBook feed] fetched posts", {
-        count: nextPosts.length,
-        posts: nextPosts,
-      });
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to load feed.");
     } finally {
@@ -92,19 +84,13 @@ const Home = () => {
       }
 
       prependPost(post);
-      console.log("[VibeBook feed] post received in state", post);
     };
 
     window.addEventListener("vibebook:post-created", handlePostCreated);
     return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
   }, []);
 
-  const validPosts = useMemo(() => posts.filter((post) => post.url && post.url !== ""), [posts]);
-
-  useEffect(() => {
-    console.log("Valid posts:", validPosts.length);
-    validPosts.forEach((post) => console.log("Feed post URL:", post.url));
-  }, [validPosts]);
+  const validPosts = useMemo(() => posts.filter(isValidPost), [posts]);
 
   useEffect(() => {
     if (!hasMore || loading || loadingMore || !loadMoreRef.current) {
@@ -142,13 +128,13 @@ const Home = () => {
 
   useEffect(() => {
     const preloaders = visibleFeed
-      .filter((item) => item?.type === "video" && (item.url || item.mediaUrl))
+      .filter((item) => item?.type === "video" && item.url)
       .slice(1, 3)
       .map((item) => {
         const video = document.createElement("video");
         video.preload = "metadata";
         video.muted = true;
-        video.src = mediaUrl(item.url || item.mediaUrl);
+        video.src = mediaUrl(item.url);
         video.load();
         return video;
       });
