@@ -66,24 +66,34 @@ const getUploadedFile = (req) => {
   return req.file || (Array.isArray(req.files) ? req.files[0] : null);
 };
 
+const sendUploadError = (res, error) => {
+  const statusCode = error.statusCode || error.status || 500;
+
+  return res.status(statusCode).json({
+    success: false,
+    message: error.message || "Upload failed",
+  });
+};
+
 const createFeedUpload = async (req, res, next, expectedType = null) => {
   const file = getUploadedFile(req);
+  console.log("UPLOAD FILE:", file);
 
   try {
     if (!file) {
-      return res.status(400).json({ message: "Media file is required" });
+      return res.status(400).json({ success: false, message: "Media file is required" });
     }
 
     const type = file.mimetype.startsWith("video/") ? "video" : "image";
 
     if (expectedType && type !== expectedType) {
       await removeFiles([file]);
-      return res.status(400).json({ message: `Selected file must be a ${expectedType}` });
+      return res.status(400).json({ success: false, message: `Selected file must be a ${expectedType}` });
     }
 
     if (type === "image" && file.size > maxImageSize) {
       await removeFiles([file]);
-      return res.status(400).json({ message: "Images must be under 5MB" });
+      return res.status(400).json({ success: false, message: "Images must be under 5MB" });
     }
 
     if (type === "video") {
@@ -93,7 +103,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
 
       if (knownDuration && knownDuration > MAX_VIDEO_SECONDS) {
         await removeFiles([file]);
-        return res.status(400).json({ message: "Videos must be 2 minutes or shorter" });
+        return res.status(400).json({ success: false, message: "Videos must be 2 minutes or shorter" });
       }
     }
 
@@ -156,6 +166,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     ).populate("userId", userSelect);
 
     return res.status(201).json({
+      success: true,
       url: publicUrl,
       secure_url: publicUrl,
       path: url,
@@ -175,8 +186,19 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     if (file) {
       await removeFiles([file]);
     }
-    return next(error);
+    return sendUploadError(res, error);
   }
+};
+
+const handleUpload = (uploadMiddleware, expectedType = null) => (req, res, next) => {
+  uploadMiddleware(req, res, (error) => {
+    if (error) {
+      console.error(`Upload failed: ${error.message}`);
+      return sendUploadError(res, error);
+    }
+
+    return createFeedUpload(req, res, next, expectedType);
+  });
 };
 
 router.get("/", (req, res) => {
@@ -189,8 +211,8 @@ router.get("/", (req, res) => {
   });
 });
 
-router.post("/", authMiddleware, uploadSingleMedia, (req, res, next) => createFeedUpload(req, res, next));
-router.post("/image", authMiddleware, uploadFeedImage, (req, res, next) => createFeedUpload(req, res, next, "image"));
-router.post("/video", authMiddleware, uploadFeedVideo, (req, res, next) => createFeedUpload(req, res, next, "video"));
+router.post("/", authMiddleware, handleUpload(uploadSingleMedia));
+router.post("/image", authMiddleware, handleUpload(uploadFeedImage, "image"));
+router.post("/video", authMiddleware, handleUpload(uploadFeedVideo, "video"));
 
 module.exports = router;

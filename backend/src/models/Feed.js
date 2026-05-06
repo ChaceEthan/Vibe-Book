@@ -38,10 +38,6 @@ const feedSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      validate: {
-        validator: (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || ""),
-        message: "Feed media must be a Cloudinary secure URL",
-      },
     },
     type: {
       type: String,
@@ -80,6 +76,14 @@ const feedSchema = new mongoose.Schema(
       min: 0,
     },
     likes: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    boostedUntil: {
+      type: Date,
+    },
+    boostScore: {
       type: Number,
       default: 0,
       min: 0,

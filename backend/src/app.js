@@ -1,5 +1,7 @@
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression");
+const rateLimit = require("express-rate-limit");
 
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -13,6 +15,7 @@ const mediaRoutes = require("./routes/mediaRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const feedRoutes = require("./routes/feedRoutes");
+const exploreRoutes = require("./routes/exploreRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 const { createBooking } = require("./controllers/bookingController");
@@ -27,6 +30,31 @@ const { ensureUploadFolders, uploadRoot } = require("./middleware/uploadMiddlewa
 const app = express();
 app.set("trust proxy", 1);
 ensureUploadFolders();
+
+const uploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many uploads. Please try again soon." },
+});
+
+const bookingLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many booking or payment requests. Please try again soon." },
+});
+
+const staticAssetOptions = {
+  maxAge: "7d",
+  etag: true,
+  lastModified: true,
+  setHeaders(res) {
+    res.setHeader("Cache-Control", "public, max-age=604800");
+  },
+};
 
 const allowedOrigins = [
   "http://localhost:5173",
@@ -75,12 +103,32 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
-app.use("/uploads", express.static("uploads"));
-app.use("/uploads", express.static(uploadRoot));
+app.use(compression({ threshold: 1024 }));
+app.use("/uploads", express.static("uploads", staticAssetOptions));
+app.use("/uploads", express.static(uploadRoot, staticAssetOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(responseMiddleware);
 app.use(visitorMiddleware);
+app.use((req, res, next) => {
+  if (!req.path.startsWith("/api/")) {
+    return next();
+  }
+
+  if (req.method !== "GET") {
+    res.set("Cache-Control", "no-store");
+    return next();
+  }
+
+  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/admin", "/api/bookings", "/api/payments"];
+  if (privatePrefixes.some((prefix) => req.path.startsWith(prefix))) {
+    res.set("Cache-Control", "no-store");
+  } else {
+    res.set("Cache-Control", "private, max-age=30, stale-while-revalidate=60");
+  }
+
+  return next();
+});
 
 app.get("/", (req, res) => {
   res.json({ message: "VibeBook API is running" });
@@ -97,19 +145,20 @@ app.post("/api/unfollow/:id", authMiddleware, unfollowProfile);
 app.get("/api/search", optionalAuthMiddleware, searchUsers);
 app.use("/api/feed", feedRoutes);
 app.use("/api/posts", feedRoutes);
+app.use("/api/explore", exploreRoutes);
 app.use("/api/recommendations", recommendationRoutes);
-app.use("/api/upload", uploadRoutes);
+app.use("/api/upload", uploadLimiter, uploadRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);
-app.use("/api/payments", paymentRoutes);
+app.use("/api/payments", bookingLimiter, paymentRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/rules", ruleRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/ratings", ratingRoutes);
-app.post("/api/book", authMiddleware, createBooking);
-app.use("/api/bookings", bookingRoutes);
+app.post("/api/book", bookingLimiter, authMiddleware, createBooking);
+app.use("/api/bookings", bookingLimiter, bookingRoutes);
 
 app.use((req, res, next) => {
   const error = new Error("Route not found");

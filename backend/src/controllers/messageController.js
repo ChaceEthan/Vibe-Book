@@ -53,6 +53,19 @@ const idOf = (value) => {
   return value?._id?.toString?.() || value?.toString?.() || "";
 };
 
+const serializeRealtimeMessage = (message) => ({
+  _id: message._id,
+  chatId: message.chatId,
+  senderId: message.senderId || idOf(message.sender),
+  receiverId: message.receiverId || idOf(message.recipient || message.receiver),
+  message: message.message,
+  text: message.text || message.message,
+  createdAt: message.createdAt,
+  sender: message.sender,
+  recipient: message.recipient,
+  receiver: message.receiver || message.recipient,
+});
+
 const getInbox = async (req, res, next) => {
   try {
     if (!requireMessageAccess(req, res)) {
@@ -208,7 +221,10 @@ const sendDirectMessage = async (req, res, next) => {
     });
 
     const populatedMessage = await populateMessage(Message.findById(message._id));
+    const realtimeMessage = serializeRealtimeMessage(populatedMessage);
     getIo()?.to(recipient._id.toString()).emit("direct:message", populatedMessage);
+    getIo()?.to(recipient._id.toString()).emit("receive_message", realtimeMessage);
+    getIo()?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
 
     return res.status(201).json({
       message: "Message sent",

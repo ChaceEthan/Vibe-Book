@@ -11,6 +11,7 @@ const initialForm = () => ({
   name: "",
   gender: "",
   category: "Modern Dance",
+  skills: "",
   price: "",
   location: "",
   availability: "available",
@@ -50,6 +51,7 @@ const Dashboard = () => {
         name: user.name || "",
         gender: user.gender || "",
         category: user.category || "Modern Dance",
+        skills: Array.isArray(user.skills) ? user.skills.join(", ") : "",
         price: user.price || "",
         location: user.location || user.district || user.province || "",
         availability: user.availability || "available",
@@ -84,6 +86,7 @@ const Dashboard = () => {
     try {
       await updateProfile({
         ...form,
+        skills: form.skills,
         price: form.price ? Number(form.price) : 0,
       });
       await refreshProfile();
@@ -307,6 +310,17 @@ const Dashboard = () => {
           <label className="space-y-2">
             <span className="label">Starting price</span>
             <input className="field" type="number" min="0" name="price" value={form.price} onChange={handleChange} />
+          </label>
+
+          <label className="space-y-2 md:col-span-2">
+            <span className="label">Skills</span>
+            <input
+              className="field"
+              name="skills"
+              value={form.skills}
+              onChange={handleChange}
+              placeholder="dance, acting, music"
+            />
           </label>
 
           <label className="space-y-2">

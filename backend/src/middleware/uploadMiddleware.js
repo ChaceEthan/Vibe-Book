@@ -41,8 +41,8 @@ const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.te
 const createCloudinaryStorage = () => ({
   _handleFile(req, file, callback) {
     if (!cloudinaryConfigured()) {
-      const error = new Error("Cloudinary is not configured");
-      error.statusCode = 500;
+      const error = new Error("Cloudinary is not configured. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.");
+      error.statusCode = 503;
       return callback(error);
     }
 
@@ -63,34 +63,43 @@ const createCloudinaryStorage = () => ({
       overwrite: false,
     };
 
-    const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
-      if (error) {
-        return done(error);
-      }
+    try {
+      const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+        console.log("CLOUDINARY RESULT:", result);
 
-      if (!isCloudinarySecureUrl(result?.secure_url)) {
-        const missingUrlError = new Error("Cloudinary upload did not return a secure URL");
-        missingUrlError.statusCode = 502;
-        return done(missingUrlError);
-      }
+        if (error) {
+          error.statusCode = error.statusCode || 502;
+          console.error(`Cloudinary upload failed: ${error.message}`);
+          return done(error);
+        }
 
-      console.log("Uploaded to Cloudinary:", result.secure_url);
+        if (!isCloudinarySecureUrl(result?.secure_url)) {
+          const missingUrlError = new Error("Cloudinary upload did not return a secure URL");
+          missingUrlError.statusCode = 502;
+          return done(missingUrlError);
+        }
 
-      return done(null, {
-        path: result.secure_url,
-        secure_url: result.secure_url,
-        filename: result.public_id,
-        size: result.bytes,
-        mimetype: file.mimetype,
-        originalname: file.originalname,
-        resource_type: result.resource_type || cloudinaryResourceTypeFor(file),
-        duration: result.duration,
-        cloudinary: result,
+        console.log("Uploaded to Cloudinary:", result.secure_url);
+
+        return done(null, {
+          path: result.secure_url,
+          secure_url: result.secure_url,
+          filename: result.public_id,
+          size: result.bytes,
+          mimetype: file.mimetype,
+          originalname: file.originalname,
+          resource_type: result.resource_type || cloudinaryResourceTypeFor(file),
+          duration: result.duration,
+          cloudinary: result,
+        });
       });
-    });
 
-    file.stream.on("error", done);
-    file.stream.pipe(uploadStream);
+      file.stream.on("error", done);
+      file.stream.pipe(uploadStream);
+    } catch (error) {
+      error.statusCode = error.statusCode || 502;
+      return done(error);
+    }
   },
   _removeFile(req, file, callback) {
     if (!file?.filename) {

@@ -1,17 +1,6 @@
 import { create } from "zustand";
 
-const isCloudinaryPost = (post) => {
-  const url = String(post?.url || "").trim();
-  const mediaUrl = String(post?.mediaUrl || "").trim();
-
-  return (
-    !post?.Legacy &&
-    !post?.legacy &&
-    url.startsWith("https://res.cloudinary.com/") &&
-    !url.includes("/uploads/") &&
-    !mediaUrl.includes("/uploads/")
-  );
-};
+const isValidPost = (post) => Boolean(String(post?.url || "").trim());
 
 const newestFirst = (items) =>
   [...items].sort((left, right) => {
@@ -33,25 +22,25 @@ const mergeUniquePosts = (currentPosts, nextPosts) => {
     }
   });
 
-  return newestFirst(Array.from(byId.values()).filter(isCloudinaryPost));
+  return newestFirst(Array.from(byId.values()).filter(isValidPost));
 };
 
 export const usePostStore = create((set) => ({
   posts: [],
-  setPosts: (posts) => set({ posts: newestFirst((Array.isArray(posts) ? posts : []).filter(isCloudinaryPost)) }),
+  setPosts: (posts) => set({ posts: newestFirst((Array.isArray(posts) ? posts : []).filter(isValidPost)) }),
   mergePosts: (posts) =>
     set((state) => ({
       posts: mergeUniquePosts(state.posts, Array.isArray(posts) ? posts : []),
     })),
   prependPost: (post) =>
     set((state) => ({
-      posts: isCloudinaryPost(post) ? mergeUniquePosts([post], state.posts) : state.posts,
+      posts: isValidPost(post) ? mergeUniquePosts([post], state.posts) : state.posts,
     })),
   replacePost: (post) =>
     set((state) => ({
       posts: state.posts
         .map((item) => (item._id === post?._id ? { ...item, ...post } : item))
-        .filter(isCloudinaryPost),
+        .filter(isValidPost),
     })),
   removePost: (postId) =>
     set((state) => ({
@@ -65,4 +54,4 @@ export const usePostStore = create((set) => ({
     })),
 }));
 
-export { isCloudinaryPost };
+export { isValidPost };

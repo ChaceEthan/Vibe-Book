@@ -6,7 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import PostMedia from "../components/PostMedia.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, mediaUrl, userApi } from "../services/api";
-import { isCloudinaryPost, usePostStore } from "../store/postStore";
+import { isValidPost, usePostStore } from "../store/postStore";
 
 const FEED_PAGE_SIZE = 10;
 
@@ -50,7 +50,9 @@ const Home = () => {
         ...(feedMode === "following" ? { mode: "following" } : {}),
       };
       const { data } = await feedApi.get(params);
-      const nextPosts = (Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : []).filter(isCloudinaryPost);
+      const nextPosts = (Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : []).filter(
+        (post) => post.url && post.url !== ""
+      );
 
       if (append) {
         mergePosts(nextPosts);
@@ -85,7 +87,7 @@ const Home = () => {
     const handlePostCreated = (event) => {
       const post = event.detail?.post;
 
-      if (!post?._id || !isCloudinaryPost(post)) {
+      if (!post?._id || !isValidPost(post)) {
         return;
       }
 
@@ -97,7 +99,7 @@ const Home = () => {
     return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
   }, []);
 
-  const validPosts = useMemo(() => posts.filter(isCloudinaryPost), [posts]);
+  const validPosts = useMemo(() => posts.filter((post) => post.url && post.url !== ""), [posts]);
 
   useEffect(() => {
     console.log("Valid posts:", validPosts.length);

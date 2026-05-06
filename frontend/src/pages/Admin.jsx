@@ -94,11 +94,23 @@ const Admin = () => {
                     className="h-12 w-12 shrink-0 rounded-lg object-cover"
                   />
                   <div className="min-w-0">
-                    <h3 className="truncate font-black text-navy">{item.name}</h3>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <h3 className="truncate font-black text-navy">{item.name}</h3>
+                      {item.isVerified && <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-black uppercase text-sky-700">Verified</span>}
+                    </div>
                     <p className="truncate text-xs text-slate-500">{item.email}</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <button
+                    type="button"
+                    className="btn-secondary gap-2"
+                    onClick={() => runAction(() => adminApi.verifyUser(item._id), "Creator verified.")}
+                    disabled={Boolean(item.isVerified)}
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    {item.isVerified ? "Verified" : "Verify"}
+                  </button>
                   <button type="button" className="btn-secondary gap-2" onClick={() => runAction(() => adminApi.featureProfile(item._id, true), "Profile featured.")}>
                     <Star className="h-4 w-4" />
                     Feature

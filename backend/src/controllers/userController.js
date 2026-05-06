@@ -13,7 +13,6 @@ const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const {
-  isCloudinarySecureUrl,
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
   toPublicUploadUrl,
@@ -155,7 +154,7 @@ const profileMediaItems = (user) => {
       type: "image",
       caption: descriptionFor(user.imageDescriptions, mediaUrl),
     })),
-  ].filter((media) => isCloudinarySecureUrl(media.mediaUrl));
+  ].filter((media) => normalizeStoredUploadPath(media.mediaUrl));
 };
 
 const ensureProfilePosts = async (user) => {
@@ -194,7 +193,7 @@ const serializeProfilePost = (post, viewer = null, req = null) => {
   const viewerId = viewer?._id?.toString?.() || "";
   const mediaPath = normalizeStoredUploadPath(post.mediaUrl);
 
-  if (!isCloudinarySecureUrl(mediaPath)) {
+  if (!mediaPath) {
     return null;
   }
 
@@ -224,7 +223,7 @@ const getProfilePosts = async (user, viewer = null, req = null) => {
   await ensureProfilePosts(user);
   const posts = await Feed.find({
     userId: user._id,
-    mediaUrl: /^https:\/\/res\.cloudinary\.com\//i,
+    mediaUrl: { $exists: true, $ne: "" },
   })
     .sort({ createdAt: -1 })
     .limit(100);
@@ -272,6 +271,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     accountType: user.accountType || "talent",
     gender: user.gender,
     category: user.category,
+    skills: Array.isArray(user.skills) ? user.skills : [],
     price: user.price,
     phone: contactUnlocked ? user.phone || "" : "",
     whatsappNumber: contactUnlocked ? user.whatsappNumber || user.whatsapp || "" : "",
@@ -376,11 +376,12 @@ const getUserById = async (req, res, next) => {
 
 const searchUsers = async (req, res, next) => {
   try {
-    const { role, gender, category, type, availability, location, province, district } = req.query;
+    const { role, gender, category, type, availability, location, province, district, skill, minPrice, maxPrice } = req.query;
     const filters = {
       isBlocked: false,
       role: { $ne: "admin" },
     };
+    const andConditions = [];
 
     if (role) {
       const roleValue = searchRoleAliases[normalizeText(role).toLowerCase()] || role;
@@ -434,13 +435,30 @@ const searchUsers = async (req, res, next) => {
       filters.availability = result.value;
     }
 
+    if (skill) {
+      const skillText = normalizeText(skill).replace(/^#/, "");
+      if (skillText) {
+        const skillRegex = new RegExp(escapeRegex(skillText), "i");
+        andConditions.push({
+          $or: [
+            { skills: skillRegex },
+            { role: skillRegex },
+            { category: skillRegex },
+            { bio: skillRegex },
+          ],
+        });
+      }
+    }
+
     if (location) {
       const locationRegex = new RegExp(escapeRegex(normalizeText(location)), "i");
-      filters.$or = [
-        { location: locationRegex },
-        { province: locationRegex },
-        { district: locationRegex },
-      ];
+      andConditions.push({
+        $or: [
+          { location: locationRegex },
+          { province: locationRegex },
+          { district: locationRegex },
+        ],
+      });
     }
 
     if (province) {
@@ -451,9 +469,38 @@ const searchUsers = async (req, res, next) => {
       filters.district = new RegExp(escapeRegex(normalizeText(district)), "i");
     }
 
+    const price = {};
+    if (minPrice !== undefined && minPrice !== "") {
+      const min = Number(minPrice);
+      if (!Number.isFinite(min) || min < 0) {
+        return res.status(400).json({ message: "Minimum price must be a valid positive number" });
+      }
+      price.$gte = min;
+    }
+
+    if (maxPrice !== undefined && maxPrice !== "") {
+      const max = Number(maxPrice);
+      if (!Number.isFinite(max) || max < 0) {
+        return res.status(400).json({ message: "Maximum price must be a valid positive number" });
+      }
+      price.$lte = max;
+    }
+
+    if (price.$gte !== undefined && price.$lte !== undefined && price.$gte > price.$lte) {
+      return res.status(400).json({ message: "Minimum price cannot be greater than maximum price" });
+    }
+
+    if (Object.keys(price).length) {
+      filters.price = price;
+    }
+
+    if (andConditions.length) {
+      filters.$and = andConditions;
+    }
+
     const users = await User.find(filters)
       .select("-password")
-      .sort({ isPremium: -1, premiumBadge: -1, createdAt: -1 });
+      .sort({ isPremium: -1, premiumBadge: -1, isVerified: -1, averageRating: -1, createdAt: -1 });
 
     return res.json({ users: users.map((user) => profileResponse(user, req.user)) });
   } catch (error) {

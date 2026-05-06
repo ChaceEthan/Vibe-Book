@@ -33,7 +33,7 @@ const Navbar = () => {
   const navItems = useMemo(
     () => [
       { to: "/", label: "Home", icon: Home },
-      { to: "/search", label: "Explore", icon: Compass },
+      { to: "/explore", label: "Explore", icon: Compass },
       { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
       { to: isAuthenticated ? "/dashboard" : "/login", label: "Profile", icon: User },
     ],

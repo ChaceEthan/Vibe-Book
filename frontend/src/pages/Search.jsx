@@ -19,6 +19,10 @@ const Search = () => {
 
   const initialFilters = useMemo(
     () => ({
+      skill: searchParams.get("skill") || "",
+      location: searchParams.get("location") || "",
+      minPrice: searchParams.get("minPrice") || "",
+      maxPrice: searchParams.get("maxPrice") || "",
       gender: searchParams.get("gender") || "",
       category: searchParams.get("category") || "",
       province: searchParams.get("province") || "",
@@ -59,7 +63,7 @@ const Search = () => {
           <p className="text-sm font-semibold uppercase text-brand">Search</p>
           <h1 className="mt-2 text-3xl font-black text-navy">Find talent for your next event</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Browse performers and crews by province, district, category, and gender.
+            Browse creators by skill, Kigali/Rwanda location, price range, category, and availability signals.
           </p>
         </div>
         <p className="text-sm font-semibold text-slate-500">{users.length} profiles found</p>

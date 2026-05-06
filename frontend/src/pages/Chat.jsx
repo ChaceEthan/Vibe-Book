@@ -5,6 +5,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { groupChatApi, mediaUrl, messageApi, userApi } from "../services/api";
+import { connectSocket, disconnectSocket, getChatId } from "../services/socket";
 
 const formatTime = (value) => {
   if (!value) {
@@ -17,9 +18,30 @@ const formatTime = (value) => {
   }).format(new Date(value));
 };
 
+const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+
+const messageSenderId = (item) => item?.senderId || idOf(item?.sender);
+const messageReceiverId = (item) => item?.receiverId || idOf(item?.recipient || item?.receiver);
+const messageKey = (item) =>
+  item?._id ||
+  item?.clientId ||
+  `${messageSenderId(item)}:${messageReceiverId(item)}:${item?.createdAt || ""}:${item?.message || item?.text || ""}`;
+
+const normalizeSocketMessage = (item = {}) => ({
+  ...item,
+  senderId: messageSenderId(item),
+  receiverId: messageReceiverId(item),
+  sender: item.sender || item.senderId,
+  recipient: item.recipient || item.receiver || item.receiverId,
+  receiver: item.receiver || item.recipient || item.receiverId,
+  message: item.message || item.text || "",
+  text: item.text || item.message || "",
+  createdAt: item.createdAt || new Date().toISOString(),
+});
+
 const Chat = () => {
   const { userId } = useParams();
-  const { user, payAccess } = useAuth();
+  const { user, token, payAccess } = useAuth();
   const [activeTab, setActiveTab] = useState(userId ? "direct" : "groups");
   const [messages, setMessages] = useState([]);
   const [otherUser, setOtherUser] = useState(null);
@@ -36,8 +58,38 @@ const Chat = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [socketConnected, setSocketConnected] = useState(false);
+  const [typingUser, setTypingUser] = useState("");
   const bottomRef = useRef(null);
   const groupBottomRef = useRef(null);
+  const typingTimerRef = useRef(null);
+
+  const appendDirectMessage = (nextMessage) => {
+    const normalized = normalizeSocketMessage(nextMessage);
+
+    setMessages((current) => {
+      const existingIndex = current.findIndex((item) => messageKey(item) === messageKey(normalized));
+
+      if (existingIndex >= 0) {
+        return current.map((item, index) => (index === existingIndex ? { ...item, ...normalized, pending: false } : item));
+      }
+
+      const pendingIndex = current.findIndex((item) => {
+        return (
+          item.pending &&
+          messageSenderId(item) === normalized.senderId &&
+          messageReceiverId(item) === normalized.receiverId &&
+          (item.message || item.text) === normalized.message
+        );
+      });
+
+      if (pendingIndex >= 0) {
+        return current.map((item, index) => (index === pendingIndex ? { ...normalized, pending: false } : item));
+      }
+
+      return [...current, normalized];
+    });
+  };
 
   const loadConversation = async ({ silent = false } = {}) => {
     if (!userId) {
@@ -108,6 +160,80 @@ const Chat = () => {
   }, [userId]);
 
   useEffect(() => {
+    if (!token || !user?._id || activeTab !== "direct") {
+      return undefined;
+    }
+
+    const socket = connectSocket(token);
+
+    if (!socket) {
+      return undefined;
+    }
+
+    const register = () => {
+      socket.emit("register_user", { userId: user._id }, (response) => {
+        setSocketConnected(Boolean(response?.success));
+      });
+    };
+
+    const handleConnect = () => {
+      setSocketConnected(true);
+      register();
+    };
+
+    const handleDisconnect = () => {
+      setSocketConnected(false);
+    };
+
+    const handleReceiveMessage = (payload) => {
+      const normalized = normalizeSocketMessage(payload);
+      const senderId = normalized.senderId;
+      const receiverId = normalized.receiverId;
+      const belongsToOpenChat =
+        userId &&
+        ((senderId === user._id && receiverId === userId) || (senderId === userId && receiverId === user._id));
+
+      if (belongsToOpenChat) {
+        appendDirectMessage(normalized);
+      }
+    };
+
+    const handleTyping = (payload = {}) => {
+      if (payload.senderId !== userId || payload.receiverId !== user._id) {
+        return;
+      }
+
+      setTypingUser(payload.typing ? payload.senderId : "");
+    };
+
+    const handleStats = (payload = {}) => {
+      if (userId && Array.isArray(payload.onlineUserIds)) {
+        setOnline(payload.onlineUserIds.includes(userId));
+      }
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("receive_message", handleReceiveMessage);
+    socket.on("typing", handleTyping);
+    socket.on("global:stats", handleStats);
+
+    if (socket.connected) {
+      register();
+    }
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("receive_message", handleReceiveMessage);
+      socket.off("typing", handleTyping);
+      socket.off("global:stats", handleStats);
+      clearTimeout(typingTimerRef.current);
+      disconnectSocket();
+    };
+  }, [activeTab, token, user?._id, userId]);
+
+  useEffect(() => {
     if (activeTab !== "direct") {
       return undefined;
     }
@@ -149,18 +275,60 @@ const Chat = () => {
   const handleSend = async (event) => {
     event.preventDefault();
 
-    if (!message.trim() || !userId) {
+    const text = message.trim();
+
+    if (!text || !userId || !user?._id) {
       return;
     }
+
+    const chatId = getChatId(user._id, userId);
+    const pendingId = `pending-${Date.now()}`;
+    const optimisticMessage = {
+      _id: pendingId,
+      clientId: pendingId,
+      chatId,
+      senderId: user._id,
+      receiverId: userId,
+      sender: user._id,
+      recipient: userId,
+      receiver: userId,
+      message: text,
+      text,
+      createdAt: new Date().toISOString(),
+      pending: true,
+    };
 
     setSending(true);
     setStatus("");
     setError("");
+    setMessage("");
+    appendDirectMessage(optimisticMessage);
 
     try {
-      await messageApi.sendDirect(userId, { message: message.trim() });
-      setMessage("");
-      await loadConversation({ silent: true });
+      const socket = connectSocket(token);
+
+      if (socket?.connected) {
+        socket.emit(
+          "send_message",
+          {
+            senderId: user._id,
+            receiverId: userId,
+            chatId,
+            message: text,
+          },
+          (response) => {
+            if (!response?.success) {
+              setError(response?.message || "Message failed.");
+              return;
+            }
+
+            appendDirectMessage(response.data);
+          }
+        );
+      } else {
+        const { data } = await messageApi.sendDirect(userId, { message: text, chatId });
+        appendDirectMessage(data.chatMessage || data.inboxMessage);
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Message failed.");
     } finally {
@@ -314,7 +482,9 @@ const Chat = () => {
                 />
                 <div className="min-w-0">
                   <p className="truncate font-bold text-navy">{otherUser?.name || "Conversation"}</p>
-                  <p className="truncate text-xs capitalize text-slate-500">{otherUser?.role || "VibeBook user"}</p>
+                  <p className="truncate text-xs capitalize text-slate-500">
+                    {socketConnected ? "Real-time connected" : otherUser?.role || "VibeBook user"}
+                  </p>
                 </div>
               </div>
 
@@ -323,12 +493,14 @@ const Chat = () => {
                   <div className="h-40 animate-pulse rounded-lg bg-slate-200" />
                 ) : messages.length ? (
                   messages.map((item) => {
-                    const isMine = item.sender?._id === user?._id || item.sender === user?._id;
+                    const isMine = messageSenderId(item) === user?._id;
                     return (
                       <div key={item._id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
                         <div className={`max-w-[82%] rounded-lg p-3 ${isMine ? "bg-brand text-navy" : "bg-surface text-slate-700"}`}>
                           <p className="whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
-                          <p className="mt-2 truncate text-[11px] opacity-70">{formatTime(item.createdAt)}</p>
+                          <p className="mt-2 truncate text-[11px] opacity-70">
+                            {item.pending ? "Sending..." : formatTime(item.createdAt)}
+                          </p>
                         </div>
                       </div>
                     );
@@ -336,6 +508,7 @@ const Chat = () => {
                 ) : (
                   <p className="text-sm text-slate-600">No messages yet.</p>
                 )}
+                {typingUser && <p className="text-xs font-semibold text-slate-500">{otherUser?.name || "User"} is typing...</p>}
                 <div ref={bottomRef} />
               </div>
 
@@ -343,7 +516,30 @@ const Chat = () => {
                 <input
                   className="field flex-1"
                   value={message}
-                  onChange={(event) => setMessage(event.target.value)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setMessage(nextValue);
+                    const socket = connectSocket(token);
+
+                    if (socket?.connected && user?._id && userId) {
+                      socket.emit("typing", {
+                        senderId: user._id,
+                        receiverId: userId,
+                        chatId: getChatId(user._id, userId),
+                        typing: Boolean(nextValue.trim()),
+                      });
+
+                      clearTimeout(typingTimerRef.current);
+                      typingTimerRef.current = setTimeout(() => {
+                        socket.emit("typing", {
+                          senderId: user._id,
+                          receiverId: userId,
+                          chatId: getChatId(user._id, userId),
+                          typing: false,
+                        });
+                      }, 1200);
+                    }
+                  }}
                   placeholder="Write a message"
                 />
                 <button type="submit" className="btn-primary" disabled={sending || !message.trim()}>

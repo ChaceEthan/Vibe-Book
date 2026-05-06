@@ -12,6 +12,16 @@ const bookingSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    clientId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
+    creatorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true,
+    },
     userName: {
       type: String,
       trim: true,
@@ -60,6 +70,11 @@ const bookingSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    description: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     offerPrice: {
       type: Number,
       min: 0,
@@ -67,6 +82,22 @@ const bookingSchema = new mongoose.Schema(
     offeredPrice: {
       type: Number,
       min: 0,
+    },
+    price: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    platformFeeRate: {
+      type: Number,
+      min: 0,
+      max: 1,
+      default: 0.1,
+    },
+    platformFee: {
+      type: Number,
+      min: 0,
+      default: 0,
     },
     finalAgreedPrice: {
       type: Number,
@@ -128,5 +159,36 @@ const bookingSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+bookingSchema.pre("validate", function syncMarketplaceAliases(next) {
+  if (!this.clientId && this.requester) {
+    this.clientId = this.requester;
+  }
+
+  if (!this.requester && this.clientId) {
+    this.requester = this.clientId;
+  }
+
+  if (!this.creatorId && this.talent) {
+    this.creatorId = this.talent;
+  }
+
+  if (!this.talent && this.creatorId) {
+    this.talent = this.creatorId;
+  }
+
+  if (!this.description && this.message) {
+    this.description = this.message;
+  }
+
+  if (!this.message && this.description) {
+    this.message = this.description;
+  }
+
+  const resolvedPrice = Number(this.price || this.finalAgreedPrice || this.offeredPrice || this.offerPrice || 0);
+  this.price = Number.isFinite(resolvedPrice) && resolvedPrice > 0 ? resolvedPrice : 0;
+  this.platformFee = Number((this.price * Number(this.platformFeeRate || 0.1)).toFixed(2));
+  next();
+});
 
 module.exports = mongoose.model("Booking", bookingSchema);

@@ -98,6 +98,10 @@ export const feedApi = {
   recommendations: (userId, params = {}) => API.get(`/recommendations/${userId}`, { params }),
 };
 
+export const exploreApi = {
+  get: (params = {}) => API.get("/explore", { params }),
+};
+
 export const bookingApi = {
   create: (payload) => API.post("/book", payload),
   getMine: () => API.get("/bookings/me"),
@@ -110,6 +114,12 @@ export const paymentApi = {
   options: () => API.get("/payments/options"),
   create: (payload) => API.post("/payments/create", payload),
   verify: (payload) => API.post("/payments/verify", payload),
+  tip: (profileId, amount = 1000, method = "MTN_MOMO") =>
+    API.post("/payments/create", { purpose: "tip", profileId, amount, currency: "RWF", method }),
+  boostPost: (postId, amount = 3000, method = "MTN_MOMO") =>
+    API.post("/payments/create", { purpose: "post_boost", postId, amount, currency: "RWF", method }),
+  premium: (amount = 5000, method = "MTN_MOMO") =>
+    API.post("/payments/create", { purpose: "premium", amount, currency: "RWF", method }),
 };
 
 export const messageApi = {
@@ -143,6 +153,7 @@ export const adminApi = {
   deleteUser: (id) => API.delete(`/admin/delete/${id}`),
   blockUser: (id) => API.patch(`/admin/block/${id}`),
   unblockUser: (id) => API.patch(`/admin/unblock/${id}`),
+  verifyUser: (id) => API.patch(`/admin/verify/${id}`),
   featureProfile: (id, featured = true) => API.patch(`/admin/feature/${id}`, { featured }),
 };
 

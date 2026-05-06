@@ -66,13 +66,13 @@ const getDashboardStats = async (req, res, next) => {
         { $group: { _id: null, total: { $sum: "$amount" } } },
       ]),
       VisitorStat.findOne({ dateKey: getDateKey() }),
-      Feed.find({ type: "video", mediaUrl: /^https:\/\/res\.cloudinary\.com\//i })
+      Feed.find({ type: "video", mediaUrl: { $exists: true, $ne: "" } })
         .populate("userId", "name")
         .sort({ views: -1, createdAt: -1 })
         .limit(5),
     ]);
     const totalEngagement = await Feed.aggregate([
-      { $match: { mediaUrl: /^https:\/\/res\.cloudinary\.com\//i } },
+      { $match: { mediaUrl: { $exists: true, $ne: "" } } },
       {
         $group: {
           _id: null,

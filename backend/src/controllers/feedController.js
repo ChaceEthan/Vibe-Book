@@ -3,15 +3,13 @@ const User = require("../models/User");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { addMonetizationScore } = require("../utils/monetization");
 const {
-  isCloudinarySecureUrl,
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
   toPublicUploadUrl,
 } = require("../utils/storagePaths");
 const { validateChatMessage } = require("../utils/chatModeration");
 
-const userSelect = "name role category profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following isPremium premiumBadge province district createdAt";
-const cloudinaryMediaQuery = /^https:\/\/res\.cloudinary\.com\//i;
+const userSelect = "name role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following isPremium premiumBadge isVerified province district createdAt";
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 30;
 
@@ -33,6 +31,7 @@ const normalizeDescriptionFor = (items = [], mediaUrl = "") => {
 };
 
 const inferOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
+const hasMediaUrl = (value) => Boolean(normalizeStoredUploadPath(value));
 
 const parsePositiveInt = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number.parseInt(value, 10);
@@ -69,7 +68,10 @@ const recencyBoostFor = (createdAt) => {
 
 const scoreFeedItem = (item) => {
   const counts = engagementCounts(item);
-  return counts.views + counts.likes * 3 + counts.comments * 2 + recencyBoostFor(item.createdAt);
+  const boostActive = item.boostedUntil && new Date(item.boostedUntil).getTime() > Date.now();
+  const boostScore = boostActive ? Number(item.boostScore || 0) : 0;
+  const premiumBoost = item.userId?.isPremium || item.userId?.premiumBadge ? 15 : 0;
+  return counts.views + counts.likes * 3 + counts.comments * 2 + recencyBoostFor(item.createdAt) + boostScore + premiumBoost;
 };
 
 const rankedPosts = (items = []) =>
@@ -94,6 +96,9 @@ const buildProfile = (user, viewer = null) => {
     name: user?.name || "VibeBook user",
     role: user?.role || "",
     category: user?.category || "",
+    skills: Array.isArray(user?.skills) ? user.skills : [],
+    price: Number(user?.price || 0),
+    location: user?.location || "",
     profileImage: profilePicture,
     profilePicture,
     images: Array.isArray(images) ? images : [],
@@ -107,6 +112,8 @@ const buildProfile = (user, viewer = null) => {
     isFollowing,
     isPremium: user?.isPremium,
     premiumBadge: user?.premiumBadge || user?.isPremium,
+    isVerified: user?.isVerified,
+    verified: user?.isVerified,
     province: user?.province || "",
     district: user?.district || "",
   };
@@ -117,7 +124,7 @@ const serializeFeedItem = (item, viewer = null, virtual = false, options = {}) =
   const likedBy = Array.isArray(item.likedBy) ? item.likedBy : [];
   const viewerId = viewer?._id?.toString?.() || "";
   const mediaPath = normalizeStoredUploadPath(item.mediaUrl);
-  const url = isCloudinarySecureUrl(mediaPath) ? toPublicUploadUrl(options.req, mediaPath) : "";
+  const url = toPublicUploadUrl(options.req, mediaPath);
 
   if (!url) {
     return null;
@@ -141,6 +148,8 @@ const serializeFeedItem = (item, viewer = null, virtual = false, options = {}) =
     commentCount: Array.isArray(item.comments) ? item.comments.length : 0,
     commentsCount: Array.isArray(item.comments) ? item.comments.length : 0,
     shareCount: Number(item.shareCount || 0),
+    boostedUntil: item.boostedUntil,
+    boostScore: Number(item.boostScore || 0),
     score: scoreFeedItem(item),
     createdAt: item.createdAt,
     virtual,
@@ -162,7 +171,7 @@ const getUserMedia = (user) => {
       type: "image",
       caption: normalizeDescriptionFor(user.imageDescriptions, mediaUrl),
     })),
-  ].filter((media) => isCloudinarySecureUrl(media.mediaUrl));
+  ].filter((media) => hasMediaUrl(media.mediaUrl));
 };
 
 const ensureMediaPosts = async (users = []) => {
@@ -225,19 +234,17 @@ const getFeed = async (req, res, next) => {
 
     await ensureMediaPosts(users);
 
-    const query = {
-      mediaUrl: cloudinaryMediaQuery,
-      ...(followingOnly ? { userId: { $in: Array.from(followedIds) } } : {}),
-    };
+    const query = followingOnly ? { userId: { $in: Array.from(followedIds) } } : {};
     const feedDocs = await Feed.find(query).populate("userId", userSelect).sort({ createdAt: -1 }).limit(1000);
-    const rankedFeedDocs = rankedPosts(feedDocs.filter((item) => item.userId && isCloudinarySecureUrl(item.mediaUrl)));
+    const rankedFeedDocs = rankedPosts(feedDocs.filter((item) => item.userId && hasMediaUrl(item.mediaUrl)));
     const total = rankedFeedDocs.length;
     const start = (page - 1) * limit;
     const pagedDocs = rankedFeedDocs.slice(start, start + limit);
     const filteredFeedItems = pagedDocs
-      .filter((item) => item.userId && isCloudinarySecureUrl(item.mediaUrl))
+      .filter((item) => item.userId && hasMediaUrl(item.mediaUrl))
       .map((item) => serializeFeedItem(item, req.user, false, { req }))
       .filter(Boolean);
+    console.log("POST COUNT:", filteredFeedItems.length);
 
     return res.json({
       feed: filteredFeedItems,
@@ -264,7 +271,6 @@ const getRecommendations = async (req, res, next) => {
 
     const limit = parsePositiveInt(req.query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
     const likedPosts = await Feed.find({
-      mediaUrl: cloudinaryMediaQuery,
       likedBy: requestedUserId,
     })
       .select("tags")
@@ -278,12 +284,11 @@ const getRecommendations = async (req, res, next) => {
       )
     );
     const query = {
-      mediaUrl: cloudinaryMediaQuery,
       likedBy: { $ne: requestedUserId },
       ...(likedTags.length ? { tags: { $in: likedTags } } : {}),
     };
     const docs = await Feed.find(query).populate("userId", userSelect).sort({ createdAt: -1 }).limit(300);
-    const recommendations = rankedPosts(docs.filter((item) => item.userId && isCloudinarySecureUrl(item.mediaUrl)))
+    const recommendations = rankedPosts(docs.filter((item) => item.userId && hasMediaUrl(item.mediaUrl)))
       .slice(0, limit)
       .map((item) => serializeFeedItem(item, req.user, false, { req }))
       .filter(Boolean);
@@ -302,7 +307,7 @@ const toggleFeedLike = async (req, res, next) => {
   try {
     const item = await Feed.findById(req.params.id);
 
-    if (!item || !isCloudinarySecureUrl(item.mediaUrl)) {
+    if (!item || !hasMediaUrl(item.mediaUrl)) {
       return res.status(404).json({ message: "Feed item not found" });
     }
 
@@ -339,7 +344,7 @@ const addFeedComment = async (req, res, next) => {
 
     const item = await Feed.findById(req.params.id);
 
-    if (!item || !isCloudinarySecureUrl(item.mediaUrl)) {
+    if (!item || !hasMediaUrl(item.mediaUrl)) {
       return res.status(404).json({ message: "Feed item not found" });
     }
 
@@ -365,7 +370,7 @@ const incrementPostView = async (req, res, next) => {
       { returnDocument: "after", runValidators: true }
     ).populate("userId", userSelect);
 
-    if (!item || !isCloudinarySecureUrl(item.mediaUrl)) {
+    if (!item || !hasMediaUrl(item.mediaUrl)) {
       return res.status(404).json({ message: "Feed item not found" });
     }
 
@@ -383,7 +388,7 @@ const sharePost = async (req, res, next) => {
       { returnDocument: "after", runValidators: true }
     ).populate("userId", userSelect);
 
-    if (!item || !isCloudinarySecureUrl(item.mediaUrl)) {
+    if (!item || !hasMediaUrl(item.mediaUrl)) {
       return res.status(404).json({ message: "Feed item not found" });
     }
 

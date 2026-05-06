@@ -22,7 +22,6 @@ const PostMedia = ({
   const [failed, setFailed] = useState(false);
   const rawUrl = post?.url || post?.mediaUrl || post?.path || "";
   const isLegacy = [post?.url, rawUrl].some((value) => String(value || "").includes("/uploads"));
-  const isCloudinary = String(post?.url || "").startsWith("https://res.cloudinary.com/");
   const src = mediaUrl(rawUrl);
 
   const markViewed = () => {
@@ -112,8 +111,12 @@ const PostMedia = ({
     return () => observer.disconnect();
   }, [failed, post?.type, post?._id]);
 
-  if (isLegacy || !isCloudinary || failed || !rawUrl) {
-    return null;
+  if (failed || !rawUrl) {
+    return (
+      <div className={`flex min-h-48 items-center justify-center bg-slate-800 p-5 text-center text-sm font-bold text-white/70 ${placeholderClassName}`}>
+        Media unavailable
+      </div>
+    );
   }
 
   if (post.type === "video") {

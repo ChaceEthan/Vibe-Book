@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 
 const ChatMessage = require("./models/ChatMessage");
+const Message = require("./models/Message");
 const User = require("./models/User");
 const VisitorStat = require("./models/VisitorStat");
 const { validateChatMessage } = require("./utils/chatModeration");
@@ -17,6 +18,50 @@ const isUserOnline = (userId) => {
   return onlineUsers.has(userId?.toString());
 };
 
+const getOnlineUserIds = () => Array.from(onlineUsers.keys());
+
+const addOnlineUser = (userId, socketId) => {
+  const id = userId?.toString();
+
+  if (!id) {
+    return;
+  }
+
+  const sockets = onlineUsers.get(id) || new Set();
+  sockets.add(socketId);
+  onlineUsers.set(id, sockets);
+};
+
+const removeOnlineUser = (userId, socketId) => {
+  const id = userId?.toString();
+  const sockets = onlineUsers.get(id);
+
+  if (!id || !sockets) {
+    return;
+  }
+
+  sockets.delete(socketId);
+
+  if (!sockets.size) {
+    onlineUsers.delete(id);
+  }
+};
+
+const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
+
+const serializeDirectMessage = (message) => ({
+  _id: message._id,
+  chatId: message.chatId,
+  senderId: message.senderId || message.sender?.toString?.() || "",
+  receiverId: message.receiverId || message.recipient?.toString?.() || message.receiver?.toString?.() || "",
+  message: message.message,
+  text: message.text || message.message,
+  createdAt: message.createdAt,
+  sender: message.sender,
+  recipient: message.recipient,
+  receiver: message.receiver || message.recipient,
+});
+
 const emitStats = async () => {
   if (!ioInstance) {
     return;
@@ -30,6 +75,7 @@ const emitStats = async () => {
 
     ioInstance.emit("global:stats", {
       onlineUsers: getOnlineUsersCount(),
+      onlineUserIds: getOnlineUserIds(),
       totalRegisteredUsers,
       dailyVisitors: dailyVisitors?.visitors || 0,
     });
@@ -46,7 +92,8 @@ const getUserFromSocket = async (socket) => {
   }
 
   const decoded = jwt.verify(token, process.env.JWT_SECRET);
-  return User.findById(decoded.id).select("-password");
+  const userId = decoded.id || decoded._id || decoded.userId || decoded.sub;
+  return User.findById(userId).select("-password");
 };
 
 const initSocket = (server, corsOptions = {}) => {
@@ -73,10 +120,97 @@ const initSocket = (server, corsOptions = {}) => {
   });
 
   ioInstance.on("connection", async (socket) => {
-    onlineUsers.set(socket.user._id.toString(), socket.id);
+    const userId = socket.user._id.toString();
+    addOnlineUser(userId, socket.id);
     socket.join("global");
-    socket.join(socket.user._id.toString());
+    socket.join(userId);
+    console.log(`Socket connected: ${userId}`);
     await emitStats();
+
+    socket.on("register_user", async (payload = {}, callback) => {
+      const requestedUserId = payload.userId?.toString?.() || payload.senderId?.toString?.() || payload?.toString?.() || "";
+
+      if (requestedUserId !== userId) {
+        callback?.({ success: false, message: "Cannot register another user" });
+        return;
+      }
+
+      addOnlineUser(userId, socket.id);
+      socket.join(userId);
+      await emitStats();
+      callback?.({ success: true, userId, socketId: socket.id, onlineUserIds: getOnlineUserIds() });
+    });
+
+    socket.on("send_message", async (payload = {}, callback) => {
+      try {
+        const senderId = payload.senderId?.toString?.() || userId;
+        const receiverId = payload.receiverId?.toString?.() || payload.recipientId?.toString?.() || "";
+
+        if (senderId !== userId) {
+          callback?.({ success: false, message: "Cannot send as another user" });
+          return;
+        }
+
+        if (!receiverId || receiverId === userId) {
+          callback?.({ success: false, message: "Valid receiverId is required" });
+          return;
+        }
+
+        const validation = validateChatMessage(payload.message);
+
+        if (validation.error) {
+          callback?.({ success: false, message: validation.error });
+          return;
+        }
+
+        const receiver = await User.findOne({
+          _id: receiverId,
+          isBlocked: false,
+          role: { $ne: "admin" },
+        }).select("_id");
+
+        if (!receiver) {
+          callback?.({ success: false, message: "Receiver not found" });
+          return;
+        }
+
+        const directMessage = await Message.create({
+          chatId: payload.chatId || chatIdFor(userId, receiverId),
+          sender: userId,
+          senderId: userId,
+          recipient: receiver._id,
+          receiver: receiver._id,
+          receiverId: receiver._id.toString(),
+          subject: "VibeBook chat",
+          message: validation.message,
+          text: validation.message,
+          type: "reply",
+        });
+        const messagePayload = serializeDirectMessage(directMessage);
+
+        ioInstance.to(receiver._id.toString()).emit("receive_message", messagePayload);
+        ioInstance.to(userId).emit("receive_message", messagePayload);
+        callback?.({ success: true, message: "Message sent", data: messagePayload });
+      } catch (error) {
+        console.error(`Socket send_message failed: ${error.message}`);
+        callback?.({ success: false, message: "Message failed" });
+      }
+    });
+
+    socket.on("typing", (payload = {}) => {
+      const receiverId = payload.receiverId?.toString?.() || "";
+
+      if (!receiverId || payload.senderId?.toString?.() !== userId) {
+        return;
+      }
+
+      ioInstance.to(receiverId).emit("typing", {
+        senderId: userId,
+        receiverId,
+        chatId: payload.chatId || chatIdFor(userId, receiverId),
+        typing: Boolean(payload.typing),
+      });
+    });
 
     socket.on("global:send", async (payload = {}, callback) => {
       try {
@@ -102,7 +236,8 @@ const initSocket = (server, corsOptions = {}) => {
     });
 
     socket.on("disconnect", async () => {
-      onlineUsers.delete(socket.user._id.toString());
+      removeOnlineUser(userId, socket.id);
+      console.log(`Socket disconnected: ${userId}`);
       await emitStats();
     });
   });
@@ -114,6 +249,7 @@ const getIo = () => ioInstance;
 
 module.exports = {
   getIo,
+  getOnlineUserIds,
   getOnlineUsersCount,
   initSocket,
   isUserOnline,

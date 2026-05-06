@@ -9,6 +9,7 @@ import Bookings from "./pages/Bookings.jsx";
 import Chat from "./pages/Chat.jsx";
 import Admin from "./pages/Admin.jsx";
 import Drafts from "./pages/Drafts.jsx";
+import Explore from "./pages/Explore.jsx";
 import Home from "./pages/Home.jsx";
 import Inbox from "./pages/Inbox.jsx";
 import Login from "./pages/Login.jsx";
@@ -43,6 +44,7 @@ const App = () => {
       <main className="flex-1 pb-28">
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/explore" element={<Explore />} />
           <Route path="/search" element={<Search />} />
           <Route
             path="/profile/:id"

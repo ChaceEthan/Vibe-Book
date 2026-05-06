@@ -5,6 +5,10 @@ import { GENDER_OPTIONS, PROFILE_CATEGORIES } from "../constants/profile";
 import { RWANDA_PROVINCES, getDistrictsForProvince } from "../constants/rwanda";
 
 const defaultFilters = {
+  skill: "",
+  location: "",
+  minPrice: "",
+  maxPrice: "",
   gender: "",
   category: "",
   province: "",
@@ -36,7 +40,51 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
 
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border border-slate-200 bg-white p-4 shadow-soft">
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <label className="space-y-2">
+          <span className="label">Skill</span>
+          <input
+            className="field"
+            value={filters.skill}
+            onChange={(event) => updateField("skill", event.target.value)}
+            placeholder="dance, acting, music"
+          />
+        </label>
+
+        <label className="space-y-2">
+          <span className="label">Location</span>
+          <input
+            className="field"
+            value={filters.location}
+            onChange={(event) => updateField("location", event.target.value)}
+            placeholder="Kigali, Rwanda"
+          />
+        </label>
+
+        <label className="space-y-2">
+          <span className="label">Min price</span>
+          <input
+            className="field"
+            type="number"
+            min="0"
+            value={filters.minPrice}
+            onChange={(event) => updateField("minPrice", event.target.value)}
+            placeholder="0"
+          />
+        </label>
+
+        <label className="space-y-2">
+          <span className="label">Max price</span>
+          <input
+            className="field"
+            type="number"
+            min="0"
+            value={filters.maxPrice}
+            onChange={(event) => updateField("maxPrice", event.target.value)}
+            placeholder="500000"
+          />
+        </label>
+
         <label className="space-y-2">
           <span className="label">Gender</span>
           <select className="field" value={filters.gender} onChange={(event) => updateField("gender", event.target.value)}>
@@ -97,7 +145,7 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
           </select>
         </label>
 
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-2 lg:col-span-4">
           <button type="submit" className="btn-primary flex-1">
             Search
           </button>

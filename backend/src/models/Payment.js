@@ -12,13 +12,17 @@ const paymentSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
     },
+    postId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Feed",
+    },
     profileId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
     purpose: {
       type: String,
-      enum: ["platform_access", "booking_access", "contact_unlock"],
+      enum: ["platform_access", "booking_access", "contact_unlock", "tip", "post_boost", "premium"],
       default: "platform_access",
     },
     method: {
@@ -61,4 +65,3 @@ const paymentSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("Payment", paymentSchema);
-

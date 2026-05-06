@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { CreditCard, Eye, Heart, Lock, Mail, MessageCircle, Phone, Send, Share2, Star, UserMinus, UserPlus, X } from "lucide-react";
+import { BadgeCheck, CreditCard, Eye, Gift, Heart, Lock, Mail, MessageCircle, Phone, Rocket, Send, Share2, Sparkles, Star, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -188,6 +188,8 @@ const Profile = () => {
     [profilePicture, user]
   );
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
+  const verified = Boolean(user?.isVerified || user?.verified);
+  const skills = Array.isArray(user?.skills) ? user.skills.filter(Boolean) : [];
   const isOwnProfile = currentUser?._id && user?._id && currentUser._id === user._id;
   const isFollowing = Boolean(user?.isFollowing);
   const contentUnlocked = Boolean(isOwnProfile || user?.isUnlocked || user?.contentUnlocked);
@@ -429,12 +431,68 @@ const Profile = () => {
 
     setPaymentAction({
       type: "contact",
+      purpose: "contact_unlock",
       profileId: id,
       amount: 1000,
       currency: "RWF",
     });
     setContactError("Choose a payment option to unlock contact.");
     setUnlockingContact(false);
+  };
+
+  const handleStartTip = () => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    setPaymentStatus("");
+    setPaymentError("");
+    setPaymentAction({
+      type: "tip",
+      purpose: "tip",
+      profileId: user._id,
+      amount: 1000,
+      currency: "RWF",
+    });
+  };
+
+  const handleUpgradePremium = () => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    setPaymentStatus("");
+    setPaymentError("");
+    setPaymentAction({
+      type: "premium",
+      purpose: "premium",
+      amount: 5000,
+      currency: "RWF",
+    });
+  };
+
+  const handleBoostPost = (post) => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    if (!post?._id) {
+      setPaymentError("Choose a saved post to boost.");
+      return;
+    }
+
+    setPaymentStatus("");
+    setPaymentError("");
+    setPaymentAction({
+      type: "boost",
+      purpose: "post_boost",
+      postId: post._id,
+      amount: 3000,
+      currency: "RWF",
+    });
   };
 
   const handleOfferChange = (event) => {
@@ -495,10 +553,11 @@ const Profile = () => {
     try {
       const { data: created } = await paymentApi.create({
         method,
-        purpose: "platform_access",
+        purpose: paymentAction.purpose || "platform_access",
         amount: paymentAction.amount,
         currency: paymentAction.currency,
-        profileId: user._id,
+        profileId: paymentAction.profileId || undefined,
+        postId: paymentAction.postId || undefined,
       });
       await paymentApi.verify({
         paymentId: created.payment?._id,
@@ -528,8 +587,23 @@ const Profile = () => {
         setContactError("");
       }
 
+      if (paymentAction.type === "tip") {
+        setPaymentStatus("Tip sent to creator.");
+      }
+
+      if (paymentAction.type === "premium") {
+        await refreshProfile();
+        setPaymentStatus("Premium visibility activated.");
+      }
+
+      if (paymentAction.type === "boost") {
+        const { data } = await userApi.getById(id);
+        setUser(data.user);
+        setPaymentStatus("Post boosted for 7 days.");
+      }
+
       setPaymentAction(null);
-      setPaymentStatus("Sandbox payment verified.");
+      setPaymentStatus((current) => current || "Sandbox payment verified.");
     } catch (requestError) {
       setPaymentError(requestError.response?.data?.message || "Payment failed.");
     } finally {
@@ -693,7 +767,7 @@ const Profile = () => {
                             {post.tags.slice(0, 5).map((tag) => `#${tag}`).join(" ")}
                           </p>
                         )}
-                        <div className="mt-3 grid grid-cols-4 gap-2 text-xs font-bold text-slate-600">
+                        <div className={`mt-3 grid gap-2 text-xs font-bold text-slate-600 ${isOwnProfile ? "grid-cols-5" : "grid-cols-4"}`}>
                           <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2" onClick={() => handlePostLike(post)}>
                             <Heart className={`h-4 w-4 ${post.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
                             {Number(post.likes || post.likeCount || 0)}
@@ -714,6 +788,12 @@ const Profile = () => {
                             <Share2 className="h-4 w-4" />
                             {Number(post.shareCount || 0)}
                           </button>
+                          {isOwnProfile && (
+                            <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2 text-brand" onClick={() => handleBoostPost(post)}>
+                              <Rocket className="h-4 w-4" />
+                              Boost
+                            </button>
+                          )}
                         </div>
                         {profileCommentOpen === post._id && (
                           <form className="mt-3 flex gap-2" onSubmit={(event) => handlePostComment(event, post)}>
@@ -751,6 +831,12 @@ const Profile = () => {
                 <img src={mediaUrl(profilePicture || activeImageUrl)} alt="" className="mb-4 h-20 w-20 rounded-full object-cover shadow-soft" />
                 <div className="flex flex-wrap items-center gap-2">
                   <p className="text-sm font-semibold uppercase text-brand">{user.role}</p>
+                  {verified && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold uppercase text-sky-700">
+                      <BadgeCheck className="h-4 w-4" />
+                      Verified
+                    </span>
+                  )}
                   {premiumActive && (
                     <span className="rounded-full bg-brand/10 px-3 py-1 text-xs font-bold uppercase text-green-700">
                       Premium
@@ -780,6 +866,19 @@ const Profile = () => {
                 <p className="mt-1 text-lg font-bold capitalize text-navy">{user.availability || "available"}</p>
               </div>
             </div>
+
+            {skills.length > 0 && (
+              <div className="mt-6">
+                <h2 className="text-lg font-bold text-navy">Skills</h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {skills.map((skill) => (
+                    <span key={skill} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">
+                      #{skill}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="mt-6">
               <h2 className="text-lg font-bold text-navy">Bio</h2>
@@ -851,6 +950,18 @@ const Profile = () => {
                   Send Offer
                 </button>
               )}
+              {!isOwnProfile && (
+                <button type="button" className="btn-secondary gap-2" onClick={handleStartTip}>
+                  <Gift className="h-4 w-4" />
+                  Tip 1,000 RWF
+                </button>
+              )}
+              {isOwnProfile && !premiumActive && (
+                <button type="button" className="btn-primary gap-2" onClick={handleUpgradePremium}>
+                  <Sparkles className="h-4 w-4" />
+                  Upgrade Premium
+                </button>
+              )}
             </div>
             {followStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{followStatus}</div>}
             {likeStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{likeStatus}</div>}
@@ -862,8 +973,17 @@ const Profile = () => {
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
                 <div className="flex items-center gap-3 text-sm font-bold text-amber-900">
                   <CreditCard className="h-5 w-5" />
-                  Unlock action
+                  {paymentAction.type === "tip"
+                    ? "Send creator tip"
+                    : paymentAction.type === "boost"
+                      ? "Boost this post"
+                      : paymentAction.type === "premium"
+                        ? "Activate premium"
+                        : "Unlock action"}
                 </div>
+                <p className="mt-2 text-xs font-semibold text-amber-800">
+                  Sandbox charge: {Number(paymentAction.amount || 0).toLocaleString()} {paymentAction.currency || "RWF"}
+                </p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   {PAYMENT_OPTIONS.map((option) => (
                     <button

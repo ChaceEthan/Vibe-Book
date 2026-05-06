@@ -176,6 +176,8 @@ const createBooking = async (req, res, next) => {
     const booking = await Booking.create({
       requester: req.user._id,
       talent: talent._id,
+      clientId: req.user._id,
+      creatorId: talent._id,
       userName: trimText(req.body.userName) || req.user.name,
       businessName: trimText(req.body.businessName),
       location: trimText(req.body.location),
@@ -187,8 +189,13 @@ const createBooking = async (req, res, next) => {
       endDate,
       numberOfDays,
       message: trimText(req.body.message),
+      description: trimText(req.body.description || req.body.message),
       offerPrice: parsePositiveNumber(req.body.offerPrice || req.body.offeredPrice),
       offeredPrice: parsePositiveNumber(req.body.offeredPrice || req.body.offerPrice),
+      price:
+        parsePositiveNumber(req.body.finalAgreedPrice) ||
+        parsePositiveNumber(req.body.offeredPrice || req.body.offerPrice) ||
+        Number(talent.price || 0),
       finalAgreedPrice: parsePositiveNumber(req.body.finalAgreedPrice),
       finalPriceStatus: parsePositiveNumber(req.body.finalAgreedPrice) ? "agreed" : "pending_negotiation",
       paymentStatus: "pending",
@@ -201,7 +208,7 @@ const createBooking = async (req, res, next) => {
 
     await booking.populate([
       { path: "requester", select: "name role" },
-      { path: "talent", select: "name role price availability profileImage images" },
+      { path: "talent", select: "name role skills price availability profileImage images isVerified averageRating" },
     ]);
 
     return res.status(201).json({ booking, notification });
@@ -252,6 +259,8 @@ const sendOffer = async (req, res, next) => {
     const booking = await Booking.create({
       requester: req.user._id,
       talent: talent._id,
+      clientId: req.user._id,
+      creatorId: talent._id,
       userName: trimText(req.body.userName) || req.user.name,
       businessName: trimText(req.body.businessName),
       location: trimText(req.body.location),
@@ -263,8 +272,10 @@ const sendOffer = async (req, res, next) => {
       endDate,
       numberOfDays,
       message,
+      description: trimText(req.body.description) || message,
       offerPrice,
       offeredPrice: offerPrice,
+      price: parsePositiveNumber(req.body.finalAgreedPrice) || offerPrice,
       finalAgreedPrice: parsePositiveNumber(req.body.finalAgreedPrice),
       finalPriceStatus: parsePositiveNumber(req.body.finalAgreedPrice) ? "agreed" : "pending_negotiation",
       paymentStatus: "pending",
@@ -277,7 +288,7 @@ const sendOffer = async (req, res, next) => {
 
     await booking.populate([
       { path: "requester", select: "name role" },
-      { path: "talent", select: "name role price availability profileImage images" },
+      { path: "talent", select: "name role skills price availability profileImage images isVerified averageRating" },
     ]);
 
     return res.status(201).json({ booking, notification });
@@ -329,7 +340,7 @@ const payBookingAccess = async (req, res, next) => {
 
     await booking.populate([
       { path: "requester", select: "name role" },
-      { path: "talent", select: "name role price availability profileImage images" },
+      { path: "talent", select: "name role skills price availability profileImage images isVerified averageRating" },
     ]);
 
     return res.json({ booking, message: "Booking access paid" });
@@ -344,7 +355,7 @@ const getMyBookings = async (req, res, next) => {
       $or: [{ requester: req.user._id }, { talent: req.user._id }],
     })
       .populate("requester", "name role")
-      .populate("talent", "name role price availability profileImage images")
+      .populate("talent", "name role skills price availability profileImage images isVerified averageRating")
       .sort({ createdAt: -1 });
 
     return res.json({ bookings });
@@ -384,7 +395,7 @@ const updateBookingStatus = async (req, res, next) => {
     await booking.save();
     await booking.populate([
       { path: "requester", select: "name role" },
-      { path: "talent", select: "name role price availability profileImage images" },
+      { path: "talent", select: "name role skills price availability profileImage images isVerified averageRating" },
     ]);
 
     return res.json({ booking });

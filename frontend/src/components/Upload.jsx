@@ -4,13 +4,12 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl } from "../services/api";
-import { isCloudinaryPost, usePostStore } from "../store/postStore";
+import { isValidPost, usePostStore } from "../store/postStore";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 const MAX_VIDEO_SECONDS = 120;
-const cloudinaryUrl = (value) =>
-  String(value || "").startsWith("https://res.cloudinary.com/") ? String(value || "") : "";
+const uploadUrl = (value) => String(value || "").trim();
 
 const Upload = ({ open, initialType = "image", onClose }) => {
   const { deleteMedia, uploadMedia, uploadProfilePicture } = useAuth();
@@ -201,32 +200,32 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 setProgress(Math.round((event.loaded * 100) / event.total));
               }
             },
-          });
+      });
       const nextUrl =
-        cloudinaryUrl(data.secure_url) ||
-        cloudinaryUrl(data.url) ||
-        cloudinaryUrl(data.file?.secure_url) ||
-        cloudinaryUrl(data.file?.url) ||
-        cloudinaryUrl(data.file?.path) ||
-        cloudinaryUrl(data.files?.[0]?.secure_url) ||
-        cloudinaryUrl(data.files?.[0]?.url) ||
-        cloudinaryUrl(data.files?.[0]?.path) ||
-        cloudinaryUrl(data.path) ||
-        cloudinaryUrl(data.user?.profilePicture);
+        uploadUrl(data.secure_url) ||
+        uploadUrl(data.url) ||
+        uploadUrl(data.file?.secure_url) ||
+        uploadUrl(data.file?.url) ||
+        uploadUrl(data.file?.path) ||
+        uploadUrl(data.files?.[0]?.secure_url) ||
+        uploadUrl(data.files?.[0]?.url) ||
+        uploadUrl(data.files?.[0]?.path) ||
+        uploadUrl(data.path) ||
+        uploadUrl(data.user?.profilePicture);
       const nextPath = nextUrl;
       setUploadedUrl(nextUrl);
       setUploadedPath(nextPath);
       setProgress(100);
       setStatus(isProfile ? "Profile picture updated." : isImage ? "Image uploaded." : "Video uploaded.");
-      if (data.feedItem && isCloudinaryPost(data.feedItem)) {
-        const cloudinaryPost = {
+      if (data.feedItem && isValidPost(data.feedItem)) {
+        const uploadedPost = {
           ...data.feedItem,
-          url: cloudinaryUrl(data.feedItem.url) || nextUrl,
-          mediaUrl: cloudinaryUrl(data.feedItem.mediaUrl) || nextUrl,
+          url: uploadUrl(data.feedItem.url) || nextUrl,
+          mediaUrl: uploadUrl(data.feedItem.mediaUrl) || nextUrl,
         };
-        prependPost(cloudinaryPost);
-        console.log("[VibeBook upload] post saved and added to state", cloudinaryPost);
-        window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: cloudinaryPost } }));
+        prependPost(uploadedPost);
+        console.log("[VibeBook upload] post saved and added to state", uploadedPost);
+        window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: uploadedPost } }));
       }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Upload failed.");

@@ -237,6 +237,13 @@ const normalizeProfileFields = (body, options = {}) => {
     else data.price = result.value;
   }
 
+  if (hasOwn(body, "skills")) {
+    data.skills = normalizeStringArray(body.skills)
+      .map((skill) => skill.replace(/^#/, "").trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  }
+
   ["phone", "whatsappNumber", "whatsapp", "location", "province", "district", "bio"].forEach((field) => {
     if (hasOwn(body, field)) {
       data[field] = normalizeText(body[field]);
