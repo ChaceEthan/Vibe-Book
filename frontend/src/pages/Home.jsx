@@ -140,6 +140,27 @@ const Home = () => {
     [validPosts, feedMode]
   );
 
+  useEffect(() => {
+    const preloaders = visibleFeed
+      .filter((item) => item?.type === "video" && (item.url || item.mediaUrl))
+      .slice(1, 3)
+      .map((item) => {
+        const video = document.createElement("video");
+        video.preload = "metadata";
+        video.muted = true;
+        video.src = mediaUrl(item.url || item.mediaUrl);
+        video.load();
+        return video;
+      });
+
+    return () => {
+      preloaders.forEach((video) => {
+        video.removeAttribute("src");
+        video.load?.();
+      });
+    };
+  }, [visibleFeed]);
+
   const replaceFeedItem = (nextItem) => {
     replacePost(nextItem);
   };

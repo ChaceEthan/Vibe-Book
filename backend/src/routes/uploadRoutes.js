@@ -85,7 +85,7 @@ const sendUploadError = (res, error) => {
 
 const createFeedUpload = async (req, res, next, expectedType = null) => {
   const file = getUploadedFile(req);
-  console.log("UPLOAD FILE:", file);
+  console.log("UPLOAD FILE:", file?.originalname);
 
   try {
     if (!file) {
@@ -97,12 +97,12 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
 
     if (expectedType && type !== expectedType) {
       await removeFiles([file]);
-      return res.status(400).json({ success: false, message: `Selected file must be a ${expectedType}` });
+      return res.status(400).json({ success: false, error: `Selected file must be a ${expectedType}`, message: `Selected file must be a ${expectedType}` });
     }
 
     if (type === "image" && file.size > maxImageSize) {
       await removeFiles([file]);
-      return res.status(400).json({ success: false, message: "Images must be under 5MB" });
+      return res.status(400).json({ success: false, error: "Images must be under 5MB", message: "Images must be under 5MB" });
     }
 
     if (type === "video" && clientDuration && clientDuration > MAX_VIDEO_SECONDS) {
@@ -117,7 +117,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
 
       if (knownDuration && knownDuration > MAX_VIDEO_SECONDS) {
         await removeFiles([file]);
-        return res.status(400).json({ success: false, message: "Videos must be 2 minutes or shorter" });
+        return res.status(400).json({ success: false, error: "Videos must be 2 minutes or shorter", message: "Videos must be 2 minutes or shorter" });
       }
     }
 

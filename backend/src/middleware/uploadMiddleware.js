@@ -82,7 +82,7 @@ const uploadBufferToCloudinary = async (file, options = {}) => {
     stream.end(file.buffer);
   });
 
-  console.log("CLOUDINARY URL:", result?.secure_url);
+  console.log("Uploaded to Cloudinary:", result?.secure_url);
 
   if (!isCloudinarySecureUrl(result?.secure_url)) {
     throw createUploadError("Cloudinary upload did not return a secure URL", 502);

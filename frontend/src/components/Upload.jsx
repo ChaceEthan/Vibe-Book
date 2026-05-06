@@ -7,9 +7,59 @@ import { mediaUrl } from "../services/api";
 import { isValidPost, usePostStore } from "../store/postStore";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
-const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
+const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
 const MAX_VIDEO_SECONDS = 120;
 const uploadUrl = (value) => String(value || "").trim();
+const COMPRESSED_IMAGE_MAX_SIDE = 1600;
+const COMPRESSED_IMAGE_QUALITY = 0.82;
+
+const canvasToBlob = (canvas, type, quality) =>
+  new Promise((resolve) => {
+    canvas.toBlob(resolve, type, quality);
+  });
+
+const compressImageFile = async (sourceFile) => {
+  if (!sourceFile?.type?.startsWith("image/") || sourceFile.type === "image/gif") {
+    return sourceFile;
+  }
+
+  const imageUrl = URL.createObjectURL(sourceFile);
+  const image = new Image();
+
+  try {
+    await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+      image.src = imageUrl;
+    });
+
+    const scale = Math.min(1, COMPRESSED_IMAGE_MAX_SIDE / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+    const width = Math.max(1, Math.round((image.naturalWidth || 1) * scale));
+    const height = Math.max(1, Math.round((image.naturalHeight || 1) * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d")?.drawImage(image, 0, 0, width, height);
+
+    const outputType = sourceFile.type === "image/png" ? "image/png" : "image/jpeg";
+    const blob = await canvasToBlob(canvas, outputType, COMPRESSED_IMAGE_QUALITY);
+
+    if (!blob || blob.size >= sourceFile.size) {
+      return sourceFile;
+    }
+
+    const extension = outputType === "image/png" ? "png" : "jpg";
+    const name = sourceFile.name.replace(/\.[^.]+$/, "") || "upload";
+    return new File([blob], `${name}.${extension}`, {
+      type: outputType,
+      lastModified: Date.now(),
+    });
+  } catch {
+    return sourceFile;
+  } finally {
+    URL.revokeObjectURL(imageUrl);
+  }
+};
 
 const Upload = ({ open, initialType = "image", onClose }) => {
   const { deleteMedia, uploadMedia, uploadProfilePicture } = useAuth();
@@ -123,7 +173,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     }
 
     if (!isImage && (!selectedFile.type.startsWith("video/") || selectedFile.size > MAX_VIDEO_SIZE)) {
-      setError("Choose a video under 100MB.");
+      setError("Choose a video under 50MB.");
       event.target.value = "";
       return;
     }
@@ -165,27 +215,28 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       return;
     }
 
-    const formData = new FormData();
-    if (isProfile) {
-      formData.append("image", file);
-    } else {
-      formData.append("media", file);
-      formData.append("type", type);
-      formData.append("orientation", orientation);
-      formData.append("caption", caption.trim());
-      formData.append("description", caption.trim());
-      formData.append("tags", tags);
-      if (duration) {
-        formData.append("duration", String(Math.round(duration)));
-      }
-    }
-
     setUploading(true);
     setError("");
     setStatus("");
     setProgress(0);
 
     try {
+      const uploadFile = isImage ? await compressImageFile(file) : file;
+      const formData = new FormData();
+      if (isProfile) {
+        formData.append("image", uploadFile);
+      } else {
+        formData.append("media", uploadFile);
+        formData.append("type", type);
+        formData.append("orientation", orientation);
+        formData.append("caption", caption.trim());
+        formData.append("description", caption.trim());
+        formData.append("tags", tags);
+        if (duration) {
+          formData.append("duration", String(Math.round(duration)));
+        }
+      }
+
       const data = isProfile
         ? await uploadProfilePicture(formData, {
             onUploadProgress: (event) => {

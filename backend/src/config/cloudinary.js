@@ -12,7 +12,7 @@ const config = {
   api_secret: realValue(process.env.CLOUDINARY_API_SECRET),
 };
 
-console.log("Cloudinary:", realValue(process.env.CLOUDINARY_CLOUD_NAME));
+console.log("Cloudinary active:", realValue(process.env.CLOUDINARY_CLOUD_NAME));
 
 cloudinary.config(config);
 
