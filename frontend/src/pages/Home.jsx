@@ -1,36 +1,68 @@
 // @ts-nocheck
 import { CalendarCheck, Eye, Heart, MessageCircle, Search, Send, Share2, Star, UserMinus, UserPlus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, mediaUrl, userApi } from "../services/api";
-import { usePostStore } from "../store/postStore";
+import { isCloudinaryPost, usePostStore } from "../store/postStore";
+
+const FEED_PAGE_SIZE = 10;
 
 const Home = () => {
   const { isAuthenticated, user: currentUser } = useAuth();
   const posts = usePostStore((state) => state.posts);
   const setPosts = usePostStore((state) => state.setPosts);
+  const mergePosts = usePostStore((state) => state.mergePosts);
   const prependPost = usePostStore((state) => state.prependPost);
   const replacePost = usePostStore((state) => state.replacePost);
+  const removePost = usePostStore((state) => state.removePost);
   const updatePostsByUser = usePostStore((state) => state.updatePostsByUser);
   const [feedMode, setFeedMode] = useState("for-you");
   const [commentOpen, setCommentOpen] = useState("");
   const [commentText, setCommentText] = useState("");
   const [viewedPosts, setViewedPosts] = useState(new Set());
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const scrollerRef = useRef(null);
+  const loadMoreRef = useRef(null);
   const navigate = useNavigate();
 
-  const loadFeed = useCallback(async () => {
-    setLoading(true);
+  const loadFeed = useCallback(async (nextPage = 1, options = {}) => {
+    const append = Boolean(options.append);
+
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
+
     setError("");
 
     try {
-      const { data } = await feedApi.get(feedMode === "following" ? { mode: "following" } : {});
-      const nextPosts = Array.isArray(data?.feed) ? data.feed : [];
-      setPosts(nextPosts);
+      const params = {
+        page: nextPage,
+        limit: FEED_PAGE_SIZE,
+        ...(feedMode === "following" ? { mode: "following" } : {}),
+      };
+      const { data } = await feedApi.get(params);
+      const nextPosts = (Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : []).filter(isCloudinaryPost);
+
+      if (append) {
+        mergePosts(nextPosts);
+      } else {
+        setPosts(nextPosts);
+        scrollerRef.current?.scrollTo?.({ top: 0, behavior: "instant" });
+      }
+
+      setPage(nextPage);
+      setHasMore(Boolean(data?.hasMore));
+      console.log("Valid posts:", nextPosts.length);
+      nextPosts.forEach((post) => console.log("Feed post URL:", post.url));
       console.log("[VibeBook feed] fetched posts", {
         count: nextPosts.length,
         posts: nextPosts,
@@ -39,18 +71,21 @@ const Home = () => {
       setError(requestError.response?.data?.message || "Unable to load feed.");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, [feedMode]);
+  }, [feedMode, mergePosts, setPosts]);
 
   useEffect(() => {
-    loadFeed();
+    setPage(1);
+    setHasMore(true);
+    loadFeed(1);
   }, [loadFeed]);
 
   useEffect(() => {
     const handlePostCreated = (event) => {
       const post = event.detail?.post;
 
-      if (!post?._id) {
+      if (!post?._id || !isCloudinaryPost(post)) {
         return;
       }
 
@@ -62,16 +97,45 @@ const Home = () => {
     return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
   }, []);
 
+  const validPosts = useMemo(() => posts.filter(isCloudinaryPost), [posts]);
+
+  useEffect(() => {
+    console.log("Valid posts:", validPosts.length);
+    validPosts.forEach((post) => console.log("Feed post URL:", post.url));
+  }, [validPosts]);
+
+  useEffect(() => {
+    if (!hasMore || loading || loadingMore || !loadMoreRef.current) {
+      return undefined;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          loadFeed(page + 1, { append: true });
+        }
+      },
+      {
+        root: scrollerRef.current,
+        rootMargin: "360px 0px",
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMore, loadFeed, loading, loadingMore, page]);
+
   const visibleFeed = useMemo(
     () =>
-      posts.filter((item) => {
+      validPosts.filter((item) => {
         if (feedMode === "following") {
           return Boolean(item?.userId?.isFollowing);
         }
 
         return true;
       }),
-    [posts, feedMode]
+    [validPosts, feedMode]
   );
 
   const replaceFeedItem = (nextItem) => {
@@ -247,9 +311,10 @@ const Home = () => {
           </button>
         ))}
       </div>
-      <div className="mx-auto h-[calc(100dvh-9rem)] min-h-[560px] max-w-xl snap-y snap-mandatory overflow-y-auto">
+      <div ref={scrollerRef} className="mx-auto h-[calc(100dvh-9rem)] min-h-[560px] max-w-xl snap-y snap-mandatory overflow-y-auto scroll-smooth">
         {visibleFeed.length ? (
-          visibleFeed.map((item) => {
+          <>
+          {visibleFeed.map((item) => {
             const profile = item.userId || {};
             const profileImage = profile.profilePicture || profile.profileImage || profile.images?.[0] || "/logo.png";
             const comments = Array.isArray(item.comments) ? item.comments : [];
@@ -268,6 +333,7 @@ const Home = () => {
                   autoPlay
                   controls
                   onViewed={() => handleViewed(item)}
+                  onInvalid={() => removePost(item._id)}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/10 to-transparent" />
 
@@ -393,7 +459,11 @@ const Home = () => {
                 </div>
               </article>
             );
-          })
+          })}
+          <div ref={loadMoreRef} className="flex h-24 snap-end items-center justify-center bg-slate-950 text-xs font-bold uppercase tracking-[0.2em] text-white/50">
+            {loadingMore ? "Loading more" : hasMore ? "More vibes incoming" : "Caught up"}
+          </div>
+          </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-white">
             <Search className="h-10 w-10 text-brand" />

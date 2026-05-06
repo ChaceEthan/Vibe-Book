@@ -19,6 +19,11 @@ const groupMessageSchema = new mongoose.Schema(
       trim: true,
       maxlength: 1000,
     },
+    type: {
+      type: String,
+      enum: ["message", "system"],
+      default: "message",
+    },
   },
   {
     timestamps: true,
@@ -26,4 +31,3 @@ const groupMessageSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("GroupMessage", groupMessageSchema);
-

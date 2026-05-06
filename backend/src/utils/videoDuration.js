@@ -1,5 +1,7 @@
 const fs = require("fs/promises");
 
+const isRemotePath = (value) => /^https?:\/\//i.test(value || "");
+
 const readUInt64BE = (buffer, offset) => {
   const high = buffer.readUInt32BE(offset);
   const low = buffer.readUInt32BE(offset + 4);
@@ -68,6 +70,10 @@ const findMvhdBox = (buffer, start, end) => {
 };
 
 const getMp4DurationSeconds = async (filePath) => {
+  if (!filePath || isRemotePath(filePath)) {
+    return null;
+  }
+
   const buffer = await fs.readFile(filePath);
   const mvhd = findMvhdBox(buffer, 0, buffer.length);
 
@@ -89,6 +95,21 @@ const getMp4DurationSeconds = async (filePath) => {
   return duration / timescale;
 };
 
+const getUploadedVideoDurationSeconds = async (file) => {
+  const cloudinaryDuration = Number(file?.cloudinary?.duration || file?.duration || 0);
+
+  if (Number.isFinite(cloudinaryDuration) && cloudinaryDuration > 0) {
+    return cloudinaryDuration;
+  }
+
+  try {
+    return await getMp4DurationSeconds(file?.path);
+  } catch {
+    return null;
+  }
+};
+
 module.exports = {
   getMp4DurationSeconds,
+  getUploadedVideoDurationSeconds,
 };

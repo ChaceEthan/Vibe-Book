@@ -12,7 +12,13 @@ const {
 const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
-const { normalizeStoredUploadPath, normalizeStoredUploadPaths, toPublicUploadUrl, toUploadPath } = require("../utils/storagePaths");
+const {
+  isCloudinarySecureUrl,
+  normalizeStoredUploadPath,
+  normalizeStoredUploadPaths,
+  toPublicUploadUrl,
+  toUploadPath,
+} = require("../utils/storagePaths");
 const {
   normalizeAvailability,
   normalizeGender,
@@ -21,7 +27,7 @@ const {
   normalizeText,
   normalizeType,
 } = require("../utils/profileValidation");
-const { getMp4DurationSeconds } = require("../utils/videoDuration");
+const { getUploadedVideoDurationSeconds } = require("../utils/videoDuration");
 
 const CONTACT_UNLOCK_PRICE = PLATFORM_ACCESS_AMOUNT;
 const CONTACT_UNLOCK_CURRENCY = PLATFORM_ACCESS_CURRENCY;
@@ -149,7 +155,7 @@ const profileMediaItems = (user) => {
       type: "image",
       caption: descriptionFor(user.imageDescriptions, mediaUrl),
     })),
-  ];
+  ].filter((media) => isCloudinarySecureUrl(media.mediaUrl));
 };
 
 const ensureProfilePosts = async (user) => {
@@ -188,6 +194,10 @@ const serializeProfilePost = (post, viewer = null, req = null) => {
   const viewerId = viewer?._id?.toString?.() || "";
   const mediaPath = normalizeStoredUploadPath(post.mediaUrl);
 
+  if (!isCloudinarySecureUrl(mediaPath)) {
+    return null;
+  }
+
   return {
     _id: post._id,
     userId: post.userId,
@@ -212,8 +222,13 @@ const serializeProfilePost = (post, viewer = null, req = null) => {
 
 const getProfilePosts = async (user, viewer = null, req = null) => {
   await ensureProfilePosts(user);
-  const posts = await Feed.find({ userId: user._id }).sort({ createdAt: -1 }).limit(100);
-  return posts.map((post) => serializeProfilePost(post, viewer, req));
+  const posts = await Feed.find({
+    userId: user._id,
+    mediaUrl: /^https:\/\/res\.cloudinary\.com\//i,
+  })
+    .sort({ createdAt: -1 })
+    .limit(100);
+  return posts.map((post) => serializeProfilePost(post, viewer, req)).filter(Boolean);
 };
 
 const profileResponse = (user, viewer = null, options = {}) => {
@@ -251,6 +266,8 @@ const profileResponse = (user, viewer = null, options = {}) => {
     name: user.name,
     email: contactUnlocked ? user.email || "" : "",
     role: user.role,
+    accountRole: options.includePrivate ? user.accountRole || (user.role === "admin" ? "admin" : "user") : undefined,
+    protected: options.includePrivate ? Boolean(user.protected || user.role === "admin") : undefined,
     type: user.type,
     accountType: user.accountType || "talent",
     gender: user.gender,
@@ -568,7 +585,7 @@ const uploadProfileVideos = async (req, res, next) => {
     }
 
     for (const file of files) {
-      const duration = await getMp4DurationSeconds(file.path);
+      const duration = await getUploadedVideoDurationSeconds(file);
 
       if (!duration || duration > MAX_VIDEO_SECONDS) {
         await removeFiles(files);

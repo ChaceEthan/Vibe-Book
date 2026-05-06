@@ -2,6 +2,7 @@ const bcrypt = require("bcryptjs");
 
 const User = require("../models/User");
 const { buildAccessState, syncTrialState } = require("../utils/accessControl");
+const { applyAdminIsolation, isConfiguredAdminEmail } = require("../utils/adminIsolation");
 const generateToken = require("../utils/generateToken");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
@@ -55,6 +56,8 @@ const userResponse = (user) => {
     name: user.name,
     email: user.email,
     role: user.role,
+    accountRole: user.accountRole || (user.role === "admin" ? "admin" : "user"),
+    protected: Boolean(user.protected || user.role === "admin"),
     type: user.type,
     accountType: user.accountType || "talent",
     gender: user.gender,
@@ -153,6 +156,12 @@ const register = async (req, res, next) => {
     userData.email = email;
     userData.referralCode = createReferralCode(name);
 
+    if (isConfiguredAdminEmail(email)) {
+      userData.role = "admin";
+      userData.accountRole = "admin";
+      userData.protected = true;
+    }
+
     const refCode = typeof req.body.referralCode === "string" ? req.body.referralCode.trim() : "";
     const referrer = refCode ? await User.findOne({ referralCode: refCode }) : null;
 
@@ -173,8 +182,10 @@ const register = async (req, res, next) => {
       await User.findByIdAndUpdate(referrer._id, { $inc: { referredUsers: 1 } });
     }
 
+    const isolatedUser = await applyAdminIsolation(user);
+
     return res.status(201).json({
-      user: userResponse(user),
+      user: userResponse(isolatedUser),
       token: generateToken(user._id),
       message: "Registration successful",
     });
@@ -210,6 +221,7 @@ const login = async (req, res, next) => {
       return res.status(403).json({ message: "Your account is blocked" });
     }
 
+    await applyAdminIsolation(user);
     await syncTrialState(user);
 
     return res.json({

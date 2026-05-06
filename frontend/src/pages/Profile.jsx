@@ -71,6 +71,25 @@ const toEmbedUrl = (url) => {
   }
 };
 
+const isDirectVideoUrl = (url = "") => {
+  const value = String(url || "").trim();
+
+  if (value.startsWith("/uploads") || value.startsWith("uploads/")) {
+    return true;
+  }
+
+  if (/\.(mp4|mov|webm)(?:$|[?#])/i.test(value)) {
+    return true;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname === "res.cloudinary.com";
+  } catch {
+    return false;
+  }
+};
+
 const Profile = () => {
   const { id } = useParams();
   const { refreshProfile, user: currentUser } = useAuth();
@@ -622,7 +641,7 @@ const Profile = () => {
                 ) : (
                   videoUrls.map((videoUrl, index) => (
                     <div key={videoUrl} className="aspect-video overflow-hidden rounded-lg bg-slate-100">
-                      {videoUrl.startsWith("/uploads") ? (
+                      {isDirectVideoUrl(videoUrl) ? (
                         <video
                           src={mediaUrl(videoUrl)}
                           className="h-full bg-slate-900"

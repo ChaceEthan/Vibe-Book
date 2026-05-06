@@ -4,6 +4,7 @@ import axios from "axios";
 const API_ROOT = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
 const API_BASE_URL = API_ROOT.endsWith("/api") ? API_ROOT : `${API_ROOT}/api`;
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+const APP_ROOT_URL = typeof window !== "undefined" ? window.location.origin : "";
 
 if (!API_ROOT) {
   throw new Error("VITE_API_URL is required");
@@ -89,11 +90,12 @@ export const userApi = {
 };
 
 export const feedApi = {
-  get: (params = {}) => API.get("/feed", { params }),
-  toggleLike: (id) => API.post(`/feed/${id}/like`),
-  addComment: (id, payload) => API.post(`/feed/${id}/comments`, payload),
-  recordView: (id) => API.post(`/feed/${id}/view`),
-  share: (id) => API.post(`/feed/${id}/share`),
+  get: (params = {}) => API.get("/posts", { params }),
+  toggleLike: (id) => API.post(`/posts/${id}/like`),
+  addComment: (id, payload) => API.post(`/posts/${id}/comments`, payload),
+  recordView: (id) => API.post(`/posts/${id}/view`),
+  share: (id) => API.post(`/posts/${id}/share`),
+  recommendations: (userId, params = {}) => API.get(`/recommendations/${userId}`, { params }),
 };
 
 export const bookingApi = {
@@ -130,6 +132,9 @@ export const groupChatApi = {
   create: (payload) => API.post("/chat/group", payload),
   getMessages: (groupId) => API.get(`/chat/group/${groupId}/messages`),
   send: (groupId, payload) => API.post(`/chat/group/${groupId}/messages`, payload),
+  join: (groupId) => API.post(`/chat/group/${groupId}/join`),
+  leave: (groupId) => API.post(`/chat/group/${groupId}/leave`),
+  members: (groupId) => API.get(`/chat/group/${groupId}/members`),
 };
 
 export const adminApi = {
@@ -147,19 +152,30 @@ export const ratingApi = {
 };
 
 export const mediaUrl = (path) => {
-  if (!path) {
-    return "/logo.png";
+  const value = String(path || "").trim();
+
+  if (!value) {
+    return `${APP_ROOT_URL}/logo.png`;
   }
 
-  if (/^(https?:|blob:|data:)/.test(path)) {
-    return path;
+  if (/^(https?:|blob:|data:)/.test(value)) {
+    return value;
   }
 
-  if (path.startsWith("/uploads")) {
-    return `${API_ROOT_URL}${path}`;
+  if (value.startsWith("/uploads")) {
+    return `${API_ROOT_URL}${value}`;
   }
 
-  return path;
+  if (value.startsWith("uploads/")) {
+    return `${API_ROOT_URL}/${value}`;
+  }
+
+  if (value.startsWith("/")) {
+    return `${APP_ROOT_URL}${value}`;
+  }
+
+  console.error("Media path is not an absolute URL:", value);
+  return `${APP_ROOT_URL}/logo.png`;
 };
 
 export default API;

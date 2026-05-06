@@ -1,8 +1,9 @@
 // @ts-nocheck
-const fs = require("fs");
 const path = require("path");
 
 const multer = require("multer");
+
+const cloudinary = require("../config/cloudinary");
 
 const uploadRoot = path.join(__dirname, "..", "..", "uploads");
 const imageUploadDir = path.join(uploadRoot, "images");
@@ -13,15 +14,15 @@ const videoMimeTypes = ["video/mp4", "video/quicktime", "video/webm"];
 const maxImageSize = 5 * 1024 * 1024;
 const maxVideoSize = 100 * 1024 * 1024;
 
-const ensureUploadFolders = () => {
-  [imageUploadDir, videoUploadDir].forEach((directory) => {
-    fs.mkdirSync(directory, { recursive: true });
-  });
-};
+const ensureUploadFolders = () => undefined;
 
-ensureUploadFolders();
+const cloudinaryConfigured = () =>
+  Boolean(
+    process.env.CLOUDINARY_URL ||
+      (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET)
+  );
 
-const safeName = (name) => {
+const safeName = (name, includeExtension = true) => {
   const extension = path.extname(name).toLowerCase();
   const baseName = path
     .basename(name, extension)
@@ -30,34 +31,80 @@ const safeName = (name) => {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
 
-  return `${baseName || "upload"}-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`;
+  return `${baseName || "upload"}-${Date.now()}-${Math.round(Math.random() * 1e9)}${includeExtension ? extension : ""}`;
 };
 
-const createStorage = (directory) =>
-  multer.diskStorage({
-    destination(req, file, callback) {
-      callback(null, directory);
-    },
-    filename(req, file, callback) {
-      callback(null, safeName(file.originalname));
-    },
-  });
+const cloudinaryFolderFor = (file) => (file.mimetype.startsWith("video/") ? "vibebook/videos" : "vibebook/images");
+const cloudinaryResourceTypeFor = (file) => (file.mimetype.startsWith("video/") ? "video" : "image");
+const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
 
-const mediaUploadStorage = multer.diskStorage({
-  destination(req, file, callback) {
-    callback(null, file.mimetype.startsWith("video/") ? videoUploadDir : imageUploadDir);
-  },
-  filename(req, file, callback) {
-    callback(null, safeName(file.originalname));
-  },
-});
+const createCloudinaryStorage = () => ({
+  _handleFile(req, file, callback) {
+    if (!cloudinaryConfigured()) {
+      const error = new Error("Cloudinary is not configured");
+      error.statusCode = 500;
+      return callback(error);
+    }
 
-const genericUploadStorage = multer.diskStorage({
-  destination(req, file, callback) {
-    callback(null, uploadRoot);
+    let settled = false;
+    const done = (error, uploadedFile) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      callback(error, uploadedFile);
+    };
+
+    const uploadOptions = {
+      folder: cloudinaryFolderFor(file),
+      public_id: safeName(file.originalname, false),
+      resource_type: "auto",
+      overwrite: false,
+    };
+
+    const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
+      if (error) {
+        return done(error);
+      }
+
+      if (!isCloudinarySecureUrl(result?.secure_url)) {
+        const missingUrlError = new Error("Cloudinary upload did not return a secure URL");
+        missingUrlError.statusCode = 502;
+        return done(missingUrlError);
+      }
+
+      console.log("Uploaded to Cloudinary:", result.secure_url);
+
+      return done(null, {
+        path: result.secure_url,
+        secure_url: result.secure_url,
+        filename: result.public_id,
+        size: result.bytes,
+        mimetype: file.mimetype,
+        originalname: file.originalname,
+        resource_type: result.resource_type || cloudinaryResourceTypeFor(file),
+        duration: result.duration,
+        cloudinary: result,
+      });
+    });
+
+    file.stream.on("error", done);
+    file.stream.pipe(uploadStream);
   },
-  filename(req, file, callback) {
-    callback(null, safeName(file.originalname));
+  _removeFile(req, file, callback) {
+    if (!file?.filename) {
+      return callback(null);
+    }
+
+    return cloudinary.uploader.destroy(
+      file.filename,
+      {
+        resource_type: file.resource_type || cloudinaryResourceTypeFor(file),
+        invalidate: true,
+      },
+      callback
+    );
   },
 });
 
@@ -72,7 +119,7 @@ const createFileFilter = (allowedTypes, label) => (req, file, callback) => {
 };
 
 const uploadFiles = multer({
-  storage: genericUploadStorage,
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxVideoSize,
     files: 10,
@@ -81,7 +128,7 @@ const uploadFiles = multer({
 });
 
 const uploadSingleMedia = multer({
-  storage: mediaUploadStorage,
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxVideoSize,
     files: 1,
@@ -90,7 +137,7 @@ const uploadSingleMedia = multer({
 }).single("file");
 
 const uploadFeedImage = multer({
-  storage: createStorage(imageUploadDir),
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxImageSize,
     files: 1,
@@ -99,7 +146,7 @@ const uploadFeedImage = multer({
 }).single("file");
 
 const uploadFeedVideo = multer({
-  storage: createStorage(videoUploadDir),
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxVideoSize,
     files: 1,
@@ -108,7 +155,7 @@ const uploadFeedVideo = multer({
 }).single("file");
 
 const uploadImages = multer({
-  storage: createStorage(imageUploadDir),
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxImageSize,
     files: 5,
@@ -117,7 +164,7 @@ const uploadImages = multer({
 }).array("images", 20);
 
 const uploadSingleImage = multer({
-  storage: createStorage(imageUploadDir),
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxImageSize,
     files: 1,
@@ -126,7 +173,7 @@ const uploadSingleImage = multer({
 }).single("image");
 
 const uploadVideos = multer({
-  storage: createStorage(videoUploadDir),
+  storage: createCloudinaryStorage(),
   limits: {
     fileSize: maxVideoSize,
     files: 3,

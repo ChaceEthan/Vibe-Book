@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Plus, Send } from "lucide-react";
+import { Plus, Send, UserMinus, Users } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -216,6 +216,25 @@ const Chat = () => {
     }
   };
 
+  const handleLeaveGroup = async () => {
+    if (!selectedGroup || !window.confirm("Leave this group?")) {
+      return;
+    }
+
+    setStatus("");
+    setError("");
+
+    try {
+      await groupChatApi.leave(selectedGroup);
+      setSelectedGroup("");
+      setGroupMessages([]);
+      setStatus("You left the group.");
+      await loadGroups();
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to leave group.");
+    }
+  };
+
   const handlePayAccess = async () => {
     setStatus("");
     setError("");
@@ -397,7 +416,23 @@ const Chat = () => {
 
           <div className="rounded-lg border border-slate-200 bg-white shadow-soft">
             <div className="border-b border-slate-100 p-4">
-              <p className="truncate font-black text-navy">{selectedGroupInfo?.groupName || "Group messages"}</p>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-black text-navy">{selectedGroupInfo?.groupName || selectedGroupInfo?.name || "Group messages"}</p>
+                  {selectedGroupInfo?.members?.length ? (
+                    <p className="mt-1 inline-flex max-w-full items-center gap-1 truncate text-xs font-semibold text-slate-500">
+                      <Users className="h-3.5 w-3.5 shrink-0" />
+                      {selectedGroupInfo.members.map((member) => member.name || "Member").join(", ")}
+                    </p>
+                  ) : null}
+                </div>
+                {selectedGroup && (
+                  <button type="button" className="btn-secondary gap-2 text-red-700" onClick={handleLeaveGroup}>
+                    <UserMinus className="h-4 w-4" />
+                    Leave
+                  </button>
+                )}
+              </div>
             </div>
             <div className="max-h-[520px] min-h-80 space-y-4 overflow-y-auto p-4">
               {loading ? (
@@ -405,6 +440,14 @@ const Chat = () => {
               ) : groupMessages.length ? (
                 groupMessages.map((item) => {
                   const isMine = item.sender?._id === user?._id || item.sender === user?._id;
+                  if (item.type === "system") {
+                    return (
+                      <div key={item._id} className="flex justify-center">
+                        <p className="rounded-full bg-brand/20 px-4 py-2 text-xs font-black text-navy">{item.message}</p>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={item._id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[82%] rounded-lg p-3 ${isMine ? "bg-brand text-navy" : "bg-surface text-slate-700"}`}>

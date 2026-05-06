@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../services/api";
 
@@ -15,11 +15,14 @@ const PostMedia = ({
   videoClassName = "",
   placeholderClassName = "",
   onViewed,
+  onInvalid,
 }) => {
   const mediaRef = useRef(null);
   const viewedRef = useRef(false);
   const [failed, setFailed] = useState(false);
   const rawUrl = post?.url || post?.mediaUrl || post?.path || "";
+  const isLegacy = [post?.url, rawUrl].some((value) => String(value || "").includes("/uploads"));
+  const isCloudinary = String(post?.url || "").startsWith("https://res.cloudinary.com/");
   const src = mediaUrl(rawUrl);
 
   const markViewed = () => {
@@ -35,6 +38,22 @@ const PostMedia = ({
     viewedRef.current = false;
     setFailed(false);
   }, [post?._id, rawUrl]);
+
+  useEffect(() => {
+    console.log("Media URL:", post?.url || rawUrl);
+    console.log("Legacy:", isLegacy);
+  }, [isLegacy, post?.url, rawUrl]);
+
+  const handleMediaError = (event) => {
+    console.error("Media failed to render:", {
+      url: src,
+      rawUrl,
+      postId: post?._id,
+      event,
+    });
+    setFailed(true);
+    onInvalid?.();
+  };
 
   useEffect(() => {
     if (post?.type !== "video") {
@@ -93,12 +112,8 @@ const PostMedia = ({
     return () => observer.disconnect();
   }, [failed, post?.type, post?._id]);
 
-  if (failed || !rawUrl) {
-    return (
-      <div className={`flex min-h-48 items-center justify-center bg-slate-800 p-5 text-center text-sm font-bold text-white/70 ${placeholderClassName}`}>
-        Media unavailable
-      </div>
-    );
+  if (isLegacy || !isCloudinary || failed || !rawUrl) {
+    return null;
   }
 
   if (post.type === "video") {
@@ -114,10 +129,7 @@ const PostMedia = ({
         autoPlay={autoPlay}
         preload="metadata"
         onLoadedData={() => console.log("video loaded", rawUrl)}
-        onError={(event) => {
-          console.error("video error", event, rawUrl);
-          setFailed(true);
-        }}
+        onError={handleMediaError}
         onTimeUpdate={(event) => {
           if (event.currentTarget.currentTime >= 3) {
             markViewed();
@@ -134,14 +146,15 @@ const PostMedia = ({
       src={src}
       alt={alt}
       className={`${className} ${imageClassName}`}
-      onError={() => setFailed(true)}
+      onError={handleMediaError}
       onLoad={() => {
         if (!window.IntersectionObserver) {
           markViewed();
         }
       }}
+      loading="lazy"
     />
   );
 };
 
-export default PostMedia;
+export default memo(PostMedia);

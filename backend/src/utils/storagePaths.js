@@ -2,7 +2,30 @@ const path = require("path");
 
 const { uploadRoot } = require("../middleware/uploadMiddleware");
 
-const toUploadPath = (file, folder) => `/uploads/${folder}/${file.filename}`;
+const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
+
+const toUploadPath = (file, folder) => {
+  if (isCloudinarySecureUrl(file?.cloudinary?.secure_url)) {
+    return file.cloudinary.secure_url;
+  }
+
+  if (isCloudinarySecureUrl(file?.secure_url)) {
+    return file.secure_url;
+  }
+
+  if (isCloudinarySecureUrl(file?.path)) {
+    return file.path;
+  }
+
+  const error = new Error("Upload did not return a Cloudinary URL");
+  error.statusCode = 502;
+  error.details = {
+    folder,
+    originalName: file?.originalname,
+    filename: file?.filename,
+  };
+  throw error;
+};
 
 const getPublicBaseUrl = (req) => {
   const configuredUrl = process.env.API_URL || process.env.BACKEND_URL || process.env.RENDER_EXTERNAL_URL;
@@ -83,6 +106,7 @@ const normalizeStoredUploadPaths = (values = []) => {
 
 module.exports = {
   fromMediaId,
+  isCloudinarySecureUrl,
   toMediaId,
   toPublicUploadUrl,
   toUploadFilePath,

@@ -9,6 +9,9 @@ const {
 const {
   createGroup,
   getGroupMessages,
+  joinGroup,
+  leaveGroup,
+  listMembers,
   listGroups,
   sendGroupMessage,
 } = require("../controllers/groupChatController");
@@ -28,6 +31,9 @@ router.delete("/global/me", clearMyChatView);
 router.get("/stats", getChatStats);
 router.get("/groups", listGroups);
 router.post("/group", createGroup);
+router.post("/group/:groupId/join", joinGroup);
+router.post("/group/:groupId/leave", leaveGroup);
+router.get("/group/:groupId/members", listMembers);
 router.get("/group/:groupId/messages", getGroupMessages);
 router.post("/group/:groupId/messages", sendGroupMessage);
 router.get("/:userId", getConversation);

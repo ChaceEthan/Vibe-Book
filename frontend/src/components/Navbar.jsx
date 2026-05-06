@@ -116,7 +116,7 @@ const Navbar = () => {
             </select>
             {isAuthenticated ? (
               <>
-                {user?.role === "admin" && (
+                {(user?.role === "admin" || user?.accountRole === "admin") && (
                   <Link to="/admin" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Admin">
                     <User className="h-5 w-5" />
                   </Link>

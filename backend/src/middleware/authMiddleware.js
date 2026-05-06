@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 
 const User = require("../models/User");
+const { applyAdminIsolation } = require("../utils/adminIsolation");
 const { syncTrialState } = require("../utils/accessControl");
 
 const getBearerToken = (req) => {
@@ -33,6 +34,7 @@ const authMiddleware = async (req, res, next) => {
       return res.status(403).json({ message: "Your account is blocked" });
     }
 
+    await applyAdminIsolation(user);
     req.user = await syncTrialState(user);
     return next();
   } catch (error) {

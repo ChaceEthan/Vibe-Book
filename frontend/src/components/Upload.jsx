@@ -4,11 +4,13 @@ import { useEffect, useState } from "react";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl } from "../services/api";
-import { usePostStore } from "../store/postStore";
+import { isCloudinaryPost, usePostStore } from "../store/postStore";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 100 * 1024 * 1024;
 const MAX_VIDEO_SECONDS = 120;
+const cloudinaryUrl = (value) =>
+  String(value || "").startsWith("https://res.cloudinary.com/") ? String(value || "") : "";
 
 const Upload = ({ open, initialType = "image", onClose }) => {
   const { deleteMedia, uploadMedia, uploadProfilePicture } = useAuth();
@@ -200,16 +202,31 @@ const Upload = ({ open, initialType = "image", onClose }) => {
               }
             },
           });
-      const nextPath = data.path || data.file?.path || data.files?.[0]?.path || data.user?.profilePicture || "";
-      const nextUrl = data.url || data.file?.url || data.files?.[0]?.url || nextPath;
+      const nextUrl =
+        cloudinaryUrl(data.secure_url) ||
+        cloudinaryUrl(data.url) ||
+        cloudinaryUrl(data.file?.secure_url) ||
+        cloudinaryUrl(data.file?.url) ||
+        cloudinaryUrl(data.file?.path) ||
+        cloudinaryUrl(data.files?.[0]?.secure_url) ||
+        cloudinaryUrl(data.files?.[0]?.url) ||
+        cloudinaryUrl(data.files?.[0]?.path) ||
+        cloudinaryUrl(data.path) ||
+        cloudinaryUrl(data.user?.profilePicture);
+      const nextPath = nextUrl;
       setUploadedUrl(nextUrl);
       setUploadedPath(nextPath);
       setProgress(100);
       setStatus(isProfile ? "Profile picture updated." : isImage ? "Image uploaded." : "Video uploaded.");
-      if (data.feedItem) {
-        prependPost(data.feedItem);
-        console.log("[VibeBook upload] post saved and added to state", data.feedItem);
-        window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: data.feedItem } }));
+      if (data.feedItem && isCloudinaryPost(data.feedItem)) {
+        const cloudinaryPost = {
+          ...data.feedItem,
+          url: cloudinaryUrl(data.feedItem.url) || nextUrl,
+          mediaUrl: cloudinaryUrl(data.feedItem.mediaUrl) || nextUrl,
+        };
+        prependPost(cloudinaryPost);
+        console.log("[VibeBook upload] post saved and added to state", cloudinaryPost);
+        window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: cloudinaryPost } }));
       }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Upload failed.");

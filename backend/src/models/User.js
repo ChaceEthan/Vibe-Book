@@ -12,6 +12,7 @@ const allowedCategories = [
 ];
 const allowedAvailability = ["available", "busy", "unavailable"];
 const allowedAccountTypes = ["user", "talent"];
+const allowedAccountRoles = ["user", "admin"];
 
 const userSchema = new mongoose.Schema({
   name: {
@@ -37,6 +38,11 @@ const userSchema = new mongoose.Schema({
     enum: allowedRoles,
     default: "dancer",
   },
+  protected: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
   type: {
     type: String,
     enum: allowedTypes,
@@ -46,6 +52,12 @@ const userSchema = new mongoose.Schema({
     type: String,
     enum: allowedAccountTypes,
     default: "talent",
+  },
+  accountRole: {
+    type: String,
+    enum: allowedAccountRoles,
+    default: "user",
+    index: true,
   },
   gender: {
     type: String,
@@ -354,5 +366,6 @@ User.allowedTypes = allowedTypes;
 User.allowedCategories = allowedCategories;
 User.allowedAvailability = allowedAvailability;
 User.allowedAccountTypes = allowedAccountTypes;
+User.allowedAccountRoles = allowedAccountRoles;
 
 module.exports = User;

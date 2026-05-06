@@ -14,7 +14,7 @@ const {
 } = require("../middleware/uploadMiddleware");
 const { removeFiles } = require("../utils/fileCleanup");
 const { toPublicUploadUrl, toUploadPath } = require("../utils/storagePaths");
-const { getMp4DurationSeconds } = require("../utils/videoDuration");
+const { getUploadedVideoDurationSeconds } = require("../utils/videoDuration");
 const { serializeFeedItem, userSelect } = require("../controllers/feedController");
 
 const router = express.Router();
@@ -56,6 +56,7 @@ const buildUploadedFiles = (req, files = []) => {
   return files.map((file) => ({
     path: toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images"),
     url: toPublicUploadUrl(req, toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images")),
+    secure_url: toPublicUploadUrl(req, toUploadPath(file, file.mimetype.startsWith("video/") ? "videos" : "images")),
     type: file.mimetype,
     originalName: file.originalname,
   }));
@@ -86,7 +87,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     }
 
     if (type === "video") {
-      const duration = await getMp4DurationSeconds(file.path);
+      const duration = await getUploadedVideoDurationSeconds(file);
       const clientDuration = parseDuration(req.body.duration);
       const knownDuration = duration || clientDuration;
 
@@ -103,7 +104,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     const caption = cleanDescription(req.body.caption || req.body.description);
     const tags = parseTags(req.body.tags);
     const orientation = normalizeOrientation(req.body.orientation);
-    const duration = type === "video" ? parseDuration(req.body.duration) || (await getMp4DurationSeconds(file.path)) || 0 : 0;
+    const duration = type === "video" ? parseDuration(req.body.duration) || (await getUploadedVideoDurationSeconds(file)) || 0 : 0;
     const update = {
       $addToSet: {
         [mediaField]: url,
@@ -156,10 +157,12 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
 
     return res.status(201).json({
       url: publicUrl,
+      secure_url: publicUrl,
       path: url,
       type,
       file: {
         url: publicUrl,
+        secure_url: publicUrl,
         path: url,
         type: file.mimetype,
         originalName: file.originalname,

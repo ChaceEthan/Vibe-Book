@@ -45,7 +45,7 @@ const Admin = () => {
     }
   };
 
-  if (user?.role !== "admin") {
+  if (user?.role !== "admin" && user?.accountRole !== "admin") {
     return (
       <section className="container-page py-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">Admin access required.</div>
@@ -66,9 +66,9 @@ const Admin = () => {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           ["Total users", stats?.totalUsers || 0],
-          ["Total uploads", stats?.totalUploads || 0],
+          ["Total posts", stats?.totalPosts || stats?.totalUploads || 0],
           ["Total bookings", stats?.totalBookings || 0],
-          ["Revenue", stats?.revenue || 0],
+          ["Engagement", `${stats?.engagementRate || 0}%`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <p className="truncate text-xs font-semibold uppercase text-slate-500">{label}</p>
@@ -111,7 +111,13 @@ const Admin = () => {
                     {item.isBlocked ? <ShieldCheck className="h-4 w-4" /> : <UserX className="h-4 w-4" />}
                     {item.isBlocked ? "Unblock" : "Block"}
                   </button>
-                  <button type="button" className="btn-secondary gap-2 text-red-700" onClick={() => runAction(() => adminApi.deleteUser(item._id), "User deleted.")}>
+                  <button
+                    type="button"
+                    className="btn-secondary gap-2 text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => runAction(() => adminApi.deleteUser(item._id), "User deleted.")}
+                    disabled={Boolean(item.protected || item.role === "admin" || item.accountRole === "admin")}
+                    title={item.protected || item.role === "admin" || item.accountRole === "admin" ? "Protected admin users cannot be deleted" : "Delete user"}
+                  >
                     <Trash2 className="h-4 w-4" />
                     Delete
                   </button>
