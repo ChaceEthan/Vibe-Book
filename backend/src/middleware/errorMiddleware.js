@@ -1,4 +1,6 @@
 const errorMiddleware = (err, req, res, next) => {
+  console.error("GLOBAL ERROR:", err);
+
   let statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : err.statusCode || 500;
   let message = err.message || "Server error";
   let data = null;
@@ -40,7 +42,8 @@ const errorMiddleware = (err, req, res, next) => {
   return res.status(statusCode).json({
     success: false,
     data,
-    message: statusCode === 500 ? "Server error" : message,
+    error: message,
+    message,
   });
 };
 

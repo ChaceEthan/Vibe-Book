@@ -1,14 +1,18 @@
 const { v2: cloudinary } = require("cloudinary");
+const path = require("path");
+
+require("dotenv").config({ path: path.join(__dirname, "..", "..", ".env"), quiet: true });
+
+const realValue = (value) => (value && !/^your_/i.test(String(value).trim()) ? value : undefined);
 
 const config = {
   secure: true,
+  cloud_name: realValue(process.env.CLOUDINARY_CLOUD_NAME),
+  api_key: realValue(process.env.CLOUDINARY_API_KEY),
+  api_secret: realValue(process.env.CLOUDINARY_API_SECRET),
 };
 
-if (!process.env.CLOUDINARY_URL) {
-  config.cloud_name = process.env.CLOUDINARY_CLOUD_NAME;
-  config.api_key = process.env.CLOUDINARY_API_KEY;
-  config.api_secret = process.env.CLOUDINARY_API_SECRET;
-}
+console.log("Cloudinary:", realValue(process.env.CLOUDINARY_CLOUD_NAME));
 
 cloudinary.config(config);
 

@@ -28,6 +28,10 @@ const removeFiles = async (files = []) => {
           return;
         }
 
+        if (!file?.path) {
+          return;
+        }
+
         await fs.unlink(file.path);
       } catch (error) {
         if (error.code !== "ENOENT") {

@@ -169,7 +169,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     if (isProfile) {
       formData.append("image", file);
     } else {
-      formData.append("file", file);
+      formData.append("media", file);
       formData.append("type", type);
       formData.append("orientation", orientation);
       formData.append("caption", caption.trim());
@@ -228,7 +228,12 @@ const Upload = ({ open, initialType = "image", onClose }) => {
         window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: uploadedPost } }));
       }
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Upload failed.");
+      console.error("UPLOAD FAILED:", requestError.response?.data);
+      const uploadMessage = requestError.response?.data?.error || requestError.response?.data?.message || "Upload failed";
+      setError(uploadMessage);
+      if (typeof window !== "undefined") {
+        window.alert(uploadMessage);
+      }
     } finally {
       setUploading(false);
     }
@@ -404,7 +409,14 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             onClick={handleUpload}
             disabled={uploading || !file || (type === "video" && duration > MAX_VIDEO_SECONDS)}
           >
-            {uploading ? "Uploading..." : "Upload"}
+            {uploading ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <UploadCloud className="h-4 w-4 animate-bounce" />
+                Uploading...
+              </span>
+            ) : (
+              "Upload"
+            )}
           </button>
         </div>
       </div>

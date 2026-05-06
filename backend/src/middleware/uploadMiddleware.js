@@ -12,14 +12,21 @@ const videoUploadDir = path.join(uploadRoot, "videos");
 const imageMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const videoMimeTypes = ["video/mp4", "video/quicktime", "video/webm"];
 const maxImageSize = 5 * 1024 * 1024;
-const maxVideoSize = 100 * 1024 * 1024;
+const maxVideoSize = 50 * 1024 * 1024;
+const maxUploadSize = 50 * 1024 * 1024;
+
+const storage = multer.memoryStorage();
 
 const ensureUploadFolders = () => undefined;
 
+const hasRealValue = (value) => Boolean(value && !/^your_/i.test(String(value).trim()));
+
 const cloudinaryConfigured = () =>
   Boolean(
-    process.env.CLOUDINARY_URL ||
-      (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET)
+    hasRealValue(process.env.CLOUDINARY_URL) ||
+      (hasRealValue(process.env.CLOUDINARY_CLOUD_NAME) &&
+        hasRealValue(process.env.CLOUDINARY_API_KEY) &&
+        hasRealValue(process.env.CLOUDINARY_API_SECRET))
   );
 
 const safeName = (name, includeExtension = true) => {
@@ -34,164 +41,165 @@ const safeName = (name, includeExtension = true) => {
   return `${baseName || "upload"}-${Date.now()}-${Math.round(Math.random() * 1e9)}${includeExtension ? extension : ""}`;
 };
 
-const cloudinaryFolderFor = (file) => (file.mimetype.startsWith("video/") ? "vibebook/videos" : "vibebook/images");
-const cloudinaryResourceTypeFor = (file) => (file.mimetype.startsWith("video/") ? "video" : "image");
+const cloudinaryFolderFor = (file) => (file?.mimetype?.startsWith("video/") ? "vibebook/videos" : "vibebook/images");
+const cloudinaryResourceTypeFor = (file) => (file?.mimetype?.startsWith("video/") ? "video" : "image");
 const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
 
-const createCloudinaryStorage = () => ({
-  _handleFile(req, file, callback) {
-    if (!cloudinaryConfigured()) {
-      const error = new Error("Cloudinary is not configured. Set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET.");
-      error.statusCode = 503;
-      return callback(error);
-    }
+const createUploadError = (message, statusCode = 500) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
 
-    let settled = false;
-    const done = (error, uploadedFile) => {
-      if (settled) {
-        return;
-      }
+const uploadBufferToCloudinary = async (file, options = {}) => {
+  console.log("UPLOAD FILE:", file?.originalname);
 
-      settled = true;
-      callback(error, uploadedFile);
-    };
+  if (!file?.buffer) {
+    throw createUploadError("No file uploaded", 400);
+  }
 
-    const uploadOptions = {
-      folder: cloudinaryFolderFor(file),
-      public_id: safeName(file.originalname, false),
-      resource_type: "auto",
-      overwrite: false,
-    };
+  if (!cloudinaryConfigured()) {
+    throw createUploadError("Cloudinary not configured", 500);
+  }
 
-    try {
-      const uploadStream = cloudinary.uploader.upload_stream(uploadOptions, (error, result) => {
-        console.log("CLOUDINARY RESULT:", result);
-
-        if (error) {
-          error.statusCode = error.statusCode || 502;
-          console.error(`Cloudinary upload failed: ${error.message}`);
-          return done(error);
-        }
-
-        if (!isCloudinarySecureUrl(result?.secure_url)) {
-          const missingUrlError = new Error("Cloudinary upload did not return a secure URL");
-          missingUrlError.statusCode = 502;
-          return done(missingUrlError);
-        }
-
-        console.log("Uploaded to Cloudinary:", result.secure_url);
-
-        return done(null, {
-          path: result.secure_url,
-          secure_url: result.secure_url,
-          filename: result.public_id,
-          size: result.bytes,
-          mimetype: file.mimetype,
-          originalname: file.originalname,
-          resource_type: result.resource_type || cloudinaryResourceTypeFor(file),
-          duration: result.duration,
-          cloudinary: result,
-        });
-      });
-
-      file.stream.on("error", done);
-      file.stream.pipe(uploadStream);
-    } catch (error) {
-      error.statusCode = error.statusCode || 502;
-      return done(error);
-    }
-  },
-  _removeFile(req, file, callback) {
-    if (!file?.filename) {
-      return callback(null);
-    }
-
-    return cloudinary.uploader.destroy(
-      file.filename,
+  const result = await new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
       {
-        resource_type: file.resource_type || cloudinaryResourceTypeFor(file),
-        invalidate: true,
+        folder: options.folder || cloudinaryFolderFor(file),
+        public_id: options.publicId || safeName(file.originalname, false),
+        resource_type: "auto",
+        overwrite: false,
       },
-      callback
+      (error, uploadedResult) => {
+        if (error) {
+          return reject(error);
+        }
+
+        return resolve(uploadedResult);
+      }
     );
-  },
-});
+
+    stream.end(file.buffer);
+  });
+
+  console.log("CLOUDINARY URL:", result?.secure_url);
+
+  if (!isCloudinarySecureUrl(result?.secure_url)) {
+    throw createUploadError("Cloudinary upload did not return a secure URL", 502);
+  }
+
+  file.path = result.secure_url;
+  file.secure_url = result.secure_url;
+  file.filename = result.public_id;
+  file.size = result.bytes || file.size;
+  file.resource_type = result.resource_type || cloudinaryResourceTypeFor(file);
+  file.duration = result.duration;
+  file.cloudinary = result;
+
+  return file;
+};
 
 const createFileFilter = (allowedTypes, label) => (req, file, callback) => {
   if (!allowedTypes.includes(file.mimetype)) {
-    const error = new Error(`Only ${label} files are allowed`);
-    error.statusCode = 400;
+    const error = createUploadError(`Only ${label} files are allowed`, 400);
     return callback(error);
   }
 
   return callback(null, true);
 };
 
-const uploadFiles = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
-    fileSize: maxVideoSize,
+const createMulter = (allowedTypes, label, options = {}) =>
+  multer({
+    storage,
+    limits: {
+      fileSize: options.fileSize || maxUploadSize,
+      files: options.files || 1,
+    },
+    fileFilter: createFileFilter(allowedTypes, label),
+  });
+
+const flattenFiles = (files) => {
+  if (!files) {
+    return [];
+  }
+
+  if (Array.isArray(files)) {
+    return files;
+  }
+
+  return Object.values(files).flat().filter(Boolean);
+};
+
+const withCloudinaryUpload = (multerMiddleware) => (req, res, next) => {
+  multerMiddleware(req, res, async (error) => {
+    if (error) {
+      return next(error);
+    }
+
+    try {
+      const files = [req.file, ...flattenFiles(req.files)].filter(Boolean);
+      await Promise.all(files.map((file) => uploadBufferToCloudinary(file)));
+      return next();
+    } catch (uploadError) {
+      return next(uploadError);
+    }
+  });
+};
+
+const uploadFiles = withCloudinaryUpload(
+  createMulter([...imageMimeTypes, ...videoMimeTypes], "image or video", {
     files: 10,
-  },
-  fileFilter: createFileFilter([...imageMimeTypes, ...videoMimeTypes], "image or video"),
-});
+  }).array("files", 10)
+);
 
-const uploadSingleMedia = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
-    fileSize: maxVideoSize,
-    files: 1,
-  },
-  fileFilter: createFileFilter([...imageMimeTypes, ...videoMimeTypes], "image or video"),
-}).single("file");
+const uploadSingleMedia = createMulter([...imageMimeTypes, ...videoMimeTypes], "image or video", {
+  files: 2,
+}).fields([
+  { name: "media", maxCount: 1 },
+  { name: "file", maxCount: 1 },
+]);
 
-const uploadFeedImage = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
-    fileSize: maxImageSize,
-    files: 1,
-  },
-  fileFilter: createFileFilter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image"),
-}).single("file");
+const uploadFeedImage = createMulter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image", {
+  fileSize: maxImageSize,
+  files: 2,
+}).fields([
+  { name: "media", maxCount: 1 },
+  { name: "file", maxCount: 1 },
+]);
 
-const uploadFeedVideo = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
-    fileSize: maxVideoSize,
-    files: 1,
-  },
-  fileFilter: createFileFilter(videoMimeTypes, "MP4, MOV, or WEBM video"),
-}).single("file");
+const uploadFeedVideo = createMulter(videoMimeTypes, "MP4, MOV, or WEBM video", {
+  fileSize: maxVideoSize,
+  files: 2,
+}).fields([
+  { name: "media", maxCount: 1 },
+  { name: "file", maxCount: 1 },
+]);
 
-const uploadImages = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
+const uploadImages = withCloudinaryUpload(
+  createMulter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image", {
     fileSize: maxImageSize,
     files: 5,
-  },
-  fileFilter: createFileFilter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image"),
-}).array("images", 20);
+  }).array("images", 20)
+);
 
-const uploadSingleImage = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
+const uploadSingleImage = withCloudinaryUpload(
+  createMulter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image", {
     fileSize: maxImageSize,
     files: 1,
-  },
-  fileFilter: createFileFilter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image"),
-}).single("image");
+  }).single("image")
+);
 
-const uploadVideos = multer({
-  storage: createCloudinaryStorage(),
-  limits: {
+const uploadVideos = withCloudinaryUpload(
+  createMulter(videoMimeTypes, "MP4, MOV, or WEBM video", {
     fileSize: maxVideoSize,
     files: 3,
-  },
-  fileFilter: createFileFilter(videoMimeTypes, "MP4, MOV, or WEBM video"),
-}).array("videos", 3);
+  }).array("videos", 3)
+);
 
 module.exports = {
+  cloudinaryConfigured,
   ensureUploadFolders,
+  uploadBufferToCloudinary,
   uploadFiles,
   imageUploadDir,
   maxImageSize,

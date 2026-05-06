@@ -8,6 +8,7 @@ const User = require("../models/User");
 const authMiddleware = require("../middleware/authMiddleware");
 const {
   maxImageSize,
+  uploadBufferToCloudinary,
   uploadFeedImage,
   uploadFeedVideo,
   uploadSingleMedia,
@@ -63,15 +64,22 @@ const buildUploadedFiles = (req, files = []) => {
 };
 
 const getUploadedFile = (req) => {
-  return req.file || (Array.isArray(req.files) ? req.files[0] : null);
+  return (
+    req.file ||
+    req.files?.media?.[0] ||
+    req.files?.file?.[0] ||
+    (Array.isArray(req.files) ? req.files[0] : null)
+  );
 };
 
 const sendUploadError = (res, error) => {
   const statusCode = error.statusCode || error.status || 500;
+  const message = error.message || "Upload failed";
 
   return res.status(statusCode).json({
     success: false,
-    message: error.message || "Upload failed",
+    error: message,
+    message,
   });
 };
 
@@ -81,10 +89,11 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
 
   try {
     if (!file) {
-      return res.status(400).json({ success: false, message: "Media file is required" });
+      return res.status(400).json({ success: false, error: "No file uploaded", message: "No file uploaded" });
     }
 
     const type = file.mimetype.startsWith("video/") ? "video" : "image";
+    const clientDuration = parseDuration(req.body.duration);
 
     if (expectedType && type !== expectedType) {
       await removeFiles([file]);
@@ -96,9 +105,14 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       return res.status(400).json({ success: false, message: "Images must be under 5MB" });
     }
 
+    if (type === "video" && clientDuration && clientDuration > MAX_VIDEO_SECONDS) {
+      return res.status(400).json({ success: false, error: "Videos must be 2 minutes or shorter", message: "Videos must be 2 minutes or shorter" });
+    }
+
+    await uploadBufferToCloudinary(file);
+
     if (type === "video") {
       const duration = await getUploadedVideoDurationSeconds(file);
-      const clientDuration = parseDuration(req.body.duration);
       const knownDuration = duration || clientDuration;
 
       if (knownDuration && knownDuration > MAX_VIDEO_SECONDS) {
@@ -205,7 +219,8 @@ router.get("/", (req, res) => {
   return res.json({
     message: "Upload API is ready",
     fields: {
-      file: "multipart/form-data field: file",
+      media: "multipart/form-data field: media",
+      file: "legacy multipart/form-data field: file",
     },
     endpoints: ["/api/upload/image", "/api/upload/video"],
   });
