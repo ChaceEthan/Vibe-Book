@@ -12,11 +12,7 @@ const config = {
   api_secret: realValue(process.env.CLOUDINARY_API_SECRET),
 };
 
-if (!config.cloud_name || !config.api_key || !config.api_secret) {
-  console.error("Cloudinary env missing");
-}
-
-console.log("Cloudinary active:", Boolean(realValue(process.env.CLOUDINARY_CLOUD_NAME)));
+console.log("Cloudinary active:", Boolean(config.cloud_name && config.api_key && config.api_secret));
 
 cloudinary.config(config);
 

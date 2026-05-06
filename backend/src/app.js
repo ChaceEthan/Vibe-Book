@@ -57,16 +57,11 @@ const staticAssetOptions = {
 };
 
 const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5174",
+  "https://vibe-book-kappa.vercel.app",
   "http://localhost:5175",
   "http://localhost:5176",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
   "http://127.0.0.1:5175",
   "http://127.0.0.1:5176",
-  "http://localhost:3000",
-  "https://vibe-book-kappa.vercel.app",
 ];
 
 const addAllowedOrigins = (...origins) => {
@@ -83,7 +78,7 @@ const addAllowedOrigins = (...origins) => {
   });
 };
 
-addAllowedOrigins(process.env.CLIENT_URL, process.env.FRONTEND_URL, process.env.CORS_ORIGIN);
+addAllowedOrigins(process.env.CLIENT_URL, process.env.FRONTEND_URL);
 
 const corsOptions = {
   origin(origin, callback) {
@@ -91,11 +86,9 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
+    const normalizedOrigin = origin.trim();
 
-    if (process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+    if (allowedOrigins.includes(normalizedOrigin)) {
       return callback(null, true);
     }
 
@@ -108,6 +101,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+// Express 5-safe wildcard preflight handler.
 app.options(/.*/, cors(corsOptions));
 app.use(compression({ threshold: 1024 }));
 app.use("/uploads", express.static("uploads", staticAssetOptions));
