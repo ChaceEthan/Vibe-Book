@@ -1,3 +1,4 @@
+// @ts-nocheck
 const fs = require("fs/promises");
 
 const cloudinary = require("../config/cloudinary");

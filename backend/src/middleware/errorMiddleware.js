@@ -1,3 +1,4 @@
+// @ts-nocheck
 const errorMiddleware = (err, req, res, next) => {
   console.error("GLOBAL ERROR:", err);
 

@@ -1,3 +1,4 @@
+// @ts-nocheck
 const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 

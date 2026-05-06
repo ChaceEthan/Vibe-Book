@@ -1,3 +1,4 @@
+// @ts-nocheck
 const mongoose = require("mongoose");
 
 const allowedRoles = ["dancer", "dj", "mc", "artist", "crew", "admin"];

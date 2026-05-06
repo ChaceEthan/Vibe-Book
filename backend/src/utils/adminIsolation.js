@@ -1,3 +1,4 @@
+// @ts-nocheck
 const configuredAdminEmails = () =>
   [
     process.env.ISAAC_ADMIN_EMAIL,

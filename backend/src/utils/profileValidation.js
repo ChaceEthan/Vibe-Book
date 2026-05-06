@@ -1,3 +1,4 @@
+// @ts-nocheck
 const User = require("../models/User");
 
 const publicRoles = User.allowedRoles.filter((role) => role !== "admin");

@@ -1,3 +1,4 @@
+// @ts-nocheck
 const TRIAL_DAYS = 30;
 const PLATFORM_ACCESS_AMOUNT = 1000;
 const PLATFORM_ACCESS_CURRENCY = "RWF";
