@@ -69,21 +69,21 @@ const allowedOrigins = [
   "https://vibe-book-kappa.vercel.app",
 ];
 
-if (process.env.CLIENT_URL && !allowedOrigins.includes(process.env.CLIENT_URL)) {
-  allowedOrigins.push(process.env.CLIENT_URL);
-}
+const addAllowedOrigins = (...origins) => {
+  origins.filter(Boolean).forEach((origin) => {
+    origin
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .forEach((value) => {
+        if (!allowedOrigins.includes(value)) {
+          allowedOrigins.push(value);
+        }
+      });
+  });
+};
 
-[process.env.FRONTEND_URL, process.env.CORS_ORIGIN].filter(Boolean).forEach((origin) => {
-  origin
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .forEach((value) => {
-      if (!allowedOrigins.includes(value)) {
-        allowedOrigins.push(value);
-      }
-    });
-});
+addAllowedOrigins(process.env.CLIENT_URL, process.env.FRONTEND_URL, process.env.CORS_ORIGIN);
 
 const corsOptions = {
   origin(origin, callback) {
@@ -104,6 +104,7 @@ const corsOptions = {
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 200,
 };
 
 app.use(cors(corsOptions));
