@@ -13,6 +13,7 @@ const defaultCategoryByRole = {
 };
 
 const hasOwn = (source, field) => Object.prototype.hasOwnProperty.call(source, field);
+const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
 
 const normalizeText = (value) => {
   return typeof value === "string" ? value.trim() : "";
@@ -38,25 +39,7 @@ const normalizeMediaPath = (value) => {
     return "";
   }
 
-  if (mediaPath.startsWith("/uploads/")) {
-    return mediaPath;
-  }
-
-  try {
-    const parsed = new URL(mediaPath);
-
-    if (parsed.pathname.startsWith("/uploads/")) {
-      return parsed.pathname;
-    }
-
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return mediaPath;
-    }
-  } catch {
-    return "";
-  }
-
-  return "";
+  return isCloudinarySecureUrl(mediaPath) ? mediaPath : "";
 };
 
 const normalizeMediaArray = (value, field) => {
@@ -64,7 +47,7 @@ const normalizeMediaArray = (value, field) => {
 
   if (Array.isArray(value) && values.length !== value.filter(Boolean).length) {
     return {
-      error: `${field} must contain valid upload URLs`,
+      error: `${field} must contain valid Cloudinary upload URLs`,
     };
   }
 

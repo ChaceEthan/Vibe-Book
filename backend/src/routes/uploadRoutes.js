@@ -1,3 +1,4 @@
+// @ts-nocheck
 const express = require("express");
 
 const Feed = require("../models/Feed");
@@ -11,7 +12,6 @@ const {
   uploadSingleMedia,
 } = require("../middleware/uploadMiddleware");
 const { removeFiles } = require("../utils/fileCleanup");
-const { toUploadPath } = require("../utils/storagePaths");
 const { getUploadedVideoDurationSeconds } = require("../utils/videoDuration");
 
 const router = express.Router();
@@ -50,16 +50,11 @@ const parseTags = (value) => {
 };
 
 const getUploadedFile = (req) => {
-  return (
-    req.file ||
-    req.files?.media?.[0] ||
-    req.files?.file?.[0] ||
-    (Array.isArray(req.files) ? req.files[0] : null)
-  );
+  return req.file || req.files?.media?.[0] || (Array.isArray(req.files) ? req.files[0] : null);
 };
 
 const sendUploadError = (res, error) => {
-  const statusCode = error.statusCode || error.status || 500;
+  const statusCode = error.statusCode || error.status || (error.name === "MulterError" ? 400 : 500);
   const message = error.message || "Upload failed";
 
   return res.status(statusCode).json({
@@ -95,7 +90,9 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       return res.status(400).json({ success: false, error: "Videos must be 2 minutes or shorter", message: "Videos must be 2 minutes or shorter" });
     }
 
-    await uploadBufferToCloudinary(file);
+    const uploadResult = await uploadBufferToCloudinary(file);
+    const url = uploadResult.secure_url;
+    const publicId = uploadResult.public_id;
 
     if (type === "video") {
       const duration = await getUploadedVideoDurationSeconds(file);
@@ -107,7 +104,6 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       }
     }
 
-    const url = toUploadPath(file, type === "video" ? "videos" : "images");
     const mediaField = type === "video" ? "videos" : "images";
     const mirrorField = type === "video" ? "videoUrls" : "gallery";
     const caption = cleanDescription(req.body.caption || req.body.description);
@@ -167,7 +163,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     return res.status(201).json({
       success: true,
       url,
-      public_id: file.filename,
+      public_id: publicId,
     });
   } catch (error) {
     if (file) {
@@ -193,7 +189,6 @@ router.get("/", (req, res) => {
     message: "Upload API is ready",
     fields: {
       media: "multipart/form-data field: media",
-      file: "legacy multipart/form-data field: file",
     },
     endpoints: ["/api/upload/image", "/api/upload/video"],
   });

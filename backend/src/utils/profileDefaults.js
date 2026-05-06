@@ -1,4 +1,4 @@
-const DEFAULT_PROFILE_IMAGE_PATH = "/uploads/default-profile.svg";
+const DEFAULT_PROFILE_IMAGE_PATH = "";
 
 module.exports = {
   DEFAULT_PROFILE_IMAGE_PATH,

@@ -2,12 +2,9 @@
 const path = require("path");
 
 const multer = require("multer");
+const streamifier = require("streamifier");
 
 const cloudinary = require("../config/cloudinary");
-
-const uploadRoot = path.join(__dirname, "..", "..", "uploads");
-const imageUploadDir = path.join(uploadRoot, "images");
-const videoUploadDir = path.join(uploadRoot, "videos");
 
 const imageMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const videoMimeTypes = ["video/mp4", "video/quicktime", "video/webm"];
@@ -54,7 +51,7 @@ const createUploadError = (message, statusCode = 500) => {
 const uploadBufferToCloudinary = async (file, options = {}) => {
   console.log("UPLOAD FILE:", file?.originalname);
 
-  if (!file?.buffer) {
+  if (!Buffer.isBuffer(file?.buffer)) {
     throw createUploadError("No file uploaded", 400);
   }
 
@@ -79,7 +76,7 @@ const uploadBufferToCloudinary = async (file, options = {}) => {
       }
     );
 
-    stream.end(file.buffer);
+    streamifier.createReadStream(file.buffer).on("error", reject).pipe(stream);
   });
 
   console.log("Uploaded to Cloudinary:", result?.secure_url);
@@ -91,12 +88,13 @@ const uploadBufferToCloudinary = async (file, options = {}) => {
   file.path = result.secure_url;
   file.secure_url = result.secure_url;
   file.filename = result.public_id;
+  file.public_id = result.public_id;
   file.size = result.bytes || file.size;
   file.resource_type = result.resource_type || cloudinaryResourceTypeFor(file);
   file.duration = result.duration;
   file.cloudinary = result;
 
-  return file;
+  return result;
 };
 
 const createFileFilter = (allowedTypes, label) => (req, file, callback) => {
@@ -152,28 +150,15 @@ const uploadFiles = withCloudinaryUpload(
   }).array("files", 10)
 );
 
-const uploadSingleMedia = createMulter([...imageMimeTypes, ...videoMimeTypes], "image or video", {
-  files: 2,
-}).fields([
-  { name: "media", maxCount: 1 },
-  { name: "file", maxCount: 1 },
-]);
+const uploadSingleMedia = createMulter([...imageMimeTypes, ...videoMimeTypes], "image or video").single("media");
 
 const uploadFeedImage = createMulter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image", {
   fileSize: maxImageSize,
-  files: 2,
-}).fields([
-  { name: "media", maxCount: 1 },
-  { name: "file", maxCount: 1 },
-]);
+}).single("media");
 
 const uploadFeedVideo = createMulter(videoMimeTypes, "MP4, MOV, or WEBM video", {
   fileSize: maxVideoSize,
-  files: 2,
-}).fields([
-  { name: "media", maxCount: 1 },
-  { name: "file", maxCount: 1 },
-]);
+}).single("media");
 
 const uploadImages = withCloudinaryUpload(
   createMulter(imageMimeTypes, "JPEG, PNG, WEBP, or GIF image", {
@@ -201,7 +186,6 @@ module.exports = {
   ensureUploadFolders,
   uploadBufferToCloudinary,
   uploadFiles,
-  imageUploadDir,
   maxImageSize,
   maxVideoSize,
   uploadFeedImage,
@@ -209,7 +193,5 @@ module.exports = {
   uploadImages,
   uploadSingleImage,
   uploadSingleMedia,
-  uploadRoot,
   uploadVideos,
-  videoUploadDir,
 };

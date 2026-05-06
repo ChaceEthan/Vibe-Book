@@ -17,7 +17,6 @@ const {
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
   toPublicUploadUrl,
-  toUploadPath,
 } = require("../utils/storagePaths");
 const {
   normalizeAvailability,
@@ -35,6 +34,17 @@ const MAX_IMAGES_PER_USER = 3;
 const FREE_VIDEO_LIMIT = 1;
 const MAX_VIDEO_SECONDS = 120;
 const cloudinaryMediaQuery = { $regex: /^https:\/\/res\.cloudinary\.com\//i };
+const getCloudinaryUploadUrl = (file) => {
+  const url = file?.cloudinary?.secure_url || file?.secure_url || file?.path || "";
+
+  if (isCloudinarySecureUrl(url)) {
+    return url;
+  }
+
+  const error = new Error("Upload did not return a Cloudinary URL");
+  error.statusCode = 502;
+  throw error;
+};
 const searchRoleAliases = {
   djs: "dj",
   dj: "dj",
@@ -576,7 +586,7 @@ const uploadProfileImages = async (req, res, next) => {
       return res.status(400).json({ message: `Free profiles can have a maximum of ${MAX_IMAGES_PER_USER} images` });
     }
 
-    const imagePaths = files.map((file) => toUploadPath(file, "images"));
+    const imagePaths = files.map(getCloudinaryUploadUrl);
     const descriptions = imagePaths.map((imagePath) => ({
       url: imagePath,
       description: normalizeText(req.body.description).slice(0, 500),
@@ -608,7 +618,7 @@ const uploadProfileImage = async (req, res, next) => {
       return res.status(400).json({ message: "Profile image file is required" });
     }
 
-    const imagePath = toUploadPath(file, "images");
+    const imagePath = getCloudinaryUploadUrl(file);
     const user = await User.findByIdAndUpdate(
       req.user._id,
       {
@@ -654,7 +664,7 @@ const uploadProfileVideos = async (req, res, next) => {
       return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 2 minutes` });
     }
 
-    const videoPaths = files.map((file) => toUploadPath(file, "videos"));
+    const videoPaths = files.map(getCloudinaryUploadUrl);
     const nextVideos = [...currentVideos, ...videoPaths];
     const descriptions = videoPaths.map((videoPath) => ({
       url: videoPath,

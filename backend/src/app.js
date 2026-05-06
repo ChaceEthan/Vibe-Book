@@ -26,11 +26,9 @@ const authMiddleware = require("./middleware/authMiddleware");
 const responseMiddleware = require("./middleware/responseMiddleware");
 const errorMiddleware = require("./middleware/errorMiddleware");
 const { visitorMiddleware } = require("./middleware/visitorMiddleware");
-const { ensureUploadFolders, uploadRoot } = require("./middleware/uploadMiddleware");
 
 const app = express();
 app.set("trust proxy", 1);
-ensureUploadFolders();
 
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -48,19 +46,12 @@ const bookingLimiter = rateLimit({
   message: { message: "Too many booking or payment requests. Please try again soon." },
 });
 
-const staticAssetOptions = {
-  maxAge: "7d",
-  etag: true,
-  lastModified: true,
-  setHeaders(res) {
-    res.setHeader("Cache-Control", "public, max-age=604800");
-  },
-};
-
 const allowedOrigins = [
   "https://vibe-book-kappa.vercel.app",
+  "http://localhost:5174",
   "http://localhost:5175",
   "http://localhost:5176",
+  "http://127.0.0.1:5174",
   "http://127.0.0.1:5175",
   "http://127.0.0.1:5176",
 ];
@@ -105,8 +96,6 @@ app.use(cors(corsOptions));
 // Express 5-safe wildcard preflight handler.
 app.options(/.*/, cors(corsOptions));
 app.use(compression({ threshold: 1024 }));
-app.use("/uploads", express.static("uploads", staticAssetOptions));
-app.use("/uploads", express.static(uploadRoot, staticAssetOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(responseMiddleware);

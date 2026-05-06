@@ -1,4 +1,3 @@
-const fs = require("fs/promises");
 const express = require("express");
 
 const Feed = require("../models/Feed");
@@ -6,12 +5,11 @@ const User = require("../models/User");
 const cloudinary = require("../config/cloudinary");
 const authMiddleware = require("../middleware/authMiddleware");
 const { profileResponse } = require("../controllers/userController");
-const { fromMediaId, normalizeStoredUploadPath, toUploadFilePath } = require("../utils/storagePaths");
+const { fromMediaId, isCloudinarySecureUrl, normalizeStoredUploadPath } = require("../utils/storagePaths");
 
 const router = express.Router();
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const isRemoteMedia = (value) => /^https?:\/\//i.test(value || "");
 
 const cloudinaryAssetFromUrl = (mediaPath) => {
   try {
@@ -58,27 +56,13 @@ const removeMediaFile = async (mediaPath) => {
 
     return;
   }
-
-  const filePath = toUploadFilePath(mediaPath);
-
-  if (!filePath) {
-    return;
-  }
-
-  try {
-    await fs.unlink(filePath);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      console.error(`Media delete failed: ${error.message}`);
-    }
-  }
 };
 
 router.delete("/:id", authMiddleware, async (req, res, next) => {
   try {
     const mediaPath = fromMediaId(req.params.id);
 
-    if (!mediaPath || (!mediaPath.startsWith("/uploads/") && !isRemoteMedia(mediaPath))) {
+    if (!mediaPath || !isCloudinarySecureUrl(mediaPath)) {
       return res.status(400).json({ message: "Invalid media id" });
     }
 
