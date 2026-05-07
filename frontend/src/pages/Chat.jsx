@@ -18,6 +18,16 @@ const formatTime = (value) => {
   }).format(new Date(value));
 };
 
+const requestMessage = (requestError, fallback) => {
+  const message = requestError?.response?.data?.message || requestError?.message || "";
+
+  if (requestError?.response?.status === 404 && message.toLowerCase().includes("route not found")) {
+    return "Group chat is temporarily unavailable. Please try again shortly.";
+  }
+
+  return message || fallback;
+};
+
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
 
 const messageSenderId = (item) => item?.senderId || idOf(item?.sender);
@@ -78,6 +88,9 @@ const Chat = () => {
   const bottomRef = useRef(null);
   const groupBottomRef = useRef(null);
   const typingTimerRef = useRef(null);
+  const groupsLoadingRef = useRef(false);
+  const groupMessagesRequestRef = useRef(0);
+  const groupsRefreshTimerRef = useRef(null);
 
   const appendDirectMessage = (nextMessage) => {
     const normalized = normalizeSocketMessage(nextMessage);
@@ -150,21 +163,46 @@ const Chat = () => {
       setOtherUser(data?.otherUser || null);
       setOnline(Boolean(data?.online));
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to load chat.");
+      setError(requestMessage(requestError, "Unable to load chat."));
     } finally {
       setLoading(false);
     }
   };
 
-  const loadGroups = async () => {
+  const loadGroups = async ({ silent = false } = {}) => {
+    if (groupsLoadingRef.current) {
+      return;
+    }
+
+    groupsLoadingRef.current = true;
+
+    if (!silent) {
+      setError("");
+    }
+
     try {
       const { data } = await groupChatApi.list();
       const nextGroups = Array.isArray(data?.groups) ? data.groups : [];
       setGroups(nextGroups);
       setSelectedGroup((current) => current || nextGroups[0]?._id || "");
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to load groups.");
+      const rawMessage = requestError?.response?.data?.message || "";
+
+      if (requestError?.response?.status === 404 && rawMessage.toLowerCase().includes("route not found")) {
+        setGroups([]);
+        setSelectedGroup("");
+        setGroupMessages([]);
+      }
+
+      setError(requestMessage(requestError, "Unable to load groups."));
+    } finally {
+      groupsLoadingRef.current = false;
     }
+  };
+
+  const scheduleGroupsRefresh = () => {
+    clearTimeout(groupsRefreshTimerRef.current);
+    groupsRefreshTimerRef.current = setTimeout(() => loadGroups({ silent: true }), 500);
   };
 
   const loadMembers = async () => {
@@ -179,6 +217,7 @@ const Chat = () => {
   const loadGroupMessages = async (groupId, { silent = false } = {}) => {
     if (!groupId) {
       setGroupMessages([]);
+      setLoading(false);
       return;
     }
 
@@ -186,14 +225,25 @@ const Chat = () => {
       setLoading(true);
     }
 
+    const requestId = groupMessagesRequestRef.current + 1;
+    groupMessagesRequestRef.current = requestId;
+
     try {
       const { data } = await groupChatApi.getMessages(groupId);
+      if (requestId !== groupMessagesRequestRef.current) {
+        return;
+      }
+
       setGroupMessages(Array.isArray(data?.messages) ? data.messages : []);
       setGroups((current) => current.map((item) => (item._id === data?.group?._id ? data.group : item)));
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to load group chat.");
+      if (requestId === groupMessagesRequestRef.current) {
+        setError(requestMessage(requestError, "Unable to load group chat."));
+      }
     } finally {
-      setLoading(false);
+      if (requestId === groupMessagesRequestRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -286,6 +336,10 @@ const Chat = () => {
   }, [activeTab, userId]);
 
   useEffect(() => {
+    return () => clearTimeout(groupsRefreshTimerRef.current);
+  }, []);
+
+  useEffect(() => {
     if (activeTab !== "groups") {
       return undefined;
     }
@@ -321,7 +375,11 @@ const Chat = () => {
 
     const joinSelectedGroup = () => {
       if (selectedGroup) {
-        socket.emit("join_group", { groupId: selectedGroup });
+        socket.emit("join_group", { groupId: selectedGroup }, (response) => {
+          if (response && !response.success) {
+            setError(response.message || "Unable to join group chat.");
+          }
+        });
       }
     };
 
@@ -343,7 +401,7 @@ const Chat = () => {
         appendGroupMessage(normalized);
       }
 
-      loadGroups();
+      scheduleGroupsRefresh();
     };
 
     const handleGroupMembership = (payload = {}) => {
@@ -353,17 +411,30 @@ const Chat = () => {
         appendGroupMessage(messagePayload);
       }
 
-      loadGroups();
+      scheduleGroupsRefresh();
+    };
+
+    const handleGroupCreated = (payload = {}) => {
+      if (payload.group?._id) {
+        setGroups((current) => {
+          const exists = current.some((item) => item._id === payload.group._id);
+          return exists ? current.map((item) => (item._id === payload.group._id ? payload.group : item)) : [payload.group, ...current];
+        });
+        setSelectedGroup((current) => current || payload.group._id);
+      }
+
+      scheduleGroupsRefresh();
     };
 
     const handleStats = () => {
-      loadGroups();
+      scheduleGroupsRefresh();
     };
 
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.on("receive_group_message", handleGroupMessage);
     socket.on("group:message", handleGroupMessage);
+    socket.on("group:created", handleGroupCreated);
     socket.on("group:member-joined", handleGroupMembership);
     socket.on("group:member-left", handleGroupMembership);
     socket.on("global:stats", handleStats);
@@ -378,6 +449,7 @@ const Chat = () => {
       socket.off("disconnect", handleDisconnect);
       socket.off("receive_group_message", handleGroupMessage);
       socket.off("group:message", handleGroupMessage);
+      socket.off("group:created", handleGroupCreated);
       socket.off("group:member-joined", handleGroupMembership);
       socket.off("group:member-left", handleGroupMembership);
       socket.off("global:stats", handleStats);
@@ -451,7 +523,7 @@ const Chat = () => {
         appendDirectMessage(data.chatMessage || data.inboxMessage);
       }
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Message failed.");
+      setError(requestMessage(requestError, "Message failed."));
     } finally {
       setSending(false);
     }
@@ -501,7 +573,7 @@ const Chat = () => {
         }
       }
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Group message failed.");
+      setError(requestMessage(requestError, "Group message failed."));
     } finally {
       setSending(false);
     }
@@ -510,8 +582,8 @@ const Chat = () => {
   const handleCreateGroup = async (event) => {
     event.preventDefault();
 
-    if (!groupName.trim() || !selectedMembers.length) {
-      setError("Group name and members are required.");
+    if (!groupName.trim()) {
+      setError("Group name is required.");
       return;
     }
 
@@ -529,7 +601,7 @@ const Chat = () => {
       setStatus("Group created.");
       await loadGroups();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to create group.");
+      setError(requestMessage(requestError, "Unable to create group."));
     }
   };
 
@@ -548,7 +620,7 @@ const Chat = () => {
       setStatus("You left the group.");
       await loadGroups();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to leave group.");
+      setError(requestMessage(requestError, "Unable to leave group."));
     }
   };
 
@@ -561,7 +633,7 @@ const Chat = () => {
       setStatus("Chat unlocked.");
       await loadConversation();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to unlock chat.");
+      setError(requestMessage(requestError, "Unable to unlock chat."));
     }
   };
 

@@ -5,6 +5,15 @@ const API_BASE_URL = API_ROOT.endsWith("/api") ? API_ROOT : `${API_ROOT}/api`;
 const SOCKET_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
 let socket = null;
+let connectRequested = false;
+let disconnectTimer = null;
+
+const clearDisconnectTimer = () => {
+  if (disconnectTimer) {
+    clearTimeout(disconnectTimer);
+    disconnectTimer = null;
+  }
+};
 
 export const getStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
 
@@ -25,10 +34,24 @@ export const getSocket = (token = getStoredToken()) => {
     autoConnect: false,
     withCredentials: true,
     reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 800,
-    reconnectionDelayMax: 5000,
-    transports: ["websocket", "polling"],
+    reconnectionAttempts: 12,
+    reconnectionDelay: 1000,
+    reconnectionDelayMax: 8000,
+    timeout: 12000,
+    transports: ["polling", "websocket"],
+  });
+
+  socket.on("connect", () => {
+    connectRequested = false;
+  });
+
+  socket.on("connect_error", (error) => {
+    connectRequested = false;
+    console.warn("Socket connection failed:", error.message);
+  });
+
+  socket.on("disconnect", () => {
+    connectRequested = false;
   });
 
   return socket;
@@ -37,15 +60,37 @@ export const getSocket = (token = getStoredToken()) => {
 export const connectSocket = (token = getStoredToken()) => {
   const activeSocket = getSocket(token);
 
-  if (activeSocket && !activeSocket.connected) {
+  clearDisconnectTimer();
+
+  if (activeSocket && !activeSocket.connected && !connectRequested && !activeSocket.active) {
+    connectRequested = true;
     activeSocket.connect();
   }
 
   return activeSocket;
 };
 
-export const disconnectSocket = () => {
-  if (socket) {
-    socket.disconnect();
+export const disconnectSocket = ({ immediate = false } = {}) => {
+  if (!socket) {
+    return;
   }
+
+  clearDisconnectTimer();
+
+  const disconnect = () => {
+    if (socket && !socket.connected && !socket.active) {
+      connectRequested = false;
+      return;
+    }
+
+    socket?.disconnect();
+    connectRequested = false;
+  };
+
+  if (immediate) {
+    disconnect();
+    return;
+  }
+
+  disconnectTimer = setTimeout(disconnect, 1200);
 };

@@ -138,13 +138,13 @@ export const messageApi = {
 };
 
 export const groupChatApi = {
-  list: () => API.get("/chat/groups"),
-  create: (payload) => API.post("/chat/group", payload),
-  getMessages: (groupId) => API.get(`/chat/group/${groupId}/messages`),
-  send: (groupId, payload) => API.post(`/chat/group/${groupId}/messages`, payload),
-  join: (groupId) => API.post(`/chat/group/${groupId}/join`),
-  leave: (groupId) => API.post(`/chat/group/${groupId}/leave`),
-  members: (groupId) => API.get(`/chat/group/${groupId}/members`),
+  list: () => API.get("/groups"),
+  create: (payload) => API.post("/groups/create", payload),
+  getMessages: (groupId) => API.get(`/groups/${groupId}`),
+  send: (groupId, payload) => API.post("/groups/message", { ...payload, groupId }),
+  join: (groupId) => API.post(`/groups/join/${groupId}`),
+  leave: (groupId) => API.post(`/groups/leave/${groupId}`),
+  members: (groupId) => API.get(`/groups/${groupId}/members`),
 };
 
 export const adminApi = {

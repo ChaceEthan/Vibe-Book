@@ -73,8 +73,10 @@ const serializeGroupMessage = (message) => ({
   sender: message.sender,
   senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
   message: message.message,
+  text: message.message,
   type: message.type || "message",
   createdAt: message.createdAt,
+  timestamp: message.createdAt,
 });
 
 const userIsGroupMember = (group, userId) => {
@@ -129,10 +131,32 @@ const getUserFromSocket = async (socket) => {
 };
 
 const initSocket = (server, corsOptions = {}) => {
+  if (ioInstance) {
+    console.warn("[socket] initSocket called more than once; reusing existing instance");
+    return ioInstance;
+  }
+
+  const socketCorsConfig = {
+    credentials: true,
+    methods: ["GET", "POST"],
+  };
+
+  // Handle different CORS origin formats
+  if (typeof corsOptions.origin === "string") {
+    socketCorsConfig.origin = corsOptions.origin;
+  } else if (Array.isArray(corsOptions.origin)) {
+    socketCorsConfig.origin = corsOptions.origin;
+  } else if (corsOptions.origin === true || !corsOptions.origin) {
+    socketCorsConfig.origin = true;
+  } else {
+    socketCorsConfig.origin = corsOptions.origin;
+  }
+
   ioInstance = new Server(server, {
-    cors: {
-      origin: corsOptions.origin || true,
-      credentials: true,
+    cors: socketCorsConfig,
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000,
+      skipMiddlewares: false,
     },
   });
 
@@ -141,24 +165,38 @@ const initSocket = (server, corsOptions = {}) => {
       const user = await getUserFromSocket(socket);
 
       if (!user || user.isBlocked) {
+        console.warn("[socket] unauthorized connection attempt");
         return next(new Error("Unauthorized"));
       }
 
       socket.user = user;
       return next();
     } catch (error) {
+      console.warn(`[socket] authentication failed: ${error.message}`);
       return next(new Error("Unauthorized"));
     }
   });
 
+  ioInstance.engine.on("connection_error", (error) => {
+    console.warn(`[socket] connection failed: ${error.message}`);
+  });
+
   ioInstance.on("connection", async (socket) => {
     const userId = socket.user._id.toString();
-    addOnlineUser(userId, socket.id);
-    socket.join("global");
-    socket.join(userId);
-    await joinUserGroupRooms(socket, userId);
-    console.log(`Socket connected: ${userId}`);
-    await emitStats();
+
+    try {
+      addOnlineUser(userId, socket.id);
+      socket.join("global");
+      socket.join(userId);
+      await joinUserGroupRooms(socket, userId);
+      console.log(`Socket connected: ${userId}`);
+      await emitStats();
+    } catch (error) {
+      removeOnlineUser(userId, socket.id);
+      console.error(`[socket] connection setup failed for ${userId}: ${error.message}`);
+      socket.disconnect(true);
+      return;
+    }
 
     socket.on("register_user", async (payload = {}, callback) => {
       const requestedUserId = payload.userId?.toString?.() || payload.senderId?.toString?.() || payload?.toString?.() || "";
@@ -189,7 +227,7 @@ const initSocket = (server, corsOptions = {}) => {
           return;
         }
 
-        const validation = validateChatMessage(payload.message);
+        const validation = validateChatMessage(payload.message || payload.text);
 
         if (validation.error) {
           callback?.({ success: false, message: validation.error });
@@ -265,7 +303,7 @@ const initSocket = (server, corsOptions = {}) => {
     socket.on("send_group_message", async (payload = {}, callback) => {
       try {
         const groupId = payload.groupId?.toString?.() || "";
-        const validation = validateChatMessage(payload.message);
+        const validation = validateChatMessage(payload.message || payload.text);
 
         if (validation.error) {
           callback?.({ success: false, message: validation.error });
@@ -294,8 +332,8 @@ const initSocket = (server, corsOptions = {}) => {
         await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
 
         const messagePayload = serializeGroupMessage(groupMessage);
-        ioInstance.to(groupRoomFor(group._id)).emit("receive_group_message", messagePayload);
-        ioInstance.to(groupRoomFor(group._id)).emit("group:message", {
+        socket.to(groupRoomFor(group._id)).emit("receive_group_message", messagePayload);
+        socket.to(groupRoomFor(group._id)).emit("group:message", {
           groupId: group._id,
           message: messagePayload,
         });

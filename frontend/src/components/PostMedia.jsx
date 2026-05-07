@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { Volume2, VolumeX } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../services/api";
@@ -20,6 +21,7 @@ const PostMedia = ({
   const mediaRef = useRef(null);
   const viewedRef = useRef(false);
   const [failed, setFailed] = useState(false);
+  const [isMuted, setIsMuted] = useState(Boolean(muted));
   const rawUrl = post?.url || "";
   const src = rawUrl ? mediaUrl(rawUrl) : "";
 
@@ -35,7 +37,16 @@ const PostMedia = ({
   useEffect(() => {
     viewedRef.current = false;
     setFailed(false);
-  }, [post?._id, rawUrl]);
+    setIsMuted(Boolean(muted));
+  }, [muted, post?._id, rawUrl]);
+
+  useEffect(() => {
+    if (post?.type !== "video" || !mediaRef.current) {
+      return;
+    }
+
+    mediaRef.current.muted = isMuted;
+  }, [isMuted, post?.type, rawUrl]);
 
   const handleMediaError = (event) => {
     console.error("Media failed to render:", {
@@ -46,6 +57,24 @@ const PostMedia = ({
     });
     setFailed(true);
     onInvalid?.();
+  };
+
+  const handleMuteToggle = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const video = mediaRef.current;
+    const nextMuted = video ? !video.muted : !isMuted;
+
+    if (video) {
+      video.muted = nextMuted;
+
+      if (!nextMuted) {
+        video.play?.().catch(() => undefined);
+      }
+    }
+
+    setIsMuted(nextMuted);
   };
 
   useEffect(() => {
@@ -109,24 +138,37 @@ const PostMedia = ({
 
   if (post.type === "video") {
     return (
-      <video
-        ref={mediaRef}
-        src={src}
-        className={`w-full max-h-[450px] object-cover ${className} ${videoClassName}`}
-        muted={muted}
-        loop={loop}
-        playsInline
-        controls={controls}
-        autoPlay={autoPlay}
-        preload="metadata"
-        onError={handleMediaError}
-        onTimeUpdate={(event) => {
-          if (event.currentTarget.currentTime >= 3) {
-            markViewed();
-          }
-        }}
-        style={{ width: "100%", borderRadius: "12px" }}
-      />
+      <div className={`relative ${className}`}>
+        <video
+          ref={mediaRef}
+          src={src}
+          className={`h-full w-full max-h-[450px] object-cover ${videoClassName}`}
+          muted={isMuted}
+          defaultMuted={Boolean(muted)}
+          loop={loop}
+          playsInline
+          controls={controls}
+          autoPlay={autoPlay}
+          preload="metadata"
+          onError={handleMediaError}
+          onLoadedMetadata={(event) => setIsMuted(event.currentTarget.muted)}
+          onVolumeChange={(event) => setIsMuted(event.currentTarget.muted)}
+          onTimeUpdate={(event) => {
+            if (event.currentTarget.currentTime >= 3) {
+              markViewed();
+            }
+          }}
+          style={{ width: "100%", borderRadius: "12px" }}
+        />
+        <button
+          type="button"
+          className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur"
+          onClick={handleMuteToggle}
+          aria-label={isMuted ? "Unmute video" : "Mute video"}
+        >
+          {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+        </button>
+      </div>
     );
   }
 

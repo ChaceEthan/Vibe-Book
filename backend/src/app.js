@@ -14,6 +14,7 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const mediaRoutes = require("./routes/mediaRoutes");
 const chatRoutes = require("./routes/chatRoutes");
+const groupRoutes = require("./routes/groupRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const feedRoutes = require("./routes/feedRoutes");
 const exploreRoutes = require("./routes/exploreRoutes");
@@ -48,9 +49,11 @@ const bookingLimiter = rateLimit({
 
 const allowedOrigins = [
   "https://vibe-book-kappa.vercel.app",
+  "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",
   "http://localhost:5176",
+  "http://127.0.0.1:5173",
   "http://127.0.0.1:5174",
   "http://127.0.0.1:5175",
   "http://127.0.0.1:5176",
@@ -70,7 +73,10 @@ const addAllowedOrigins = (...origins) => {
   });
 };
 
-addAllowedOrigins(process.env.CLIENT_URL, process.env.FRONTEND_URL);
+addAllowedOrigins(process.env.CLIENT_URL, process.env.FRONTEND_URL, process.env.CORS_ORIGIN);
+if (process.env.VERCEL_URL) {
+  addAllowedOrigins(`https://${process.env.VERCEL_URL.replace(/^https?:\/\//, "")}`);
+}
 
 const corsOptions = {
   origin(origin, callback) {
@@ -110,7 +116,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/admin", "/api/bookings", "/api/payments"];
+  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/groups", "/api/admin", "/api/bookings", "/api/payments"];
   if (privatePrefixes.some((prefix) => req.path.startsWith(prefix))) {
     res.set("Cache-Control", "no-store");
   } else {
@@ -140,6 +146,8 @@ app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/upload", uploadLimiter, uploadRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/groups", groupRoutes);
+console.log("[routes] mounted /api/groups");
 app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);
 app.use("/api/payments", bookingLimiter, paymentRoutes);

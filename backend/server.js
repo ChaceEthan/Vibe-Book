@@ -61,11 +61,46 @@ const startServer = async () => {
 
     const app = require("./src/app");
     const server = http.createServer(app);
+
+    // Socket.io CORS origins - must match Express CORS allowedOrigins
+    const socketCorsOrigins = [
+      "https://vibe-book-kappa.vercel.app",
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "http://localhost:5176",
+      "http://127.0.0.1:5173",
+      "http://127.0.0.1:5174",
+      "http://127.0.0.1:5175",
+      "http://127.0.0.1:5176",
+    ];
+
+    // Add dynamic origins from env if provided
+    const dynamicOrigins = [
+      process.env.FRONTEND_URL,
+      process.env.CLIENT_URL,
+      process.env.CORS_ORIGIN,
+      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL.replace(/^https?:\/\//, "")}` : "",
+    ].filter(Boolean);
+
+    dynamicOrigins.forEach((origin) => {
+      origin
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean)
+        .forEach((o) => {
+          if (!socketCorsOrigins.includes(o)) {
+            socketCorsOrigins.push(o);
+          }
+        });
+    });
+
     const io = initSocket(server, {
-      origin: process.env.FRONTEND_URL || process.env.CLIENT_URL || process.env.CORS_ORIGIN || true,
+      origin: socketCorsOrigins,
     });
 
     app.set("io", io);
+    console.log(`[socket] initialized with ${socketCorsOrigins.length} allowed origin(s)`);
 
     server.listen(PORT, "0.0.0.0", () => {
       const address = server.address();
