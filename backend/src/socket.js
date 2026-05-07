@@ -188,8 +188,8 @@ const initSocket = (server, corsOptions = {}) => {
       addOnlineUser(userId, socket.id);
       socket.join("global");
       socket.join(userId);
-      await joinUserGroupRooms(socket, userId);
-      console.log(`Socket connected: ${userId}`);
+      socket.data.activeGroupRoom = "";
+      console.log(`Socket connected: ${userId}${socket.recovered ? " (recovered)" : ""}`);
       await emitStats();
     } catch (error) {
       removeOnlineUser(userId, socket.id);
@@ -293,11 +293,37 @@ const initSocket = (server, corsOptions = {}) => {
           return;
         }
 
-        socket.join(groupRoomFor(group._id));
+        const room = groupRoomFor(group._id);
+        if (socket.data.activeGroupRoom && socket.data.activeGroupRoom !== room) {
+          socket.leave(socket.data.activeGroupRoom);
+        }
+
+        socket.join(room);
+        socket.data.activeGroupRoom = room;
+        console.log(`[socket] ${userId} joined group ${group._id}`);
         callback?.({ success: true, groupId: group._id.toString() });
       } catch (error) {
         callback?.({ success: false, message: "Unable to join group room" });
       }
+    });
+
+    socket.on("leave_group", (payload = {}, callback) => {
+      const groupId = payload.groupId?.toString?.() || payload?.toString?.() || "";
+
+      if (!groupId) {
+        callback?.({ success: false, message: "groupId is required" });
+        return;
+      }
+
+      const room = groupRoomFor(groupId);
+      socket.leave(room);
+
+      if (socket.data.activeGroupRoom === room) {
+        socket.data.activeGroupRoom = "";
+      }
+
+      console.log(`[socket] ${userId} left group ${groupId}`);
+      callback?.({ success: true, groupId });
     });
 
     socket.on("send_group_message", async (payload = {}, callback) => {
@@ -331,9 +357,10 @@ const initSocket = (server, corsOptions = {}) => {
         await group.save();
         await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
 
+        const room = groupRoomFor(group._id);
         const messagePayload = serializeGroupMessage(groupMessage);
-        socket.to(groupRoomFor(group._id)).emit("receive_group_message", messagePayload);
-        socket.to(groupRoomFor(group._id)).emit("group:message", {
+        ioInstance.to(room).emit("receive_group_message", messagePayload);
+        ioInstance.to(room).emit("group:message", {
           groupId: group._id,
           message: messagePayload,
         });
@@ -367,9 +394,9 @@ const initSocket = (server, corsOptions = {}) => {
       }
     });
 
-    socket.on("disconnect", async () => {
+    socket.on("disconnect", async (reason) => {
       removeOnlineUser(userId, socket.id);
-      console.log(`Socket disconnected: ${userId}`);
+      console.log(`Socket disconnected: ${userId} (${reason})`);
       await emitStats();
     });
   });

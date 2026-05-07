@@ -54,6 +54,14 @@ export const getSocket = (token = getStoredToken()) => {
     connectRequested = false;
   });
 
+  socket.io.on("reconnect_attempt", () => {
+    const nextToken = getStoredToken();
+
+    if (nextToken) {
+      socket.auth = { token: nextToken };
+    }
+  });
+
   return socket;
 };
 

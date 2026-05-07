@@ -5,7 +5,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { groupChatApi, mediaUrl, messageApi, userApi } from "../services/api";
-import { connectSocket, disconnectSocket, getChatId } from "../services/socket";
+import { connectSocket, getChatId } from "../services/socket";
 
 const formatTime = (value) => {
   if (!value) {
@@ -64,6 +64,14 @@ const normalizeGroupMessage = (item = {}) => ({
   createdAt: item.createdAt || new Date().toISOString(),
 });
 
+const sortGroupMessages = (items = []) => {
+  return [...items].sort((left, right) => {
+    const leftTime = new Date(left?.createdAt || 0).getTime() || 0;
+    const rightTime = new Date(right?.createdAt || 0).getTime() || 0;
+    return leftTime - rightTime;
+  });
+};
+
 const Chat = () => {
   const { userId } = useParams();
   const { user, token, payAccess } = useAuth();
@@ -91,6 +99,17 @@ const Chat = () => {
   const groupsLoadingRef = useRef(false);
   const groupMessagesRequestRef = useRef(0);
   const groupsRefreshTimerRef = useRef(null);
+  const activeTabRef = useRef(activeTab);
+  const selectedGroupRef = useRef(selectedGroup);
+  const userIdRef = useRef(userId);
+  const userRef = useRef(user);
+  const registeredUserRef = useRef("");
+  const joinedGroupRef = useRef("");
+
+  activeTabRef.current = activeTab;
+  selectedGroupRef.current = selectedGroup;
+  userIdRef.current = userId;
+  userRef.current = user;
 
   const appendDirectMessage = (nextMessage) => {
     const normalized = normalizeSocketMessage(nextMessage);
@@ -126,7 +145,7 @@ const Chat = () => {
       const existingIndex = current.findIndex((item) => groupMessageKey(item) === groupMessageKey(normalized));
 
       if (existingIndex >= 0) {
-        return current.map((item, index) => (index === existingIndex ? { ...item, ...normalized, pending: false } : item));
+        return sortGroupMessages(current.map((item, index) => (index === existingIndex ? { ...item, ...normalized, pending: false } : item)));
       }
 
       const pendingIndex = current.findIndex((item) => {
@@ -139,10 +158,10 @@ const Chat = () => {
       });
 
       if (pendingIndex >= 0) {
-        return current.map((item, index) => (index === pendingIndex ? { ...normalized, pending: false } : item));
+        return sortGroupMessages(current.map((item, index) => (index === pendingIndex ? { ...normalized, pending: false } : item)));
       }
 
-      return [...current, normalized];
+      return sortGroupMessages([...current, normalized]);
     });
   };
 
@@ -184,7 +203,13 @@ const Chat = () => {
       const { data } = await groupChatApi.list();
       const nextGroups = Array.isArray(data?.groups) ? data.groups : [];
       setGroups(nextGroups);
-      setSelectedGroup((current) => current || nextGroups[0]?._id || "");
+      setSelectedGroup((current) => {
+        if (current && nextGroups.some((item) => item._id === current)) {
+          return current;
+        }
+
+        return nextGroups[0]?._id || "";
+      });
     } catch (requestError) {
       const rawMessage = requestError?.response?.data?.message || "";
 
@@ -234,7 +259,7 @@ const Chat = () => {
         return;
       }
 
-      setGroupMessages(Array.isArray(data?.messages) ? data.messages : []);
+      setGroupMessages(sortGroupMessages(Array.isArray(data?.messages) ? data.messages : []));
       setGroups((current) => current.map((item) => (item._id === data?.group?._id ? data.group : item)));
     } catch (requestError) {
       if (requestId === groupMessagesRequestRef.current) {
@@ -247,83 +272,46 @@ const Chat = () => {
     }
   };
 
+  const leaveGroupRoom = (socket, groupId = joinedGroupRef.current) => {
+    if (!socket || !groupId) {
+      return;
+    }
+
+    socket.emit("leave_group", groupId, () => undefined);
+
+    if (joinedGroupRef.current === groupId) {
+      joinedGroupRef.current = "";
+    }
+  };
+
+  const joinSelectedGroupRoom = (socket) => {
+    const groupId = selectedGroupRef.current;
+
+    if (!socket || activeTabRef.current !== "groups" || !groupId || joinedGroupRef.current === groupId) {
+      return;
+    }
+
+    if (joinedGroupRef.current) {
+      leaveGroupRoom(socket, joinedGroupRef.current);
+    }
+
+    socket.emit("join_group", groupId, (response) => {
+      if (response?.success) {
+        joinedGroupRef.current = groupId;
+        return;
+      }
+
+      if (selectedGroupRef.current === groupId) {
+        setError(response?.message || "Unable to join group chat.");
+      }
+    });
+  };
+
   useEffect(() => {
     setActiveTab(userId ? "direct" : "groups");
   }, [userId]);
 
-  useEffect(() => {
-    if (!token || !user?._id || activeTab !== "direct") {
-      return undefined;
-    }
 
-    const socket = connectSocket(token);
-
-    if (!socket) {
-      return undefined;
-    }
-
-    const register = () => {
-      socket.emit("register_user", { userId: user._id }, (response) => {
-        setSocketConnected(Boolean(response?.success));
-      });
-    };
-
-    const handleConnect = () => {
-      setSocketConnected(true);
-      register();
-    };
-
-    const handleDisconnect = () => {
-      setSocketConnected(false);
-    };
-
-    const handleReceiveMessage = (payload) => {
-      const normalized = normalizeSocketMessage(payload);
-      const senderId = normalized.senderId;
-      const receiverId = normalized.receiverId;
-      const belongsToOpenChat =
-        userId &&
-        ((senderId === user._id && receiverId === userId) || (senderId === userId && receiverId === user._id));
-
-      if (belongsToOpenChat) {
-        appendDirectMessage(normalized);
-      }
-    };
-
-    const handleTyping = (payload = {}) => {
-      if (payload.senderId !== userId || payload.receiverId !== user._id) {
-        return;
-      }
-
-      setTypingUser(payload.typing ? payload.senderId : "");
-    };
-
-    const handleStats = (payload = {}) => {
-      if (userId && Array.isArray(payload.onlineUserIds)) {
-        setOnline(payload.onlineUserIds.includes(userId));
-      }
-    };
-
-    socket.on("connect", handleConnect);
-    socket.on("disconnect", handleDisconnect);
-    socket.on("receive_message", handleReceiveMessage);
-    socket.on("typing", handleTyping);
-    socket.on("global:stats", handleStats);
-
-    if (socket.connected) {
-      register();
-    }
-
-    return () => {
-      socket.off("connect", handleConnect);
-      socket.off("disconnect", handleDisconnect);
-      socket.off("receive_message", handleReceiveMessage);
-      socket.off("typing", handleTyping);
-      socket.off("global:stats", handleStats);
-      clearTimeout(typingTimerRef.current);
-      disconnectSocket();
-    };
-  }, [activeTab, token, user?._id, userId]);
 
   useEffect(() => {
     if (activeTab !== "direct") {
@@ -356,8 +344,9 @@ const Chat = () => {
     loadGroupMessages(selectedGroup);
   }, [activeTab, selectedGroup]);
 
+  // Consolidated socket management for both direct and group chat
   useEffect(() => {
-    if (!token || !user?._id || activeTab !== "groups") {
+    if (!token || !user?._id) {
       return undefined;
     }
 
@@ -368,36 +357,80 @@ const Chat = () => {
     }
 
     const register = () => {
-      socket.emit("register_user", { userId: user._id }, (response) => {
-        setSocketConnected(Boolean(response?.success));
-      });
-    };
+      const currentUserId = userRef.current?._id;
 
-    const joinSelectedGroup = () => {
-      if (selectedGroup) {
-        socket.emit("join_group", { groupId: selectedGroup }, (response) => {
-          if (response && !response.success) {
-            setError(response.message || "Unable to join group chat.");
-          }
-        });
+      if (!currentUserId || registeredUserRef.current === currentUserId) {
+        return;
       }
+
+      socket.emit("register_user", { userId: currentUserId }, (response) => {
+        setSocketConnected(Boolean(response?.success));
+
+        if (response?.success) {
+          registeredUserRef.current = currentUserId;
+          return;
+        }
+
+        registeredUserRef.current = "";
+      });
     };
 
     const handleConnect = () => {
       setSocketConnected(true);
+      registeredUserRef.current = "";
       register();
-      joinSelectedGroup();
+      joinedGroupRef.current = "";
+      joinSelectedGroupRoom(socket);
+    };
+
+    const handleReconnect = () => {
+      setSocketConnected(socket.connected);
+      joinSelectedGroupRoom(socket);
+      console.info("[socket] reconnected");
     };
 
     const handleDisconnect = () => {
       setSocketConnected(false);
+      registeredUserRef.current = "";
+      joinedGroupRef.current = "";
     };
 
+    // Direct message handlers
+    const handleReceiveMessage = (payload) => {
+      const normalized = normalizeSocketMessage(payload);
+      const senderId = normalized.senderId;
+      const receiverId = normalized.receiverId;
+      const openUserId = userIdRef.current;
+      const currentUserId = userRef.current?._id;
+      const belongsToOpenChat =
+        openUserId &&
+        activeTabRef.current === "direct" &&
+        ((senderId === currentUserId && receiverId === openUserId) || (senderId === openUserId && receiverId === currentUserId));
+
+      if (belongsToOpenChat) {
+        appendDirectMessage(normalized);
+      }
+    };
+
+    const handleTyping = (payload = {}) => {
+      if (activeTabRef.current !== "direct" || payload.senderId !== userIdRef.current || payload.receiverId !== userRef.current?._id) {
+        return;
+      }
+
+      setTypingUser(payload.typing ? payload.senderId : "");
+    };
+
+    // Group message handlers
     const handleGroupMessage = (payload = {}) => {
+      if (activeTabRef.current !== "groups") {
+        scheduleGroupsRefresh();
+        return;
+      }
+
       const messagePayload = payload.message || payload;
       const normalized = normalizeGroupMessage(messagePayload);
 
-      if (selectedGroup && normalized.groupId === selectedGroup) {
+      if (selectedGroupRef.current && normalized.groupId === selectedGroupRef.current) {
         appendGroupMessage(normalized);
       }
 
@@ -407,7 +440,7 @@ const Chat = () => {
     const handleGroupMembership = (payload = {}) => {
       const messagePayload = payload.message || {};
 
-      if (selectedGroup && idOf(payload.groupId) === selectedGroup && messagePayload.message) {
+      if (activeTabRef.current === "groups" && selectedGroupRef.current && idOf(payload.groupId) === selectedGroupRef.current && messagePayload.message) {
         appendGroupMessage(messagePayload);
       }
 
@@ -420,18 +453,30 @@ const Chat = () => {
           const exists = current.some((item) => item._id === payload.group._id);
           return exists ? current.map((item) => (item._id === payload.group._id ? payload.group : item)) : [payload.group, ...current];
         });
-        setSelectedGroup((current) => current || payload.group._id);
+        if (activeTabRef.current === "groups") {
+          setSelectedGroup((current) => current || payload.group._id);
+        }
       }
 
       scheduleGroupsRefresh();
     };
 
-    const handleStats = () => {
-      scheduleGroupsRefresh();
+    const handleStats = (payload = {}) => {
+      if (activeTabRef.current === "direct" && userIdRef.current && Array.isArray(payload.onlineUserIds)) {
+        setOnline(payload.onlineUserIds.includes(userIdRef.current));
+      }
+
+      if (activeTabRef.current === "groups") {
+        scheduleGroupsRefresh();
+      }
     };
 
+    // Register socket listeners (one-time, not duplicated)
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
+    socket.io.on("reconnect", handleReconnect);
+    socket.on("receive_message", handleReceiveMessage);
+    socket.on("typing", handleTyping);
     socket.on("receive_group_message", handleGroupMessage);
     socket.on("group:message", handleGroupMessage);
     socket.on("group:created", handleGroupCreated);
@@ -439,22 +484,48 @@ const Chat = () => {
     socket.on("group:member-left", handleGroupMembership);
     socket.on("global:stats", handleStats);
 
+    // Initial registration on connection
     if (socket.connected) {
       register();
-      joinSelectedGroup();
+      joinSelectedGroupRoom(socket);
     }
 
+    // Cleanup: remove listeners and handle disconnection
     return () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
+      socket.io.off("reconnect", handleReconnect);
+      socket.off("receive_message", handleReceiveMessage);
+      socket.off("typing", handleTyping);
       socket.off("receive_group_message", handleGroupMessage);
       socket.off("group:message", handleGroupMessage);
       socket.off("group:created", handleGroupCreated);
       socket.off("group:member-joined", handleGroupMembership);
       socket.off("group:member-left", handleGroupMembership);
       socket.off("global:stats", handleStats);
-      disconnectSocket();
+      clearTimeout(typingTimerRef.current);
+      leaveGroupRoom(socket);
     };
+  }, [token, user?._id]);
+
+  useEffect(() => {
+    if (!token || !user?._id) {
+      return undefined;
+    }
+
+    const socket = connectSocket(token);
+
+    if (!socket) {
+      return undefined;
+    }
+
+    if (activeTab !== "groups" || !selectedGroup) {
+      leaveGroupRoom(socket);
+      return undefined;
+    }
+
+    joinSelectedGroupRoom(socket);
+    return undefined;
   }, [activeTab, selectedGroup, token, user?._id]);
 
   useEffect(() => {
