@@ -144,7 +144,6 @@ const PostMedia = ({
           src={src}
           className={`h-full w-full max-h-[450px] object-cover ${videoClassName}`}
           muted={isMuted}
-          defaultMuted={Boolean(muted)}
           loop={loop}
           playsInline
           controls={controls}

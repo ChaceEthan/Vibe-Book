@@ -54,6 +54,7 @@ const userResponse = (user) => {
   return {
     _id: user._id,
     name: user.name,
+    username: user.name,
     email: user.email,
     role: user.role,
     accountRole: user.accountRole || (user.role === "admin" ? "admin" : "user"),
@@ -111,6 +112,7 @@ const userResponse = (user) => {
     lastPaymentDate: user.lastPaymentDate,
     access: buildAccessState(user),
     createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   };
 };
 

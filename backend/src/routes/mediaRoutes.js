@@ -103,6 +103,7 @@ router.delete("/:id", authMiddleware, async (req, res, next) => {
       user.profileImage = "";
     }
 
+    user.updatedAt = new Date();
     await user.save({ validateBeforeSave: false });
     await Feed.deleteMany({
       userId: user._id,

@@ -275,6 +275,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
   return {
     _id: user._id,
     name: user.name,
+    username: user.name,
     email: contactUnlocked ? user.email || "" : "",
     role: user.role,
     accountRole: options.includePrivate ? user.accountRole || (user.role === "admin" ? "admin" : "user") : undefined,
@@ -351,6 +352,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     language: options.includePrivate ? user.language || "en" : undefined,
     notificationEnabled: options.includePrivate ? user.notificationEnabled !== false : undefined,
     createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
   };
 };
 
@@ -555,13 +557,18 @@ const updateProfile = async (req, res, next) => {
       return res.status(400).json({ message: `Free profiles can upload ${FREE_VIDEO_LIMIT} video up to 2 minutes` });
     }
 
-    const user = await User.findByIdAndUpdate(req.user._id, updates, {
+    const user = await User.findByIdAndUpdate(req.user._id, { ...updates, updatedAt: new Date() }, {
       returnDocument: "after",
       runValidators: true,
     }).select("-password");
 
+    if (!user) {
+      return res.status(404).json({ message: "Profile not found" });
+    }
+
     return res.json({ user: profileResponse(user, user, { includePrivate: true }) });
   } catch (error) {
+    console.error(`[profile:update] ${error.message}`);
     return next(error);
   }
 };
@@ -599,6 +606,7 @@ const uploadProfileImages = async (req, res, next) => {
         imageDescriptions: [...(req.user.imageDescriptions || []), ...descriptions],
         profileImage: req.user.profileImage || req.user.profilePicture || imagePaths[0],
         profilePicture: req.user.profilePicture || req.user.profileImage || imagePaths[0],
+        updatedAt: new Date(),
       },
       { returnDocument: "after", runValidators: true }
     ).select("-password");
@@ -624,6 +632,7 @@ const uploadProfileImage = async (req, res, next) => {
       {
         profileImage: imagePath,
         profilePicture: imagePath,
+        updatedAt: new Date(),
       },
       { returnDocument: "after", runValidators: true }
     ).select("-password");
@@ -676,6 +685,7 @@ const uploadProfileVideos = async (req, res, next) => {
         videoUrls: nextVideos,
         videos: nextVideos,
         videoDescriptions: [...(req.user.videoDescriptions || []), ...descriptions],
+        updatedAt: new Date(),
       },
       { returnDocument: "after", runValidators: true }
     ).select("-password");

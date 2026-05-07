@@ -12,6 +12,7 @@ const initialForm = () => ({
   gender: "",
   category: "Modern Dance",
   skills: "",
+  bio: "",
   price: "",
   location: "",
   availability: "available",
@@ -52,6 +53,7 @@ const Dashboard = () => {
         gender: user.gender || "",
         category: user.category || "Modern Dance",
         skills: Array.isArray(user.skills) ? user.skills.join(", ") : "",
+        bio: user.bio || "",
         price: user.price || "",
         location: user.location || user.district || user.province || "",
         availability: user.availability || "available",
@@ -320,6 +322,16 @@ const Dashboard = () => {
               value={form.skills}
               onChange={handleChange}
               placeholder="dance, acting, music"
+            />
+          </label>
+
+          <label className="space-y-2 md:col-span-2">
+            <span className="label">{t("bio")}</span>
+            <textarea
+              className="field min-h-28 resize-y"
+              name="bio"
+              value={form.bio}
+              onChange={handleChange}
             />
           </label>
 

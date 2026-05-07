@@ -2,7 +2,9 @@ node_modules
 dist
 .vite
 .cache
+.vscode/
 *.log
+*.tmp
 /data/
 
 .env

@@ -16,10 +16,11 @@ const router = express.Router();
 router.use(authMiddleware);
 
 const sendMessageFromBody = (req, res, next) => {
-  req.params.groupId = req.body.groupId || req.body.group || req.body._id;
+  const body = req.body || {};
+  req.params.groupId = body.groupId || body.group || body._id;
 
   if (!req.params.groupId) {
-    return res.status(400).json({ message: "groupId is required" });
+    return res.status(400).json({ success: false, message: "groupId is required" });
   }
 
   return sendGroupMessage(req, res, next);

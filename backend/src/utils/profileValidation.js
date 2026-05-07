@@ -185,6 +185,13 @@ const normalizeProfileFields = (body, options = {}) => {
     }
   }
 
+  if (!hasOwn(body, "name") && hasOwn(body, "username")) {
+    data.name = normalizeText(body.username);
+    if (!data.name) {
+      errors.push("Username cannot be empty");
+    }
+  }
+
   if (hasOwn(body, "role") && allowRole) {
     const result = normalizeRole(body.role);
     if (result.error) errors.push(result.error);
