@@ -461,7 +461,7 @@ const Home = () => {
                   <Link
                     to={isAuthenticated ? `/profile/${profile._id}` : "/login"}
                     className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-navy shadow-lg"
-                    aria-label="Book profile"
+                    aria-label="View profile"
                   >
                     <CalendarCheck className="h-6 w-6" />
                   </Link>

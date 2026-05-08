@@ -40,7 +40,7 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
 
   return (
     <form onSubmit={handleSubmit} className="rounded-lg border border-slate-200 bg-white p-4 shadow-soft">
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <label className="space-y-2">
           <span className="label">Skill</span>
           <input
@@ -58,30 +58,6 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
             value={filters.location}
             onChange={(event) => updateField("location", event.target.value)}
             placeholder="Kigali, Rwanda"
-          />
-        </label>
-
-        <label className="space-y-2">
-          <span className="label">Min price</span>
-          <input
-            className="field"
-            type="number"
-            min="0"
-            value={filters.minPrice}
-            onChange={(event) => updateField("minPrice", event.target.value)}
-            placeholder="0"
-          />
-        </label>
-
-        <label className="space-y-2">
-          <span className="label">Max price</span>
-          <input
-            className="field"
-            type="number"
-            min="0"
-            value={filters.maxPrice}
-            onChange={(event) => updateField("maxPrice", event.target.value)}
-            placeholder="500000"
           />
         </label>
 
@@ -145,7 +121,7 @@ const SearchFilter = ({ initialFilters = defaultFilters, onSearch }) => {
           </select>
         </label>
 
-        <div className="flex items-end gap-2 lg:col-span-4">
+        <div className="flex items-end gap-2 lg:col-span-3">
           <button type="submit" className="btn-primary flex-1">
             Search
           </button>

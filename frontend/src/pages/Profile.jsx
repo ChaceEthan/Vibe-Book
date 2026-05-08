@@ -29,7 +29,7 @@ const formatPrice = (price) => {
   const amount = Number(price || 0);
 
   if (!amount) {
-    return "Price on request";
+    return "Not set";
   }
 
   return new Intl.NumberFormat("en-US", {
@@ -864,7 +864,7 @@ const Profile = () => {
                   )}
                 </div>
                 <h1 className="mt-2 text-3xl font-black text-navy">{user.name}</h1>
-                <p className="mt-2 text-sm text-slate-500">{user.category || "Entertainment professional"}</p>
+                <p className="mt-2 text-sm text-slate-500">@{user.username || "creator"}</p>
                 <p className="mt-2 text-xs font-bold uppercase text-slate-400">
                   {Number(user.followerCount || 0)} followers
                 </p>
@@ -877,13 +877,14 @@ const Profile = () => {
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs font-semibold uppercase text-slate-500">Starting Price (Negotiable)</p>
-                <p className="mt-1 text-lg font-bold text-navy">{formatPrice(user.price)}</p>
-                <p className="mt-1 text-xs text-slate-500">Final price is agreed between client and talent after negotiation.</p>
+                <p className="text-xs font-semibold uppercase text-slate-500">Profile views</p>
+                <p className="mt-1 text-lg font-bold text-navy">{Number(user.viewsCount || 0).toLocaleString()}</p>
+                <p className="mt-1 text-xs text-slate-500">People checking out this creator.</p>
               </div>
               <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs font-semibold uppercase text-slate-500">Availability</p>
-                <p className="mt-1 text-lg font-bold capitalize text-navy">{user.availability || "available"}</p>
+                <p className="text-xs font-semibold uppercase text-slate-500">Likes</p>
+                <p className="mt-1 text-lg font-bold capitalize text-navy">{Number(user.likes || user.likeCount || 0).toLocaleString()}</p>
+                <p className="mt-1 text-xs text-slate-500">Engagement across profile and posts.</p>
               </div>
             </div>
 
@@ -903,7 +904,7 @@ const Profile = () => {
             <div className="mt-6">
               <h2 className="text-lg font-bold text-navy">Bio</h2>
               <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-600">
-                {contentLocked ? "Follow to unlock content" : user.bio || "This performer has not added a bio yet."}
+                {contentLocked ? "Follow to unlock content" : user.bio || "This creator has not added a bio yet."}
               </p>
             </div>
 
@@ -968,12 +969,12 @@ const Profile = () => {
               )}
               {!isOwnProfile && (
                 <button type="button" className="btn-primary" onClick={() => setBookingOpen((value) => !value)}>
-                  Book Now
+                  Request collab
                 </button>
               )}
               {!isOwnProfile && (
                 <button type="button" className="btn-secondary" onClick={() => setOfferOpen((value) => !value)}>
-                  Send Offer
+                  Send proposal
                 </button>
               )}
               {!isOwnProfile && (
@@ -1050,7 +1051,7 @@ const Profile = () => {
 
           {bookingOpen && !isOwnProfile && (
             <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
-              <h2 className="text-lg font-black text-navy">Book Now</h2>
+              <h2 className="text-lg font-black text-navy">Collaboration request</h2>
               {bookingStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{bookingStatus}</div>}
               {bookingError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{bookingError}</div>}
               <form className="mt-4 space-y-4" onSubmit={handleBookingSubmit}>
@@ -1059,24 +1060,24 @@ const Profile = () => {
                   <input className="field" name="userName" value={bookingForm.userName} onChange={handleBookingChange} required />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Event place (bar/hotel/etc)</span>
+                  <span className="label">Place or project</span>
                   <input className="field" name="businessName" value={bookingForm.businessName} onChange={handleBookingChange} required />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Event location</span>
+                  <span className="label">Location</span>
                   <input className="field" name="location" value={bookingForm.location} onChange={handleBookingChange} required />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Event date</span>
+                  <span className="label">Date</span>
                   <input className="field" type="date" name="eventDate" value={bookingForm.eventDate} onChange={handleBookingChange} />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Event type</span>
+                  <span className="label">Collaboration type</span>
                   <input className="field" name="eventType" value={bookingForm.eventType} onChange={handleBookingChange} required />
                 </label>
                 <div className="grid gap-3 sm:grid-cols-[1fr_0.8fr]">
                   <label className="space-y-2">
-                    <span className="label">Event duration</span>
+                    <span className="label">Duration</span>
                     <input
                       className="field"
                       type="number"
@@ -1096,7 +1097,7 @@ const Profile = () => {
                   </label>
                 </div>
                 <label className="space-y-2">
-                  <span className="label">Starting offer (Negotiable)</span>
+                  <span className="label">Budget</span>
                   <input
                     className="field"
                     type="number"
@@ -1108,7 +1109,7 @@ const Profile = () => {
                   />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Final agreed price</span>
+                  <span className="label">Confirmed budget</span>
                   <input
                     className="field"
                     type="number"
@@ -1116,9 +1117,9 @@ const Profile = () => {
                     name="finalAgreedPrice"
                     value={bookingForm.finalAgreedPrice}
                     onChange={handleBookingChange}
-                    placeholder="Set after negotiation"
+                    placeholder="Optional"
                   />
-                  <span className="text-xs text-slate-500">Final price is agreed between client and talent after negotiation.</span>
+                  <span className="text-xs text-slate-500">You can finalize details together in chat.</span>
                 </label>
                 <label className="space-y-2">
                   <span className="label">Message</span>
@@ -1131,7 +1132,7 @@ const Profile = () => {
                   />
                 </label>
                 <button type="submit" className="btn-primary w-full" disabled={bookingSending}>
-                  {bookingSending ? "Sending..." : "Book Now"}
+                  {bookingSending ? "Sending..." : "Send request"}
                 </button>
               </form>
             </div>
@@ -1139,16 +1140,16 @@ const Profile = () => {
 
           {offerOpen && !isOwnProfile && (
             <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
-              <h2 className="text-lg font-black text-navy">Send Offer</h2>
+              <h2 className="text-lg font-black text-navy">Send proposal</h2>
               {offerStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{offerStatus}</div>}
               {offerError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{offerError}</div>}
               <form className="mt-4 space-y-4" onSubmit={handleOfferSubmit}>
                 <label className="space-y-2">
-                  <span className="label">Event date</span>
+                  <span className="label">Date</span>
                   <input className="field" type="date" name="eventDate" value={offerForm.eventDate} onChange={handleOfferChange} />
                 </label>
                 <label className="space-y-2">
-                  <span className="label">Starting offer (Negotiable)</span>
+                  <span className="label">Budget</span>
                   <input
                     className="field"
                     type="number"
@@ -1164,7 +1165,7 @@ const Profile = () => {
                   <textarea className="field min-h-28 resize-y" name="message" value={offerForm.message} onChange={handleOfferChange} />
                 </label>
                 <button type="submit" className="btn-primary w-full" disabled={offerSending}>
-                  {offerSending ? "Sending..." : "Send Offer"}
+                  {offerSending ? "Sending..." : "Send proposal"}
                 </button>
               </form>
             </div>

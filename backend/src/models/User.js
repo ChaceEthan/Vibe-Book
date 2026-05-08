@@ -23,11 +23,21 @@ const userSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: true,
+    required: false,
     unique: true,
+    sparse: true,
     lowercase: true,
     trim: true,
     match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
+  },
+  emailNormalized: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
+  emailGeneratedFromPhone: {
+    type: Boolean,
+    default: false,
   },
   password: {
     type: String,
@@ -64,6 +74,9 @@ const userSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  birthday: {
+    type: Date,
+  },
   category: {
     type: String,
     enum: {
@@ -85,6 +98,41 @@ const userSchema = new mongoose.Schema({
   phone: {
     type: String,
     trim: true,
+  },
+  phoneNumber: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  countryCode: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  country: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  phoneVerified: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  phoneVerificationCode: {
+    type: String,
+    select: false,
+  },
+  phoneVerificationExpires: {
+    type: Date,
+  },
+  phoneVerificationLastSentAt: {
+    type: Date,
+  },
+  phoneVerificationAttempts: {
+    type: Number,
+    default: 0,
+    min: 0,
   },
   whatsappNumber: {
     type: String,
@@ -386,6 +434,26 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  accountVisibility: {
+    type: String,
+    enum: ["public", "followers", "private"],
+    default: "public",
+  },
+  allowProfileDiscovery: {
+    type: Boolean,
+    default: true,
+  },
+  allowMessagesFrom: {
+    type: String,
+    enum: ["everyone", "followers", "none"],
+    default: "everyone",
+  },
+  blockedUsers: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
   isPremium: {
     type: Boolean,
     default: false,
@@ -549,6 +617,15 @@ const userSchema = new mongoose.Schema({
   },
 });
 
+userSchema.index(
+  { emailNormalized: 1 },
+  {
+    unique: true,
+    sparse: true,
+    name: "uniq_user_email_normalized",
+    partialFilterExpression: { emailNormalized: { $type: "string" } },
+  }
+);
 const User = mongoose.model("User", userSchema);
 
 User.allowedRoles = allowedRoles;

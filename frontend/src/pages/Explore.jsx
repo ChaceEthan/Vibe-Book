@@ -143,7 +143,7 @@ const Explore = () => {
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link to="/search" className="btn-primary">
-              Search marketplace
+              Discover creators
             </Link>
             <Link to="/" className="btn-secondary bg-white text-navy">
               Watch feed

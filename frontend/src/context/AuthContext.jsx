@@ -95,6 +95,22 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
+  const sendPhoneCode = async (payload = {}) => {
+    const { data } = await authApi.sendPhoneCode(payload);
+    if (data.user) {
+      syncUser(data.user);
+    }
+    return data;
+  };
+
+  const verifyPhoneCode = async (payload = {}) => {
+    const { data } = await authApi.verifyPhoneCode(payload);
+    if (data.user) {
+      syncUser(data.user);
+    }
+    return data;
+  };
+
   const updateProfile = async (payload) => {
     const { data } = await userApi.updateProfile(payload);
     return syncUser(data.user);
@@ -137,6 +153,8 @@ export const AuthProvider = ({ children }) => {
       isAuthenticated: Boolean(token && user),
       login,
       register,
+      sendPhoneCode,
+      verifyPhoneCode,
       logout: clearSession,
       refreshProfile,
       updateProfile,

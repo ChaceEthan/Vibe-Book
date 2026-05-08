@@ -10,7 +10,7 @@ import { mediaUrl } from "../services/api";
 const initialForm = () => ({
   name: "",
   gender: "",
-  category: "Modern Dance",
+  category: "",
   skills: "",
   bio: "",
   price: "",
@@ -51,7 +51,7 @@ const Dashboard = () => {
       setForm({
         name: user.name || "",
         gender: user.gender || "",
-        category: user.category || "Modern Dance",
+        category: user.category || "",
         skills: Array.isArray(user.skills) ? user.skills.join(", ") : "",
         bio: user.bio || "",
         price: user.price || "",
@@ -79,8 +79,8 @@ const Dashboard = () => {
     setStatus("");
     setError("");
 
-    if (!form.name.trim() || !form.category || !form.availability) {
-      setError("Name, category, and availability are required.");
+    if (!form.name.trim()) {
+      setError("Name is required.");
       setSaving(false);
       return;
     }
@@ -287,8 +287,9 @@ const Dashboard = () => {
           </label>
 
           <label className="space-y-2">
-            <span className="label">{t("category")}</span>
+            <span className="label">Category (optional)</span>
             <select className="field" name="category" value={form.category} onChange={handleChange}>
+              <option value="">Choose a topic</option>
               {PROFILE_CATEGORIES.map((category) => (
                 <option key={category} value={category}>
                   {category}
@@ -310,18 +311,18 @@ const Dashboard = () => {
           </label>
 
           <label className="space-y-2">
-            <span className="label">Starting price</span>
+            <span className="label">Rate (optional)</span>
             <input className="field" type="number" min="0" name="price" value={form.price} onChange={handleChange} />
           </label>
 
           <label className="space-y-2 md:col-span-2">
-            <span className="label">Skills</span>
+            <span className="label">Creator tags (optional)</span>
             <input
               className="field"
               name="skills"
               value={form.skills}
               onChange={handleChange}
-              placeholder="dance, acting, music"
+              placeholder="dance, comedy, music"
             />
           </label>
 
@@ -344,7 +345,7 @@ const Dashboard = () => {
           </label>
 
           <label className="space-y-2">
-            <span className="label">{t("availability")}</span>
+            <span className="label">Activity status</span>
             <select className="field" name="availability" value={form.availability} onChange={handleChange}>
               <option value="available">Available</option>
               <option value="busy">Busy</option>

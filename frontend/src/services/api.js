@@ -31,6 +31,8 @@ API.interceptors.request.use((config) => {
 export const authApi = {
   login: (payload) => API.post("/auth/login", payload),
   register: (payload) => API.post("/auth/register", payload),
+  sendPhoneCode: (payload = {}) => API.post("/auth/send-phone-code", payload),
+  verifyPhoneCode: (payload = {}) => API.post("/auth/verify-phone-code", payload),
 };
 
 export const mediaId = (path = "") => {

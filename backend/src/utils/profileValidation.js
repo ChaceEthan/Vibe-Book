@@ -22,6 +22,10 @@ const normalizeText = (value) => {
 const normalizeLowerText = (value) => normalizeText(value).toLowerCase();
 
 const normalizeEmail = (value) => normalizeLowerText(value);
+const normalizeCountryCode = (value) => {
+  const digits = normalizeText(value).replace(/[^\d]/g, "");
+  return digits ? `+${digits}` : "";
+};
 
 const normalizeStringArray = (value) => {
   const values = Array.isArray(value) ? value : String(value || "").split(/[\n,]/);
@@ -220,6 +224,18 @@ const normalizeProfileFields = (body, options = {}) => {
     else data.gender = result.value;
   }
 
+  if (hasOwn(body, "birthday")) {
+    const birthdayText = normalizeText(body.birthday);
+    if (birthdayText) {
+      const birthday = new Date(birthdayText);
+      if (Number.isNaN(birthday.getTime())) {
+        errors.push("Birthday must be a valid date");
+      } else {
+        data.birthday = birthday;
+      }
+    }
+  }
+
   if (hasOwn(body, "category") && normalizeText(body.category)) {
     const result = normalizeCategory(body.category);
     if (result.error) errors.push(result.error);
@@ -239,11 +255,15 @@ const normalizeProfileFields = (body, options = {}) => {
       .slice(0, 20);
   }
 
-  ["phone", "whatsappNumber", "whatsapp", "location", "province", "district", "bio", "website", "profileTheme", "creatorCategory"].forEach((field) => {
+  ["phone", "phoneNumber", "country", "whatsappNumber", "whatsapp", "location", "province", "district", "bio", "website", "profileTheme", "creatorCategory"].forEach((field) => {
     if (hasOwn(body, field)) {
       data[field] = normalizeText(body[field]);
     }
   });
+
+  if (hasOwn(body, "countryCode")) {
+    data.countryCode = normalizeCountryCode(body.countryCode);
+  }
 
   if (hasOwn(body, "creatorSkills")) {
     data.creatorSkills = normalizeStringArray(body.creatorSkills)
@@ -321,6 +341,28 @@ const normalizeProfileFields = (body, options = {}) => {
     data.notificationEnabled = body.notificationEnabled === true || body.notificationEnabled === "true";
   }
 
+  if (hasOwn(body, "accountVisibility")) {
+    const accountVisibility = normalizeLowerText(body.accountVisibility);
+    if (!["public", "followers", "private"].includes(accountVisibility)) {
+      errors.push("Account visibility must be public, followers, or private");
+    } else {
+      data.accountVisibility = accountVisibility;
+    }
+  }
+
+  if (hasOwn(body, "allowMessagesFrom")) {
+    const allowMessagesFrom = normalizeLowerText(body.allowMessagesFrom);
+    if (!["everyone", "followers", "none"].includes(allowMessagesFrom)) {
+      errors.push("Message privacy must be everyone, followers, or none");
+    } else {
+      data.allowMessagesFrom = allowMessagesFrom;
+    }
+  }
+
+  if (hasOwn(body, "allowProfileDiscovery")) {
+    data.allowProfileDiscovery = body.allowProfileDiscovery === true || body.allowProfileDiscovery === "true";
+  }
+
   if (data.role && !data.category) {
     data.category = defaultCategoryByRole[data.role];
   }
@@ -338,6 +380,7 @@ module.exports = {
   defaultCategoryByRole,
   findAllowedValue,
   normalizeAvailability,
+  normalizeCountryCode,
   normalizeAccountType,
   normalizeCategory,
   normalizeEmail,

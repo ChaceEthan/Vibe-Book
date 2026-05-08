@@ -22,7 +22,13 @@ const errorMiddleware = (err, req, res, next) => {
 
   if (err.code === 11000) {
     statusCode = 400;
-    message = "Duplicate value already exists";
+    if (err.keyPattern?.email || err.keyPattern?.emailNormalized) {
+      message = "Email already exists";
+    } else if (err.keyPattern?.username) {
+      message = "Username already taken";
+    } else {
+      message = "Duplicate value already exists";
+    }
   }
 
   if (err.type === "entity.parse.failed") {

@@ -319,17 +319,23 @@ const profileResponse = (user, viewer = null, options = {}) => {
     _id: user._id,
     name: user.name,
     username: user.username || user.name,
-    email: user.publicEmail || contactUnlocked ? user.email || "" : "",
+    email: (user.publicEmail || contactUnlocked) && !user.emailGeneratedFromPhone ? user.email || "" : "",
+    emailGeneratedFromPhone: Boolean(user.emailGeneratedFromPhone),
     role: user.role,
     accountRole: options.includePrivate ? user.accountRole || (user.role === "admin" ? "admin" : "user") : undefined,
     protected: options.includePrivate ? Boolean(user.protected || user.role === "admin") : undefined,
     type: user.type,
     accountType: user.accountType || "talent",
     gender: user.gender,
+    birthday: user.birthday,
     category: user.category,
     skills: Array.isArray(user.skills) ? user.skills : [],
     price: user.price,
     phone: contactUnlocked ? user.phone || "" : "",
+    phoneNumber: contactUnlocked || options.includePrivate ? user.phoneNumber || user.phone || "" : "",
+    countryCode: options.includePrivate ? user.countryCode || "" : undefined,
+    country: user.country || "",
+    phoneVerified: Boolean(user.phoneVerified),
     whatsappNumber: contactUnlocked ? user.whatsappNumber || user.whatsapp || "" : "",
     whatsapp: contactUnlocked ? user.whatsapp || user.whatsappNumber || "" : "",
     location: user.location,
@@ -403,6 +409,10 @@ const profileResponse = (user, viewer = null, options = {}) => {
     contactUnlockCurrency: CONTACT_UNLOCK_CURRENCY,
     language: options.includePrivate ? user.language || "en" : undefined,
     notificationEnabled: options.includePrivate ? user.notificationEnabled !== false : undefined,
+    accountVisibility: options.includePrivate ? user.accountVisibility || "public" : undefined,
+    allowProfileDiscovery: options.includePrivate ? user.allowProfileDiscovery !== false : undefined,
+    allowMessagesFrom: options.includePrivate ? user.allowMessagesFrom || "everyone" : undefined,
+    blockedUsers: options.includePrivate ? user.blockedUsers || [] : undefined,
     usernameHistory: options.includePrivate ? user.usernameHistory || [] : undefined,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
@@ -636,12 +646,16 @@ const updateProfile = async (req, res, next) => {
       errors.push("Name is required");
     }
 
-    if (!updates.category && !req.user.category) {
-      errors.push("Category is required");
-    }
-
     if (errors.length) {
       return res.status(400).json({ message: errors[0], errors });
+    }
+
+    if (
+      (Object.prototype.hasOwnProperty.call(updates, "phone") && updates.phone !== req.user.phone) ||
+      (Object.prototype.hasOwnProperty.call(updates, "phoneNumber") && updates.phoneNumber !== req.user.phoneNumber) ||
+      (Object.prototype.hasOwnProperty.call(updates, "countryCode") && updates.countryCode !== req.user.countryCode)
+    ) {
+      updates.phoneVerified = false;
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "password")) {

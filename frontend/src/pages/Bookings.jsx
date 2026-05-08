@@ -188,7 +188,7 @@ const Bookings = () => {
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
           <h2 className="text-lg font-bold text-navy">No bookings yet</h2>
-          <p className="mt-2 text-sm text-slate-600">Booking requests appear here after a client clicks Book Now.</p>
+          <p className="mt-2 text-sm text-slate-600">Collaboration requests appear here after someone sends a request.</p>
         </div>
       )}
     </section>

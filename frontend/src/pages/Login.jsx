@@ -46,8 +46,8 @@ const Login = () => {
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="block space-y-2">
-            <span className="label">Email</span>
-            <input className="field" type="email" name="email" value={form.email} onChange={handleChange} required />
+            <span className="label">Email or phone</span>
+            <input className="field" name="email" value={form.email} onChange={handleChange} autoComplete="username" required />
           </label>
 
           <label className="block space-y-2">

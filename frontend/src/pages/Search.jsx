@@ -61,9 +61,9 @@ const Search = () => {
       <div className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-semibold uppercase text-brand">Search</p>
-          <h1 className="mt-2 text-3xl font-black text-navy">Find talent for your next event</h1>
+          <h1 className="mt-2 text-3xl font-black text-navy">Find creators to follow</h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            Browse creators by skill, Kigali/Rwanda location, price range, category, and availability signals.
+            Browse creators by topic, location, category, and social signals.
           </p>
         </div>
         <p className="text-sm font-semibold text-slate-500">{users.length} profiles found</p>
