@@ -243,7 +243,8 @@ const initSocket = (server, corsOptions = {}) => {
 
   const socketCorsConfig = {
     credentials: true,
-    methods: ["GET", "POST"],
+    methods: corsOptions.methods || ["GET", "POST", "OPTIONS"],
+    allowedHeaders: corsOptions.allowedHeaders || ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
   };
 
   // Handle different CORS origin formats

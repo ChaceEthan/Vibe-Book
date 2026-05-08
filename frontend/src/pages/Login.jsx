@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
+import { getApiErrorMessage } from "../services/api";
 
 const Login = () => {
   const { isAuthenticated, login } = useAuth();
@@ -29,7 +30,7 @@ const Login = () => {
       await login({ ...form, email: identifier, identifier });
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || requestError.response?.data?.error || requestError.message || "Login failed. Please check your details.");
+      setError(getApiErrorMessage(requestError, "Login failed. Please check your details."));
     } finally {
       setSubmitting(false);
     }

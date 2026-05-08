@@ -30,7 +30,7 @@ const authMiddleware = require("./middleware/authMiddleware");
 const responseMiddleware = require("./middleware/responseMiddleware");
 const errorMiddleware = require("./middleware/errorMiddleware");
 const { visitorMiddleware } = require("./middleware/visitorMiddleware");
-const { corsOptions } = require("./config/cors");
+const { corsOptions, isOriginAllowed, logRejectedOrigin } = require("./config/cors");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -51,6 +51,15 @@ const bookingLimiter = rateLimit({
   message: { message: "Too many booking or payment requests. Please try again soon." },
 });
 
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  if (req.method === "OPTIONS" && !isOriginAllowed(origin)) {
+    logRejectedOrigin(origin, `preflight ${req.path}`);
+  }
+
+  return next();
+});
 app.use(cors(corsOptions));
 // Express 5-safe wildcard preflight handler.
 app.options(/.*/, cors(corsOptions));

@@ -14,7 +14,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { feedApi, mediaUrl, userApi } from "../services/api";
+import { feedApi, getApiErrorMessage, isRetryableApiError, mediaUrl, userApi } from "../services/api";
 import { isValidPost, usePostStore } from "../store/postStore";
 
 const FEED_PAGE_SIZE = 10;
@@ -59,9 +59,6 @@ const relativeTimeFor = (value) => {
 };
 
 const commentKeyFor = (comment, index) => comment?._id || `${comment?.userId || comment?.name || "comment"}-${comment?.createdAt || index}`;
-
-const apiErrorMessage = (error, fallback) =>
-  error?.response?.data?.message || error?.response?.data?.error || error?.message || fallback;
 
 const ActionButton = memo(({ active = false, count, label, onClick, children }) => (
   <div className="flex min-w-0 flex-col items-center gap-1">
@@ -394,6 +391,8 @@ const Home = () => {
   const scrollerRef = useRef(null);
   const loadMoreRef = useRef(null);
   const viewedPostsRef = useRef(new Set());
+  const retryTimerRef = useRef(null);
+  const retryAttemptRef = useRef(0);
   const navigate = useNavigate();
 
   const replaceFeedItem = useCallback((nextItem) => {
@@ -418,7 +417,8 @@ const Home = () => {
         ...(feedMode === "following" ? { mode: "following" } : {}),
       };
       const { data } = await feedApi.get(params);
-      const rawPosts = Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : [];
+      const payload = data && typeof data === "object" ? data : {};
+      const rawPosts = Array.isArray(payload.posts) ? payload.posts : Array.isArray(payload.feed) ? payload.feed : [];
       const nextPosts = rawPosts.filter(isValidPost);
 
       if (append) {
@@ -429,9 +429,40 @@ const Home = () => {
       }
 
       setPage(nextPage);
-      setHasMore(Boolean(data?.hasMore) && nextPosts.length > 0);
+      setHasMore(Boolean(typeof payload.hasMore === "boolean" ? payload.hasMore : nextPosts.length >= FEED_PAGE_SIZE) && nextPosts.length > 0);
+      retryAttemptRef.current = 0;
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
     } catch (requestError) {
-      setError(apiErrorMessage(requestError, "Unable to load feed."));
+      const message = getApiErrorMessage(requestError, "Unable to load feed.");
+      const canRetry = !append && isRetryableApiError(requestError) && retryAttemptRef.current < 2;
+
+      console.warn("[feed] load failed", {
+        page: nextPage,
+        append,
+        status: requestError?.response?.status,
+        code: requestError?.code || "REQUEST_FAILED",
+        message: requestError?.message,
+      });
+
+      if (canRetry) {
+        retryAttemptRef.current += 1;
+        const delay = Math.min(1000 * 2 ** (retryAttemptRef.current - 1), 4000);
+        setError(`${message} Retrying in ${Math.round(delay / 1000)}s...`);
+
+        if (retryTimerRef.current) {
+          window.clearTimeout(retryTimerRef.current);
+        }
+
+        retryTimerRef.current = window.setTimeout(() => {
+          retryTimerRef.current = null;
+          loadFeed(nextPage, { ...options, retrying: true });
+        }, delay);
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -443,6 +474,15 @@ const Home = () => {
     setHasMore(true);
     loadFeed(1);
   }, [loadFeed]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
@@ -688,6 +728,15 @@ const Home = () => {
     });
   }, []);
 
+  const handleRetryFeed = useCallback(() => {
+    retryAttemptRef.current = 0;
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    loadFeed(1, { manual: true });
+  }, [loadFeed]);
+
   if (loading) {
     return (
       <section className="h-[calc(100dvh-3.5rem)] bg-slate-950 p-2 sm:h-[calc(100dvh-4rem)]">
@@ -701,7 +750,7 @@ const Home = () => {
       <section className="container-page flex min-h-[60vh] items-center justify-center py-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-red-700">
           <p className="font-bold">{error}</p>
-          <button type="button" className="btn-primary mt-4" onClick={() => loadFeed(1)}>
+          <button type="button" className="btn-primary mt-4" onClick={handleRetryFeed}>
             Retry feed
           </button>
         </div>
@@ -743,9 +792,9 @@ const Home = () => {
       >
         {visibleFeed.length ? (
           <>
-            {visibleFeed.map((item) => (
+            {visibleFeed.map((item, index) => (
               <FeedItem
-                key={item._id}
+                key={item._id || `${item.url}-${index}`}
                 currentUser={currentUser}
                 isAuthenticated={isAuthenticated}
                 item={item}

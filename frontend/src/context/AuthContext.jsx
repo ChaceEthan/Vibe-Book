@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { authApi, userApi } from "../services/api";
+import { authApi, isRetryableApiError, userApi } from "../services/api";
 
 const AuthContext = createContext(null);
 
@@ -67,8 +67,14 @@ export const AuthProvider = ({ children }) => {
         if (!active || !nextUser) {
           return;
         }
-      } catch {
-        clearSession();
+      } catch (requestError) {
+        if (isRetryableApiError(requestError) && readStoredUser()) {
+          console.warn("[auth] profile refresh deferred after network/server failure", {
+            message: requestError.userMessage || requestError.message,
+          });
+        } else {
+          clearSession();
+        }
       } finally {
         if (active) {
           setLoading(false);

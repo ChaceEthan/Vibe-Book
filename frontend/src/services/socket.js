@@ -1,7 +1,29 @@
 import { io } from "socket.io-client";
 
-const API_ROOT = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
-const API_BASE_URL = API_ROOT.endsWith("/api") ? API_ROOT : `${API_ROOT}/api`;
+const DEFAULT_API_ROOT = "https://vibe-book-fri1.onrender.com";
+
+const normalizeApiRoot = (value) => {
+  let next = String(value || DEFAULT_API_ROOT).trim().replace(/\s+/g, "");
+
+  if (!next) {
+    next = DEFAULT_API_ROOT;
+  }
+
+  next = next.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
+
+  if (next.startsWith("/") && typeof window !== "undefined") {
+    next = `${window.location.origin}${next}`;
+  }
+
+  if (!/^https?:\/\//i.test(next)) {
+    next = `https://${next.replace(/^\/+/, "")}`;
+  }
+
+  return next.replace(/\/+$/, "");
+};
+
+const API_ROOT = normalizeApiRoot(import.meta.env.VITE_API_URL || DEFAULT_API_ROOT);
+const API_BASE_URL = `${API_ROOT.replace(/(?:\/api)+\/?$/i, "")}/api`;
 const SOCKET_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 
 let socket = null;

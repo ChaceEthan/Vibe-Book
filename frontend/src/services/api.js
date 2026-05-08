@@ -1,19 +1,91 @@
 // @ts-nocheck
 import axios from "axios";
 
-const API_ROOT = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
-const API_BASE_URL = API_ROOT.endsWith("/api") ? API_ROOT : `${API_ROOT}/api`;
+const DEFAULT_API_ROOT = "https://vibe-book-fri1.onrender.com";
+const rawApiRoot = import.meta.env.VITE_API_URL || DEFAULT_API_ROOT;
+
+const normalizeApiRoot = (value) => {
+  let next = String(value || DEFAULT_API_ROOT).trim().replace(/\s+/g, "");
+
+  if (!next) {
+    next = DEFAULT_API_ROOT;
+  }
+
+  next = next.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
+
+  if (next.startsWith("/") && typeof window !== "undefined") {
+    next = `${window.location.origin}${next}`;
+  }
+
+  if (!/^https?:\/\//i.test(next)) {
+    next = `https://${next.replace(/^\/+/, "")}`;
+  }
+
+  return next.replace(/\/+$/, "");
+};
+
+const API_ROOT = normalizeApiRoot(rawApiRoot);
+const API_BASE_URL = `${API_ROOT.replace(/(?:\/api)+\/?$/i, "")}/api`;
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 const APP_ROOT_URL = typeof window !== "undefined" ? window.location.origin : "";
-
-if (!API_ROOT) {
-  throw new Error("VITE_API_URL is required");
-}
 
 const API = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
+  timeout: 25000,
 });
+
+export const getApiErrorMessage = (error, fallback = "Request failed. Please try again.") => {
+  const data = error?.response?.data;
+  const serverMessage =
+    (typeof data?.message === "string" && data.message.trim()) ||
+    (typeof data?.error === "string" && data.error.trim()) ||
+    (typeof data === "string" && data.trim()) ||
+    "";
+  const status = error?.response?.status;
+
+  if (serverMessage) {
+    return serverMessage;
+  }
+
+  if (status === 401) {
+    return "Please log in again.";
+  }
+
+  if (status === 403) {
+    return "You do not have permission to complete this request.";
+  }
+
+  if (status === 404) {
+    return "That resource was not found.";
+  }
+
+  if (status >= 500) {
+    return "Server is temporarily unavailable. Please try again.";
+  }
+
+  if (error?.code === "ECONNABORTED" || error?.code === "ETIMEDOUT") {
+    return "Request timed out. Please check your connection and retry.";
+  }
+
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return "You appear to be offline. Reconnect and try again.";
+  }
+
+  if (error?.message === "Network Error" || !error?.response) {
+    return "Network error: the API is unreachable or this origin is not allowed yet. Please retry.";
+  }
+
+  return error?.message || fallback;
+};
+
+export const isRetryableApiError = (error) => {
+  if (!error?.response) {
+    return true;
+  }
+
+  return [408, 429, 500, 502, 503, 504].includes(Number(error.response.status));
+};
 
 const getStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
 
@@ -27,6 +99,28 @@ API.interceptors.request.use((config) => {
 
   return config;
 });
+
+API.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    error.userMessage = getApiErrorMessage(error);
+
+    if (!error.response) {
+      console.warn("[api] network request failed", {
+        baseURL: API_BASE_URL,
+        code: error.code || "NETWORK_ERROR",
+        message: error.message,
+      });
+    } else if (error.response.status >= 500) {
+      console.warn("[api] server request failed", {
+        status: error.response.status,
+        url: error.config?.url,
+      });
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 export const authApi = {
   login: (payload) => API.post("/auth/login", payload),
