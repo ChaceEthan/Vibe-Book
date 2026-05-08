@@ -1,5 +1,6 @@
 // @ts-nocheck
-const LOCAL_DEV_PORTS = ["5173", "5174", "5175", "5176", "5177"];
+const LOCAL_DEV_PORTS = ["5173", "5174", "5175", "5176", "5177", "5179"];
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 const allowedOrigins = new Set([
   "https://vibe-book-kappa.vercel.app",
@@ -57,10 +58,14 @@ const isVercelOrigin = (origin) => {
 const isAllowedLocalDevOrigin = (origin) => {
   try {
     const parsed = new URL(origin);
+    const portNumber = Number(parsed.port);
+
     return (
-      parsed.protocol === "http:" &&
-      ["localhost", "127.0.0.1"].includes(parsed.hostname) &&
-      LOCAL_DEV_PORTS.includes(parsed.port)
+      ["http:", "https:"].includes(parsed.protocol) &&
+      LOCAL_HOSTNAMES.has(parsed.hostname) &&
+      Number.isInteger(portNumber) &&
+      portNumber >= 1 &&
+      portNumber <= 65535
     );
   } catch {
     return false;

@@ -5,7 +5,7 @@ const http = require("http");
 
 const connectDB = require("./src/config/db");
 const { initSocket } = require("./src/socket");
-const { allowedOrigins, isOriginAllowed } = require("./src/config/cors");
+const { allowedOrigins, isOriginAllowed, normalizeOrigin } = require("./src/config/cors");
 
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -66,7 +66,7 @@ const startServer = async () => {
     const io = initSocket(server, {
       origin(origin, callback) {
         if (isOriginAllowed(origin)) {
-          return callback(null, origin || true);
+          return callback(null, origin ? normalizeOrigin(origin) : true);
         }
 
         return callback(null, false);
