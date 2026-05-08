@@ -4,7 +4,6 @@ import {
   Compass,
   Home,
   LogIn,
-  LogOut,
   MessageCircle,
   Plus,
   Settings,
@@ -35,22 +34,23 @@ const Navbar = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadType, setUploadType] = useState("image");
-  const { isAuthenticated, logout, user, token } = useAuth();
+  const { isAuthenticated, user, token } = useAuth();
   const { language, languages, setLanguage } = useLanguage();
   const navigate = useNavigate();
   const notificationCacheRef = useRef(new Map());
   const audioContextRef = useRef(null);
 
-  const navItems = useMemo(
+  const bottomNavItems = useMemo(
     () => [
       { to: "/", label: "Home", icon: Home },
       { to: "/explore", label: "Explore", icon: Compass },
       { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
-      { to: isAuthenticated ? "/creator-studio" : "/login", label: "Creator Studio", icon: BarChart3 },
       { to: isAuthenticated ? "/dashboard" : "/login", label: "Profile", icon: User },
     ],
     [isAuthenticated, unreadCount]
   );
+
+  const activeLanguage = languages.find((item) => item.code === language);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -196,88 +196,47 @@ const Navbar = () => {
     setUploadOpen(true);
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate("/");
-  };
-
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <nav className="container-page flex min-h-16 items-center justify-between gap-3">
-          <Link to="/" className="flex min-w-0 items-center gap-3">
-            <img src="/logo.png" alt="VibeBook logo" className="h-10 w-10 rounded-lg object-cover" />
-            <span className="truncate text-lg font-black text-navy">VibeBook</span>
+        <nav className="mx-auto flex min-h-14 w-full max-w-xs items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:max-w-full sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
+          <Link to="/" className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
+            <span className="whitespace-nowrap text-base font-black text-navy sm:text-lg">VibeBook</span>
           </Link>
 
-          <div className="hidden min-w-0 items-center gap-1 md:flex">
-            {navItems.slice(0, 2).map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink
-                  key={item.label}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition ${
-                      isActive ? "bg-brand/15 text-navy" : "text-slate-600 hover:bg-slate-100"
-                    }`
-                  }
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="hidden lg:inline">{item.label}</span>
-                </NavLink>
-              );
-            })}
-            <button type="button" className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100" onClick={() => openUpload("image")}>
-              <Plus className="h-4 w-4" />
-              <span className="hidden lg:inline">Upload</span>
-            </button>
-            {navItems.slice(2).map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavLink
-                  key={item.label}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition ${
-                      isActive ? "bg-brand/15 text-navy" : "text-slate-600 hover:bg-slate-100"
-                    }`
-                  }
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="hidden lg:inline">{item.label}</span>
-                </NavLink>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2">
+            <NavLink
+              to="/creator-studio"
+              aria-label="Creator Studio"
+              className={({ isActive }) =>
+                `inline-flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border text-slate-600 transition hover:border-brand hover:bg-brand/10 hover:text-navy md:w-auto md:px-3 md:text-sm md:font-bold ${
+                  isActive ? "border-brand bg-brand/15 text-navy" : "border-slate-200 bg-white"
+                }`
+              }
+            >
+              <BarChart3 className="h-4 w-4 shrink-0" />
+              <span className="hidden md:inline">Creator Studio</span>
+            </NavLink>
             <select
-              className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 sm:block"
+              className="h-9 w-11 shrink-0 rounded-lg border border-slate-200 bg-white px-1 text-xs font-bold uppercase text-slate-600 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 sm:w-16 sm:px-2"
               aria-label="Language"
+              title={activeLanguage?.label || "Language"}
               value={language}
               onChange={(event) => setLanguage(event.target.value)}
             >
               {languages.map((item) => (
                 <option key={item.code} value={item.code}>
-                  {item.label}
+                  {item.code.toUpperCase()}
                 </option>
               ))}
             </select>
             {isAuthenticated ? (
               <>
                 <NotificationBell />
-                {(user?.role === "admin" || user?.accountRole === "admin") && (
-                  <Link to="/admin" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Admin">
-                    <User className="h-5 w-5" />
-                  </Link>
-                )}
                 <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings">
                   <Settings className="h-5 w-5" />
                 </Link>
-                <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={handleLogout} aria-label="Logout">
-                  <LogOut className="h-5 w-5" />
-                </button>
               </>
             ) : (
               <Link to="/login" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Login">
@@ -291,8 +250,8 @@ const Navbar = () => {
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-3 pb-[calc(0.6rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="mx-auto grid max-w-xl grid-cols-6 items-end gap-1">
-          {navItems.slice(0, 2).map((item) => {
+        <div className="mx-auto grid w-full max-w-xs grid-cols-5 items-end gap-1">
+          {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
               <NavLink key={item.label} to={item.to} className={navClass}>
@@ -313,7 +272,7 @@ const Navbar = () => {
             <span>Upload</span>
           </button>
 
-          {navItems.slice(2).map((item) => {
+          {bottomNavItems.slice(2).map((item) => {
             const Icon = item.icon;
             return (
               <NavLink key={item.label} to={item.to} className={navClass}>

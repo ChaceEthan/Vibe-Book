@@ -1,7 +1,6 @@
 // @ts-nocheck
 import { Bell, CheckCheck, MessageCircle, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { notificationApi } from "../services/api";
@@ -204,11 +203,6 @@ export function NotificationBell() {
             )}
           </div>
 
-          <div className="border-t border-slate-200 p-3 text-center">
-            <Link to="/creator-studio" className="text-sm font-bold text-navy hover:text-brand" onClick={() => setOpen(false)}>
-              Open Creator Studio
-            </Link>
-          </div>
         </div>
       )}
     </div>
