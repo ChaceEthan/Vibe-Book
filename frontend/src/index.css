@@ -58,4 +58,30 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  .home-feed-scroll {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+  }
+
+  .home-feed-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .comment-sheet-in {
+    animation: commentSheetIn 180ms ease-out;
+  }
+}
+
+@keyframes commentSheetIn {
+  from {
+    opacity: 0.85;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

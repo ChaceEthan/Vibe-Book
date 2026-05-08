@@ -1,6 +1,15 @@
 // @ts-nocheck
-import { Eye, Heart, MessageCircle, Search, Send, Share2, User, UserMinus, UserPlus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BadgeCheck,
+  Bookmark,
+  Heart,
+  MessageCircle,
+  Search,
+  Send,
+  Share2,
+  X,
+} from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
@@ -9,6 +18,268 @@ import { feedApi, mediaUrl, userApi } from "../services/api";
 import { isValidPost, usePostStore } from "../store/postStore";
 
 const FEED_PAGE_SIZE = 10;
+
+const formatCount = (value) => {
+  const number = Number(value || 0);
+
+  if (number >= 1000000) {
+    return `${(number / 1000000).toFixed(number >= 10000000 ? 0 : 1)}M`;
+  }
+
+  if (number >= 1000) {
+    return `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}K`;
+  }
+
+  return number.toLocaleString();
+};
+
+const initialsFor = (value = "VibeBook") =>
+  String(value)
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "VB";
+
+const relativeTimeFor = (value) => {
+  const timestamp = value ? new Date(value).getTime() : 0;
+
+  if (!timestamp || Number.isNaN(timestamp)) {
+    return "now";
+  }
+
+  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
+
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d`;
+
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+const commentKeyFor = (comment, index) => comment?._id || `${comment?.userId || comment?.name || "comment"}-${comment?.createdAt || index}`;
+
+const ActionButton = memo(({ active = false, count, label, onClick, children }) => (
+  <div className="flex min-w-0 flex-col items-center gap-1">
+    <button
+      type="button"
+      className={`flex h-12 w-12 items-center justify-center rounded-full text-white shadow-xl backdrop-blur transition active:scale-95 ${
+        active ? "bg-white text-navy" : "bg-slate-950/35 hover:bg-slate-950/50"
+      }`}
+      onClick={onClick}
+      aria-label={label}
+    >
+      {children}
+    </button>
+    <span className="max-w-14 truncate text-[11px] font-black leading-none text-white drop-shadow">{count}</span>
+  </div>
+));
+
+const FeedItem = memo(
+  ({
+    currentUserId,
+    isAuthenticated,
+    item,
+    onFollow,
+    onInvalid,
+    onLike,
+    onOpenComments,
+    onSave,
+    onShare,
+    onViewed,
+  }) => {
+    const profile = item.userId || {};
+    const profileImage = profile.profilePicture || profile.profileImage || profile.images?.[0] || "/logo.png";
+    const profilePath = isAuthenticated ? `/profile/${profile._id}` : "/login";
+    const isOwnProfile = currentUserId && profile._id && currentUserId === profile._id;
+    const verified = Boolean(profile.verified || profile.isVerified);
+    const comments = Array.isArray(item.comments) ? item.comments : [];
+    const commentsCount = item.commentCount ?? item.commentsCount ?? comments.length;
+    const saveCount = item.saveCount ?? item.saves ?? 0;
+
+    return (
+      <article
+        className="relative h-[calc(100dvh-3.5rem)] min-h-[560px] snap-start snap-always overflow-hidden bg-slate-950 sm:h-[calc(100dvh-4rem)]"
+        style={{ contentVisibility: "auto", containIntrinsicSize: "100vh" }}
+      >
+        <PostMedia
+          post={item}
+          alt={profile.name || "VibeBook media"}
+          className="group h-full w-full"
+          imageClassName="h-full w-full object-contain"
+          videoClassName="h-full w-full object-contain"
+          placeholderClassName="h-full w-full"
+          muted
+          loop
+          autoPlay
+          controls={false}
+          interactive
+          onDoubleTap={() => onLike(item)}
+          onViewed={(metrics) => onViewed(item, metrics)}
+          onInvalid={() => onInvalid(item._id)}
+        />
+
+        <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-slate-950/95 via-slate-950/18 to-slate-950/10" />
+
+        <div className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-3 right-[5.25rem] z-20 text-white sm:bottom-[calc(6.2rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link to={profilePath} className="shrink-0" aria-label="Open creator profile">
+              <img src={mediaUrl(profileImage)} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
+            </Link>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <Link to={profilePath} className="min-w-0 truncate text-base font-black leading-tight text-white sm:text-lg">
+                  @{profile.username || profile.name || "creator"}
+                </Link>
+                {verified && <BadgeCheck className="h-4 w-4 shrink-0 fill-sky-400 text-white" aria-label="Verified" />}
+                {profile.premiumBadge || profile.isPremium ? (
+                  <span className="shrink-0 rounded-full bg-brand px-2 py-0.5 text-[10px] font-black uppercase text-navy">Premium</span>
+                ) : null}
+              </div>
+              <p className="mt-0.5 truncate text-xs font-bold text-white/75">
+                {profile.name || "VibeBook creator"}{profile.category ? ` - ${profile.category}` : ""}
+              </p>
+            </div>
+            {!isOwnProfile && profile._id && (
+              <button
+                type="button"
+                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black shadow-lg transition active:scale-95 ${
+                  profile.isFollowing ? "bg-white/20 text-white backdrop-blur" : "bg-brand text-navy"
+                }`}
+                onClick={() => onFollow(item)}
+              >
+                {profile.isFollowing ? "Following" : "Follow"}
+              </button>
+            )}
+          </div>
+
+          {item.caption && <p className="mt-3 line-clamp-3 text-sm font-semibold leading-5 text-white drop-shadow">{item.caption}</p>}
+          {Array.isArray(item.tags) && item.tags.length > 0 && (
+            <p className="mt-2 line-clamp-2 text-xs font-black leading-5 text-brand drop-shadow">
+              {item.tags.slice(0, 6).map((tag) => `#${tag}`).join(" ")}
+            </p>
+          )}
+        </div>
+
+        <div className="absolute bottom-[calc(5.6rem+env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-3 sm:bottom-[calc(6rem+env(safe-area-inset-bottom))] sm:right-5">
+          <ActionButton active={item.likedByViewer} count={formatCount(item.likes || item.likeCount)} label="Like media" onClick={() => onLike(item)}>
+            <Heart className={`h-6 w-6 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
+          </ActionButton>
+
+          <ActionButton count={formatCount(commentsCount)} label="Open comments" onClick={() => onOpenComments(item._id)}>
+            <MessageCircle className="h-6 w-6" />
+          </ActionButton>
+
+          <ActionButton count={formatCount(item.shareCount)} label="Share post" onClick={() => onShare(item)}>
+            <Share2 className="h-6 w-6" />
+          </ActionButton>
+
+          <ActionButton active={item.savedByViewer} count={formatCount(saveCount)} label="Save post" onClick={() => onSave(item)}>
+            <Bookmark className={`h-6 w-6 ${item.savedByViewer ? "fill-brand text-brand" : ""}`} />
+          </ActionButton>
+        </div>
+      </article>
+    );
+  }
+);
+
+const CommentsSheet = ({
+  commentText,
+  isAuthenticated,
+  likedComments,
+  onClose,
+  onCommentTextChange,
+  onSubmit,
+  onToggleCommentLike,
+  post,
+}) => {
+  const comments = Array.isArray(post?.comments) ? post.comments : [];
+  const profile = post?.userId || {};
+
+  if (!post) {
+    return null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-[75] flex items-end justify-center bg-slate-950/45 px-0 backdrop-blur-sm sm:items-center sm:px-4" onClick={onClose}>
+      <section
+        className="comment-sheet-in flex max-h-[78dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white text-slate-900 shadow-2xl sm:max-h-[82dvh] sm:rounded-lg"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="text-base font-black text-navy">Comments</h2>
+            <p className="truncate text-xs font-semibold text-slate-500">@{profile.username || profile.name || "creator"}</p>
+          </div>
+          <button type="button" className="rounded-full p-2 text-slate-500 hover:bg-slate-100" onClick={onClose} aria-label="Close comments">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {comments.length ? (
+            <div className="space-y-4">
+              {comments.map((comment, index) => {
+                const key = commentKeyFor(comment, index);
+                const avatar = comment.profilePicture || comment.profileImage || comment.user?.profilePicture || comment.user?.profileImage || "";
+                const name = comment.name || comment.user?.name || "VibeBook user";
+                const liked = likedComments.has(key);
+
+                return (
+                  <article key={key} className="flex gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-900 text-xs font-black text-white">
+                      {avatar ? <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" /> : initialsFor(name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-sm font-black text-navy">{name}</p>
+                        <span className="shrink-0 text-xs font-semibold text-slate-400">{relativeTimeFor(comment.createdAt)}</span>
+                      </div>
+                      <p className="mt-1 whitespace-pre-line break-words text-sm leading-6 text-slate-700">{comment.message}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100"
+                      onClick={() => onToggleCommentLike(key)}
+                      aria-label={liked ? "Unlike comment" : "Like comment"}
+                    >
+                      <Heart className={`h-4 w-4 ${liked ? "fill-red-500 text-red-500" : ""}`} />
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex min-h-52 flex-col items-center justify-center text-center">
+              <MessageCircle className="h-10 w-10 text-slate-300" />
+              <p className="mt-3 text-sm font-black text-navy">No comments yet</p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Start the conversation.</p>
+            </div>
+          )}
+        </div>
+
+        <form className="sticky bottom-0 flex gap-2 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]" onSubmit={(event) => onSubmit(event, post)}>
+          <input
+            className="min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20"
+            value={commentText}
+            onChange={(event) => onCommentTextChange(event.target.value)}
+            placeholder={isAuthenticated ? "Add a comment..." : "Log in to comment"}
+            disabled={!isAuthenticated || post.virtual || post.commentsEnabled === false}
+          />
+          <button
+            type="submit"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm disabled:opacity-50"
+            disabled={!isAuthenticated || !commentText.trim() || post.virtual || post.commentsEnabled === false}
+            aria-label="Send comment"
+          >
+            <Send className="h-5 w-5" />
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+};
 
 const Home = () => {
   const { isAuthenticated, user: currentUser } = useAuth();
@@ -22,7 +293,7 @@ const Home = () => {
   const [feedMode, setFeedMode] = useState("for-you");
   const [commentOpen, setCommentOpen] = useState("");
   const [commentText, setCommentText] = useState("");
-  const [viewedPosts, setViewedPosts] = useState(new Set());
+  const [likedComments, setLikedComments] = useState(new Set());
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -30,7 +301,12 @@ const Home = () => {
   const [error, setError] = useState("");
   const scrollerRef = useRef(null);
   const loadMoreRef = useRef(null);
+  const viewedPostsRef = useRef(new Set());
   const navigate = useNavigate();
+
+  const replaceFeedItem = useCallback((nextItem) => {
+    replacePost(nextItem);
+  }, [replacePost]);
 
   const loadFeed = useCallback(async (nextPage = 1, options = {}) => {
     const append = Boolean(options.append);
@@ -89,9 +365,23 @@ const Home = () => {
 
     window.addEventListener("vibebook:post-created", handlePostCreated);
     return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
-  }, []);
+  }, [prependPost]);
 
   const validPosts = useMemo(() => posts.filter(isValidPost), [posts]);
+
+  const visibleFeed = useMemo(
+    () =>
+      validPosts.filter((item) => {
+        if (feedMode === "following") {
+          return Boolean(item?.userId?.isFollowing);
+        }
+
+        return true;
+      }),
+    [validPosts, feedMode]
+  );
+
+  const activeCommentPost = useMemo(() => visibleFeed.find((item) => item._id === commentOpen), [commentOpen, visibleFeed]);
 
   useEffect(() => {
     if (!hasMore || loading || loadingMore || !loadMoreRef.current) {
@@ -106,8 +396,8 @@ const Home = () => {
       },
       {
         root: scrollerRef.current,
-        rootMargin: "360px 0px",
-        threshold: 0.1,
+        rootMargin: "420px 0px",
+        threshold: 0.01,
       }
     );
 
@@ -115,26 +405,15 @@ const Home = () => {
     return () => observer.disconnect();
   }, [hasMore, loadFeed, loading, loadingMore, page]);
 
-  const visibleFeed = useMemo(
-    () =>
-      validPosts.filter((item) => {
-        if (feedMode === "following") {
-          return Boolean(item?.userId?.isFollowing);
-        }
-
-        return true;
-      }),
-    [validPosts, feedMode]
-  );
-
   useEffect(() => {
     const preloaders = visibleFeed
       .filter((item) => item?.type === "video" && item.url)
-      .slice(1, 4)
+      .slice(1, 5)
       .map((item) => {
         const video = document.createElement("video");
         video.preload = "auto";
         video.muted = true;
+        video.playsInline = true;
         video.src = mediaUrl(item.url);
         video.load();
         return video;
@@ -148,11 +427,7 @@ const Home = () => {
     };
   }, [visibleFeed]);
 
-  const replaceFeedItem = (nextItem) => {
-    replacePost(nextItem);
-  };
-
-  const handleLike = async (item) => {
+  const handleLike = useCallback(async (item) => {
     if (!isAuthenticated) {
       navigate("/login");
       return;
@@ -183,9 +458,27 @@ const Home = () => {
     } catch {
       navigate(`/profile/${item.userId?._id}`);
     }
-  };
+  }, [isAuthenticated, navigate, replaceFeedItem, updatePostsByUser]);
 
-  const handleFollow = async (item) => {
+  const handleSave = useCallback(async (item) => {
+    if (!isAuthenticated) {
+      navigate("/login");
+      return;
+    }
+
+    if (item.virtual || !item._id) {
+      return;
+    }
+
+    try {
+      const { data } = await feedApi.save(item._id);
+      replaceFeedItem(data.feedItem);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to save this post.");
+    }
+  }, [isAuthenticated, navigate, replaceFeedItem]);
+
+  const handleFollow = useCallback(async (item) => {
     if (!isAuthenticated) {
       navigate("/login");
       return;
@@ -213,18 +506,14 @@ const Home = () => {
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to update follow.");
     }
-  };
+  }, [currentUser?._id, isAuthenticated, navigate, updatePostsByUser]);
 
-  const handleViewed = async (item, metrics = {}) => {
-    if (!item?._id || item.virtual || viewedPosts.has(item._id)) {
+  const handleViewed = useCallback(async (item, metrics = {}) => {
+    if (!item?._id || item.virtual || viewedPostsRef.current.has(item._id)) {
       return;
     }
 
-    setViewedPosts((current) => {
-      const next = new Set(current);
-      next.add(item._id);
-      return next;
-    });
+    viewedPostsRef.current.add(item._id);
 
     try {
       const { data } = await feedApi.recordView(item._id, metrics);
@@ -232,9 +521,9 @@ const Home = () => {
     } catch {
       // View tracking should never interrupt playback.
     }
-  };
+  }, [replaceFeedItem]);
 
-  const handleShare = async (item) => {
+  const handleShare = useCallback(async (item) => {
     const shareUrl = `${window.location.origin}/profile/${item.userId?._id || ""}`;
     const shareData = {
       title: item.userId?.name || "VibeBook post",
@@ -258,9 +547,9 @@ const Home = () => {
         setError("Unable to share this post.");
       }
     }
-  };
+  }, [replaceFeedItem]);
 
-  const handleComment = async (event, item) => {
+  const handleComment = useCallback(async (event, item) => {
     event.preventDefault();
 
     if (!isAuthenticated) {
@@ -279,12 +568,24 @@ const Home = () => {
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to add comment.");
     }
-  };
+  }, [commentText, isAuthenticated, navigate, replaceFeedItem]);
+
+  const toggleCommentLike = useCallback((key) => {
+    setLikedComments((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
 
   if (loading) {
     return (
-      <section className="h-[calc(100dvh-7.5rem)] min-h-[520px] bg-slate-950 p-3 sm:h-[calc(100dvh-8rem)]">
-        <div className="mx-auto h-full max-w-[min(100vw,36rem)] animate-pulse rounded-lg bg-slate-800" />
+      <section className="h-[calc(100dvh-3.5rem)] min-h-[560px] bg-slate-950 p-2 sm:h-[calc(100dvh-4rem)]">
+        <div className="mx-auto h-full max-w-[min(100vw,48rem)] animate-pulse rounded-lg bg-slate-800" />
       </section>
     );
   }
@@ -298,180 +599,64 @@ const Home = () => {
   }
 
   return (
-    <section className="relative bg-slate-950">
-      <div className="absolute left-1/2 top-3 z-20 flex -translate-x-1/2 rounded-lg bg-slate-950/60 p-1 text-xs font-black text-white backdrop-blur">
-        {[
-          { value: "for-you", label: "For You" },
-          { value: "following", label: "Following" },
-        ].map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            className={`rounded-lg px-4 py-2 ${feedMode === option.value ? "bg-brand text-navy" : "text-white/75"}`}
-            onClick={() => {
-              if (option.value === "following" && !isAuthenticated) {
-                navigate("/login");
-                return;
-              }
+    <section className="relative min-h-[calc(100dvh-3.5rem)] overflow-hidden bg-slate-950 text-white sm:min-h-[calc(100dvh-4rem)]">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center pt-3">
+        <div className="pointer-events-auto flex rounded-full bg-slate-950/55 p-1 text-xs font-black text-white shadow-xl backdrop-blur">
+          {[
+            { value: "for-you", label: "For You" },
+            { value: "following", label: "Following" },
+          ].map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={`rounded-full px-4 py-2 transition ${feedMode === option.value ? "bg-white text-navy" : "text-white/75 hover:text-white"}`}
+              onClick={() => {
+                if (option.value === "following" && !isAuthenticated) {
+                  navigate("/login");
+                  return;
+                }
 
-              setFeedMode(option.value);
-            }}
-          >
-            {option.label}
-          </button>
-        ))}
+                setFeedMode(option.value);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div ref={scrollerRef} className="mx-auto h-[calc(100dvh-7.5rem)] min-h-[520px] max-w-[min(100vw,36rem)] snap-y snap-mandatory overflow-y-auto scroll-smooth sm:h-[calc(100dvh-8rem)]">
+
+      <div
+        ref={scrollerRef}
+        className="home-feed-scroll mx-auto h-[calc(100dvh-3.5rem)] min-h-[560px] max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto scroll-smooth bg-slate-950 sm:h-[calc(100dvh-4rem)]"
+      >
         {visibleFeed.length ? (
           <>
-          {visibleFeed.map((item) => {
-            const profile = item.userId || {};
-            const profileImage = profile.profilePicture || profile.profileImage || profile.images?.[0] || "/logo.png";
-            const comments = Array.isArray(item.comments) ? item.comments : [];
-
-            return (
-              <article key={item._id} className="relative h-full snap-start overflow-hidden bg-slate-950">
-                <PostMedia
-                  post={item}
-                  alt={profile.name || "VibeBook media"}
-                  className="group h-full w-full"
-                  imageClassName="h-full w-full object-contain"
-                  videoClassName="h-full w-full object-contain"
-                  placeholderClassName="h-full w-full"
-                  muted
-                  loop
-                  autoPlay
-                  controls={false}
-                  interactive
-                  onDoubleTap={() => handleLike(item)}
-                  onViewed={(metrics) => handleViewed(item, metrics)}
-                  onInvalid={() => removePost(item._id)}
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/10 to-transparent" />
-
-                <div className="absolute bottom-5 left-4 right-24 text-white">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <Link to={isAuthenticated ? `/profile/${profile._id}` : "/login"} className="shrink-0">
-                      <img src={mediaUrl(profileImage)} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-white/30" />
-                    </Link>
-                    <div className="min-w-0">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <h1 className="min-w-0 truncate text-xl font-black sm:text-2xl">{profile.name}</h1>
-                        {profile.premiumBadge || profile.isPremium ? (
-                          <span className="shrink-0 rounded-full bg-brand px-2 py-1 text-[10px] font-black uppercase text-navy">Premium</span>
-                        ) : null}
-                      </div>
-                      <p className="mt-1 truncate text-sm font-semibold text-white/80">
-                        @{profile.username || "creator"}{profile.category ? ` - ${profile.category}` : ""}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3 text-xs font-bold text-white/80">
-                    <span className="inline-flex items-center gap-1">
-                      <Eye className="h-4 w-4" />
-                      {Number(item.views || 0)}
-                    </span>
-                    <span>{Number(profile.followerCount || 0).toLocaleString()} followers</span>
-                    <span className="max-w-full truncate">
-                      {profile.province || "Rwanda"}{profile.district ? `, ${profile.district}` : ""}
-                    </span>
-                  </div>
-
-                  {item.caption && <p className="mt-3 line-clamp-2 text-sm font-semibold text-white">{item.caption}</p>}
-                  {Array.isArray(item.tags) && item.tags.length > 0 && (
-                    <p className="mt-2 line-clamp-1 text-xs font-bold text-brand">
-                      {item.tags.slice(0, 4).map((tag) => `#${tag}`).join(" ")}
-                    </p>
-                  )}
-
-                  {commentOpen === item._id && (
-                    <div className="mt-4 rounded-lg bg-slate-950/70 p-3 backdrop-blur">
-                      {comments.length ? (
-                        <div className="mb-3 max-h-28 space-y-2 overflow-y-auto text-xs">
-                          {comments.slice(-3).map((comment) => (
-                            <p key={comment._id || `${comment.name}-${comment.createdAt}`} className="truncate text-white/85">
-                              <span className="font-black">{comment.name || "User"}:</span> {comment.message}
-                            </p>
-                          ))}
-                        </div>
-                      ) : null}
-                      {!item.virtual && (
-                        <form className="flex gap-2" onSubmit={(event) => handleComment(event, item)}>
-                          <input
-                            className="min-w-0 flex-1 rounded-lg border-0 bg-white px-3 py-2 text-sm text-slate-900 outline-none"
-                            value={commentText}
-                            onChange={(event) => setCommentText(event.target.value)}
-                            placeholder="Add comment"
-                          />
-                          <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand text-navy" aria-label="Send comment">
-                            <Send className="h-4 w-4" />
-                          </button>
-                        </form>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="absolute bottom-8 right-4 flex flex-col items-center gap-4">
-                  <button
-                    type="button"
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur"
-                    onClick={() => handleLike(item)}
-                    aria-label="Like media"
-                  >
-                    <Heart className={`h-6 w-6 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
-                  </button>
-                  <span className="-mt-3 max-w-12 truncate text-xs font-bold text-white">{Number(item.likes || item.likeCount || 0)}</span>
-
-                  <button
-                    type="button"
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur"
-                    onClick={() => setCommentOpen((current) => (current === item._id ? "" : item._id))}
-                    aria-label="Comment"
-                  >
-                    <MessageCircle className="h-6 w-6" />
-                  </button>
-                  <span className="-mt-3 max-w-12 truncate text-xs font-bold text-white">{Number(item.commentCount || 0)}</span>
-
-                  <button
-                    type="button"
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur"
-                    onClick={() => handleShare(item)}
-                    aria-label="Share post"
-                  >
-                    <Share2 className="h-6 w-6" />
-                  </button>
-                  <span className="-mt-3 max-w-12 truncate text-xs font-bold text-white">{Number(item.shareCount || 0)}</span>
-
-                  <button
-                    type="button"
-                    className={`flex h-12 w-12 items-center justify-center rounded-full backdrop-blur ${
-                      profile.isFollowing ? "bg-white text-navy" : "bg-brand text-navy"
-                    }`}
-                    onClick={() => handleFollow(item)}
-                    aria-label={profile.isFollowing ? "Unfollow profile" : "Follow profile"}
-                  >
-                    {profile.isFollowing ? <UserMinus className="h-6 w-6" /> : <UserPlus className="h-6 w-6" />}
-                  </button>
-                  <span className="-mt-3 max-w-16 truncate text-xs font-bold text-white">
-                    {profile.isFollowing ? "Following" : Number(profile.followerCount || 0)}
-                  </span>
-
-                  <Link
-                    to={isAuthenticated ? `/profile/${profile._id}` : "/login"}
-                    className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-navy shadow-lg"
-                    aria-label="View profile"
-                  >
-                    <User className="h-6 w-6" />
-                  </Link>
-                </div>
-              </article>
-            );
-          })}
-          <div ref={loadMoreRef} className="flex h-24 snap-end items-center justify-center bg-slate-950 text-xs font-bold uppercase tracking-[0.2em] text-white/50">
-            {loadingMore ? "Loading more" : hasMore ? "More vibes incoming" : "Caught up"}
-          </div>
+            {visibleFeed.map((item) => (
+              <FeedItem
+                key={item._id}
+                currentUserId={currentUser?._id}
+                isAuthenticated={isAuthenticated}
+                item={item}
+                onFollow={handleFollow}
+                onInvalid={removePost}
+                onLike={handleLike}
+                onOpenComments={(postId) => {
+                  setCommentOpen(postId);
+                  setCommentText("");
+                }}
+                onSave={handleSave}
+                onShare={handleShare}
+                onViewed={handleViewed}
+              />
+            ))}
+            <div ref={loadMoreRef} className="h-1 bg-slate-950" />
+            {loadingMore && (
+              <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center">
+                <span className="rounded-full bg-slate-950/65 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white/75 backdrop-blur">
+                  Loading more
+                </span>
+              </div>
+            )}
           </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-white">
@@ -483,6 +668,23 @@ const Home = () => {
           </div>
         )}
       </div>
+
+      {error && visibleFeed.length ? (
+        <div className="pointer-events-none fixed inset-x-0 top-20 z-40 flex justify-center px-4">
+          <div className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 shadow-xl">{error}</div>
+        </div>
+      ) : null}
+
+      <CommentsSheet
+        commentText={commentText}
+        isAuthenticated={isAuthenticated}
+        likedComments={likedComments}
+        onClose={() => setCommentOpen("")}
+        onCommentTextChange={setCommentText}
+        onSubmit={handleComment}
+        onToggleCommentLike={toggleCommentLike}
+        post={activeCommentPost}
+      />
     </section>
   );
 };

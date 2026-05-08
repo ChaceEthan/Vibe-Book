@@ -41,10 +41,13 @@ const ProtectedRoute = ({ children }) => {
 };
 
 const App = () => {
+  const location = useLocation();
+  const isHome = location.pathname === "/";
+
   return (
     <div className="flex min-h-screen flex-col bg-surface">
       <Navbar />
-      <main className="flex-1 pb-28">
+      <main className={`flex-1 ${isHome ? "bg-slate-950 pb-0" : "pb-28"}`}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/explore" element={<Explore />} />
@@ -158,7 +161,7 @@ const App = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      <Footer />
+      {!isHome && <Footer />}
     </div>
   );
 };

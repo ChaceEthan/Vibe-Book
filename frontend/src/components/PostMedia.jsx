@@ -281,7 +281,7 @@ const PostMedia = ({
         <video
           aria-hidden="true"
           src={src}
-          className="absolute inset-0 h-full w-full scale-110 object-cover opacity-30 blur-2xl"
+          className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-30 blur-2xl"
           muted
           loop
           playsInline
@@ -366,7 +366,7 @@ const PostMedia = ({
 
   return (
     <div className={`relative overflow-hidden bg-slate-950 ${className}`}>
-      <img src={src} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl" aria-hidden="true" />
+      <img src={src} alt="" className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl" aria-hidden="true" />
       <img
         ref={mediaRef}
         src={src}
