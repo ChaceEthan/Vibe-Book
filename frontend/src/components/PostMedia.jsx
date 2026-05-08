@@ -16,6 +16,7 @@ const PostMedia = ({
   videoClassName = "",
   placeholderClassName = "",
   interactive = false,
+  minimal = false,
   onDoubleTap,
   onViewed,
   onInvalid,
@@ -369,18 +370,22 @@ const PostMedia = ({
           </div>
         )}
 
-        <button
-          type="button"
-          className="absolute right-3 top-3 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur"
-          onClick={handleMuteToggle}
-          aria-label={isMuted ? "Unmute video" : "Mute video"}
-        >
-          {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-        </button>
+        {!minimal && (
+          <button
+            type="button"
+            className="absolute right-3 top-3 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur"
+            onClick={handleMuteToggle}
+            aria-label={isMuted ? "Unmute video" : "Mute video"}
+          >
+            {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+          </button>
+        )}
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-[3px] bg-white/15">
-          <div className="h-full bg-brand" style={{ width: `${progress}%` }} />
-        </div>
+        {!minimal && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-[3px] bg-white/15">
+            <div className="h-full bg-brand" style={{ width: `${progress}%` }} />
+          </div>
+        )}
       </div>
     );
   }

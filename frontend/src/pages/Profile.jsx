@@ -1,5 +1,30 @@
 // @ts-nocheck
-import { BadgeCheck, CreditCard, Eye, Gift, Heart, Lock, Mail, MessageCircle, Pencil, Phone, Rocket, Send, Share2, Sparkles, UserMinus, UserPlus, X } from "lucide-react";
+import {
+  BadgeCheck,
+  Bookmark,
+  CreditCard,
+  Eye,
+  Gift,
+  Grid3X3,
+  Heart,
+  Image as ImageIcon,
+  Link as LinkIcon,
+  Lock,
+  Mail,
+  MessageCircle,
+  Pencil,
+  Phone,
+  Play,
+  Rocket,
+  Send,
+  Share2,
+  Sparkles,
+  Tag,
+  UserMinus,
+  UserPlus,
+  Video,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -91,6 +116,47 @@ const isDirectVideoUrl = (url = "") => {
   }
 };
 
+const formatCompactNumber = (value = 0) =>
+  new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Number(value || 0));
+
+const normalizeExternalHref = (value = "") => {
+  const trimmed = String(value || "").trim();
+
+  if (!trimmed) {
+    return "";
+  }
+
+  if (/^(https?:|mailto:|tel:)/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  return `https://${trimmed.replace(/^@/, "")}`;
+};
+
+const getPostUrl = (post = {}) => post.url || post.mediaUrl || post.videoUrl || post.imageUrl || post.image || post.video || "";
+
+const isVideoPost = (post = {}) => {
+  const type = String(post.type || post.mediaType || "").toLowerCase();
+  const url = getPostUrl(post);
+
+  return type.includes("video") || /\.(mp4|mov|webm)(?:$|[?#])/i.test(url);
+};
+
+const formatDuration = (value = 0) => {
+  const seconds = Math.round(Number(value || 0));
+
+  if (!seconds) {
+    return "";
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+};
+
 const Profile = () => {
   const { id } = useParams();
   const { refreshProfile, user: currentUser } = useAuth();
@@ -125,6 +191,7 @@ const Profile = () => {
   const [profileCommentOpen, setProfileCommentOpen] = useState("");
   const [profileCommentText, setProfileCommentText] = useState("");
   const [editingPost, setEditingPost] = useState(null);
+  const [activeProfileTab, setActiveProfileTab] = useState("Videos");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -173,6 +240,7 @@ const Profile = () => {
     setProfileCommentOpen("");
     setProfileCommentText("");
     setEditingPost(null);
+    setActiveProfileTab("Videos");
   }, [id, currentUser]);
 
   useEffect(() => {
@@ -219,6 +287,58 @@ const Profile = () => {
 
     return Array.from(byId.values()).sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0));
   }, [id, storePosts, user]);
+
+  const postUrls = useMemo(() => new Set(profilePosts.map(getPostUrl).filter(Boolean)), [profilePosts]);
+  const coverImage = user?.coverImage || user?.coverPicture || user?.bannerImage || user?.coverPhoto || images.find((image) => image && image !== profilePicture) || profilePicture || "/logo.png";
+  const profileLikes = profilePosts.reduce((total, post) => total + Number(post.likes || post.likeCount || 0), 0);
+  const profileViews = profilePosts.reduce((total, post) => total + Number(post.views || post.viewCount || 0), 0);
+  const totalLikes = Number(user?.likes || user?.likeCount || profileLikes || 0);
+  const totalViews = Number(user?.viewsCount || user?.profileViews || profileViews || 0);
+  const socialSource = user?.socialLinks || user?.socials || {};
+  const socialEntries = Object.entries(socialSource)
+    .filter(([, value]) => Boolean(value))
+    .filter(([key]) => !["whatsapp", "phone", "email", "website"].includes(String(key).toLowerCase()))
+    .slice(0, 4);
+  const website = user?.website || user?.socialLinks?.website || user?.socials?.website || "";
+  const videoItems = useMemo(() => {
+    const postVideos = profilePosts.filter(isVideoPost);
+    const looseVideos = videoUrls
+      .filter((videoUrl) => videoUrl && !postUrls.has(videoUrl))
+      .map((videoUrl, index) => ({
+        _id: `loose-video-${index}-${videoUrl}`,
+        url: videoUrl,
+        type: "video",
+        caption: "Video",
+        duration: 0,
+        external: !isDirectVideoUrl(videoUrl),
+      }));
+
+    return [...postVideos, ...looseVideos];
+  }, [postUrls, profilePosts, videoUrls]);
+  const photoItems = useMemo(() => {
+    const postPhotos = profilePosts.filter((post) => !isVideoPost(post));
+    const loosePhotos = images
+      .filter((image) => image && !postUrls.has(image))
+      .map((image, index) => ({
+        _id: `loose-photo-${index}-${image}`,
+        url: image,
+        type: "image",
+        caption: index === 0 ? "Profile photo" : "Photo",
+      }));
+
+    return [...postPhotos, ...loosePhotos];
+  }, [images, postUrls, profilePosts]);
+  const savedItems = Array.isArray(user?.savedPosts) ? user.savedPosts : [];
+  const taggedItems = Array.isArray(user?.taggedPosts) ? user.taggedPosts : [];
+  const profileTabs = [
+    { label: "Videos", icon: Video, count: videoItems.length },
+    { label: "Photos", icon: ImageIcon, count: photoItems.length },
+    { label: "Saved", icon: Bookmark, count: savedItems.length },
+    { label: "Tagged", icon: Tag, count: taggedItems.length },
+  ];
+  const activeGridItems =
+    activeProfileTab === "Videos" ? videoItems : activeProfileTab === "Photos" ? photoItems : activeProfileTab === "Saved" ? savedItems : taggedItems;
+  const activeCommentPost = profilePosts.find((post) => post._id === profileCommentOpen);
 
   const goToImage = (direction) => {
     setActiveImage((current) => {
@@ -627,263 +747,93 @@ const Profile = () => {
   }
 
   return (
-    <section className="container-page py-10">
-      <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="space-y-4">
-          <div className="relative overflow-hidden rounded-lg bg-slate-100 shadow-soft">
-            <button type="button" className="block h-[420px] w-full" onClick={() => setPreviewImage(activeImageUrl)}>
-              <img
-                src={mediaUrl(activeImageUrl)}
-                alt={user.name}
-                className={`h-full w-full object-cover ${contentLocked ? "scale-[1.02] blur-sm" : ""}`}
-              />
-            </button>
-            {contentLocked && (
-              <div className="absolute inset-x-6 bottom-6 rounded-lg bg-slate-950/75 p-4 text-center text-white backdrop-blur">
-                <div className="flex items-center justify-center gap-2 text-sm font-black">
-                  <Lock className="h-4 w-4" />
-                  Follow to unlock content
-                </div>
-              </div>
+    <section className="container-page pb-28 pt-4 sm:py-8">
+      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+        <div className="relative h-40 overflow-hidden bg-slate-950 sm:h-56">
+          <img src={mediaUrl(coverImage)} alt="" className="h-full w-full object-cover opacity-75" />
+          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
+          <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+            {verified && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-500 px-3 py-1 text-xs font-black uppercase text-white shadow">
+                <BadgeCheck className="h-4 w-4 fill-white text-sky-500" />
+                Verified
+              </span>
             )}
-            {images.length > 1 && (
-              <div className="absolute inset-x-4 top-1/2 flex -translate-y-1/2 justify-between">
-                <button type="button" className="rounded-full bg-white/90 px-4 py-3 text-sm font-black text-navy shadow" onClick={() => goToImage(-1)} aria-label="Previous image">
-                  {"<"}
-                </button>
-                <button type="button" className="rounded-full bg-white/90 px-4 py-3 text-sm font-black text-navy shadow" onClick={() => goToImage(1)} aria-label="Next image">
-                  {">"}
-                </button>
-              </div>
+            {premiumActive && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand px-3 py-1 text-xs font-black uppercase text-navy shadow">
+                <Sparkles className="h-4 w-4" />
+                Premium
+              </span>
             )}
           </div>
+        </div>
 
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-            {images.map((image, index) => (
-              <button
-                key={`${image}-${index}`}
-                type="button"
-                className={`h-24 overflow-hidden rounded-lg border bg-slate-100 shadow-sm ${
-                  index === activeImage ? "border-brand ring-2 ring-brand/30" : "border-transparent"
-                }`}
-                onClick={() => {
-                  setActiveImage(index);
-                  setPreviewImage(image);
-                }}
-              >
-                <img src={mediaUrl(image)} alt="" className="h-full w-full object-cover" />
-              </button>
+        <div className="px-4 pb-6 text-center sm:px-6">
+          <div className="relative mx-auto -mt-16 h-32 w-32 rounded-full border-4 border-white bg-slate-100 shadow-xl">
+            <img src={mediaUrl(profilePicture || activeImageUrl)} alt={user.name} className="h-full w-full rounded-full object-cover" />
+            {verified && <BadgeCheck className="absolute bottom-2 right-1 h-8 w-8 rounded-full fill-sky-500 text-white shadow" aria-label="Verified creator" />}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <h1 className="text-3xl font-black text-navy sm:text-4xl">{user.name}</h1>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-500">{user.role || "Creator"}</span>
+          </div>
+          <p className="mt-1 text-sm font-bold text-slate-500">@{user.username || "creator"}</p>
+
+          <div className="mx-auto mt-5 grid max-w-2xl grid-cols-4 gap-2 rounded-lg bg-slate-50 p-2">
+            {[
+              { label: "Followers", value: user.followerCount || user.followers?.length || 0 },
+              { label: "Following", value: user.followingCount || user.following?.length || 0 },
+              { label: "Likes", value: totalLikes },
+              { label: "Views", value: totalViews },
+            ].map((stat) => (
+              <div key={stat.label} className="rounded-lg bg-white px-2 py-3 shadow-sm">
+                <p className="text-base font-black text-navy sm:text-xl">{formatCompactNumber(stat.value)}</p>
+                <p className="mt-1 truncate text-[10px] font-black uppercase text-slate-400 sm:text-xs">{stat.label}</p>
+              </div>
             ))}
           </div>
 
-          {lockedImageCount > 0 && (
-            <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm font-semibold text-slate-600 shadow-soft">
-              {lockedImageCount} gallery {lockedImageCount === 1 ? "item is" : "items are"} locked. Follow to unlock content.
+          <p className="mx-auto mt-5 max-w-2xl whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">
+            {contentLocked ? "Follow to unlock this creator's content." : user.bio || "This creator has not added a bio yet."}
+          </p>
+
+          {(website || socialEntries.length > 0 || skills.length > 0) && (
+            <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center justify-center gap-2">
+              {website && (
+                <a className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600 hover:bg-brand/10 hover:text-navy" href={normalizeExternalHref(website)} target="_blank" rel="noreferrer">
+                  <LinkIcon className="h-3.5 w-3.5" />
+                  Website
+                </a>
+              )}
+              {socialEntries.map(([key, value]) => (
+                <a
+                  key={key}
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black text-slate-600 hover:bg-brand/10 hover:text-navy"
+                  href={normalizeExternalHref(value)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <LinkIcon className="h-3.5 w-3.5" />
+                  {key}
+                </a>
+              ))}
+              {skills.slice(0, 8).map((skill) => (
+                <span key={skill} className="rounded-full bg-brand/10 px-3 py-1.5 text-xs font-black text-green-700">
+                  #{skill}
+                </span>
+              ))}
             </div>
           )}
 
-          {(videoUrls.length > 0 || (contentLocked && Number(user?.videoCount || 0) > 0)) && (
-            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-              <h2 className="text-lg font-black text-navy">Videos</h2>
-              <div className="mt-4 grid gap-4">
-                {contentLocked && !videoUrls.length ? (
-                  <div className="flex aspect-video items-center justify-center rounded-lg bg-slate-100 p-5 text-center text-sm font-bold text-slate-600">
-                    <span className="inline-flex items-center gap-2">
-                      <Lock className="h-4 w-4" />
-                      Follow to unlock content
-                    </span>
-                  </div>
-                ) : (
-                  videoUrls.map((videoUrl, index) => (
-                    <div key={videoUrl} className="aspect-video overflow-hidden rounded-lg bg-slate-100">
-                      {isDirectVideoUrl(videoUrl) ? (
-                        <video
-                          src={mediaUrl(videoUrl)}
-                          className="h-full bg-slate-900"
-                          controls
-                          playsInline
-                          preload="metadata"
-                          style={{ width: "100%", borderRadius: "12px" }}
-                        />
-                      ) : (
-                        <iframe
-                          src={toEmbedUrl(videoUrl)}
-                          title={`${user.name} video ${index + 1}`}
-                          className="h-full w-full"
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          allowFullScreen
-                          loading="lazy"
-                        />
-                      )}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {profilePosts.length > 0 || (!isOwnProfile && Number(user?.postCount || 0) > 0) ? (
-            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-black text-navy">Posts</h2>
-                <span className="text-xs font-bold uppercase text-slate-500">{Number(user?.postCount || profilePosts.length || 0)} posts</span>
-              </div>
-              {profilePosts.length > 0 ? (
-                <div className="mt-4 grid gap-4">
-                  {profilePosts.map((post) => (
-                    <article key={post._id} className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                      <PostMedia
-                        post={post}
-                        alt={`${user.name} post`}
-                        className="aspect-[9/12] max-h-[420px] w-full"
-                        imageClassName="h-full w-full object-contain"
-                        videoClassName="h-full w-full object-contain"
-                        placeholderClassName="min-h-[280px] rounded-lg"
-                        controls
-                        onViewed={(metrics) => handlePostViewed(post, metrics)}
-                      />
-                      <div className="p-3">
-                        {post.caption && <p className="line-clamp-2 text-sm font-semibold text-slate-700">{post.caption}</p>}
-                        {Array.isArray(post.tags) && post.tags.length > 0 && (
-                          <p className="mt-2 line-clamp-1 text-xs font-bold text-brand">
-                            {post.tags.slice(0, 5).map((tag) => `#${tag}`).join(" ")}
-                          </p>
-                        )}
-                        <div className={`mt-3 grid gap-2 text-xs font-bold text-slate-600 ${isOwnProfile ? "grid-cols-6" : "grid-cols-4"}`}>
-                          <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2" onClick={() => handlePostLike(post)}>
-                            <Heart className={`h-4 w-4 ${post.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
-                            {Number(post.likes || post.likeCount || 0)}
-                          </button>
-                          <button
-                            type="button"
-                            className="flex items-center gap-1 rounded-lg bg-white px-2 py-2"
-                            onClick={() => setProfileCommentOpen((current) => (current === post._id ? "" : post._id))}
-                          >
-                            <MessageCircle className="h-4 w-4" />
-                            {Number(post.commentCount || 0)}
-                          </button>
-                          <span className="flex items-center gap-1 rounded-lg bg-white px-2 py-2">
-                            <Eye className="h-4 w-4" />
-                            {Number(post.views || 0)}
-                          </span>
-                          <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2" onClick={() => handlePostShare(post)}>
-                            <Share2 className="h-4 w-4" />
-                            {Number(post.shareCount || 0)}
-                          </button>
-                          {isOwnProfile && (
-                            <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2 text-brand" onClick={() => handleBoostPost(post)}>
-                              <Rocket className="h-4 w-4" />
-                              Boost
-                            </button>
-                          )}
-                          {isOwnProfile && (
-                            <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2 text-navy" onClick={() => setEditingPost(post)}>
-                              <Pencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                          )}
-                        </div>
-                        {profileCommentOpen === post._id && post.commentsEnabled !== false && (
-                          <form className="mt-3 flex gap-2" onSubmit={(event) => handlePostComment(event, post)}>
-                            <input
-                              className="field min-w-0 flex-1"
-                              value={profileCommentText}
-                              onChange={(event) => setProfileCommentText(event.target.value)}
-                              placeholder="Add comment"
-                            />
-                            <button type="submit" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand text-navy" aria-label="Send comment">
-                              <Send className="h-4 w-4" />
-                            </button>
-                          </form>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-4 flex min-h-28 items-center justify-center rounded-lg bg-slate-100 p-5 text-center text-sm font-bold text-slate-600">
-                  <span className="inline-flex items-center gap-2">
-                    <Lock className="h-4 w-4" />
-                    Follow to unlock posts
-                  </span>
-                </div>
-              )}
-            </div>
-          ) : null}
-        </div>
-
-        <div className="space-y-5">
-          <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <img src={mediaUrl(profilePicture || activeImageUrl)} alt="" className="mb-4 h-20 w-20 rounded-full object-cover shadow-soft" />
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-sm font-semibold uppercase text-brand">{user.role}</p>
-                  {verified && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-3 py-1 text-xs font-bold uppercase text-sky-700">
-                      <BadgeCheck className="h-4 w-4" />
-                      Verified
-                    </span>
-                  )}
-                  {premiumActive && (
-                    <span className="rounded-full bg-brand/10 px-3 py-1 text-xs font-bold uppercase text-green-700">
-                      Premium
-                    </span>
-                  )}
-                </div>
-                <h1 className="mt-2 text-3xl font-black text-navy">{user.name}</h1>
-                <p className="mt-2 text-sm text-slate-500">@{user.username || "creator"}</p>
-                <p className="mt-2 text-xs font-bold uppercase text-slate-400">
-                  {Number(user.followerCount || 0)} followers
-                </p>
-              </div>
-              <div className="rounded-lg bg-slate-100 px-4 py-3 text-center">
-                <p className="text-xs font-semibold uppercase text-slate-500">Following</p>
-                <p className="text-xl font-black text-navy">{Number(user.followingCount || user.following?.length || 0).toLocaleString()}</p>
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs font-semibold uppercase text-slate-500">Profile views</p>
-                <p className="mt-1 text-lg font-bold text-navy">{Number(user.viewsCount || 0).toLocaleString()}</p>
-                <p className="mt-1 text-xs text-slate-500">People checking out this creator.</p>
-              </div>
-              <div className="rounded-lg bg-surface p-4">
-                <p className="text-xs font-semibold uppercase text-slate-500">Likes</p>
-                <p className="mt-1 text-lg font-bold capitalize text-navy">{Number(user.likes || user.likeCount || 0).toLocaleString()}</p>
-                <p className="mt-1 text-xs text-slate-500">Engagement across profile and posts.</p>
-              </div>
-            </div>
-
-            {skills.length > 0 && (
-              <div className="mt-6">
-                <h2 className="text-lg font-bold text-navy">Interests</h2>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {skills.map((skill) => (
-                    <span key={skill} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">
-                      #{skill}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6">
-              <h2 className="text-lg font-bold text-navy">Bio</h2>
-              <p className="mt-2 whitespace-pre-line text-sm leading-7 text-slate-600">
-                {contentLocked ? "Follow to unlock content" : user.bio || "This creator has not added a bio yet."}
-              </p>
-            </div>
-
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              {isOwnProfile && (
-                <Link to="/settings" className="btn-primary gap-2">
-                  <Pencil className="h-4 w-4" />
-                  Edit Profile
-                </Link>
-              )}
-              {!isOwnProfile && (
+          <div className="mx-auto mt-5 flex max-w-3xl flex-wrap items-center justify-center gap-2">
+            {isOwnProfile ? (
+              <Link to="/settings" className="btn-primary gap-2">
+                <Pencil className="h-4 w-4" />
+                Edit Profile
+              </Link>
+            ) : (
+              <>
                 <button
                   type="button"
                   className={`${isFollowing ? "btn-secondary" : "btn-primary"} gap-2`}
@@ -893,32 +843,38 @@ const Profile = () => {
                   {isFollowing ? <UserMinus className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
                   {followUpdating ? "Updating..." : isFollowing ? "Unfollow" : "Follow"}
                 </button>
-              )}
-              {!isOwnProfile && (
-                <button type="button" className="btn-secondary gap-2" onClick={handleLikeToggle}>
-                  <Heart className={`h-4 w-4 ${user.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
-                  {user.likedByViewer ? "Unlike" : "Like"} ({Number(user.likes || user.likeCount || 0)})
-                </button>
-              )}
-              {!isOwnProfile && (
                 <Link className="btn-secondary gap-2" to={`/chat/${user._id}`}>
                   <MessageCircle className="h-4 w-4" />
-                  Open Chat
+                  Chat
                 </Link>
-              )}
+                <button type="button" className="btn-secondary gap-2" onClick={handleLikeToggle}>
+                  <Heart className={`h-4 w-4 ${user.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
+                  {user.likedByViewer ? "Unlike" : "Like"}
+                </button>
+                <button type="button" className="btn-secondary gap-2" onClick={handleStartTip}>
+                  <Gift className="h-4 w-4" />
+                  Tip
+                </button>
+              </>
+            )}
+            {isOwnProfile && !premiumActive && (
+              <button type="button" className="btn-secondary gap-2" onClick={handleUpgradePremium}>
+                <Sparkles className="h-4 w-4" />
+                Upgrade
+              </button>
+            )}
+          </div>
+
+          {(contactUnlocked || contactLocked) && (
+            <div className="mx-auto mt-4 flex max-w-3xl flex-wrap items-center justify-center gap-2">
               {contactLocked && (
-                <div className="rounded-lg border border-slate-200 bg-surface p-4 sm:col-span-2">
-                  <div className="flex items-center gap-3 text-sm font-bold text-slate-700">
-                    <Lock className="h-5 w-5 text-slate-500" />
-                    Follow or unlock contact to view
-                  </div>
-                  <button type="button" className="btn-primary mt-3 w-full" onClick={handleUnlockContact} disabled={unlockingContact}>
-                    {unlockingContact ? "Unlocking..." : "Unlock contact"}
-                  </button>
-                </div>
+                <button type="button" className="btn-secondary gap-2" onClick={handleUnlockContact} disabled={unlockingContact}>
+                  <Lock className="h-4 w-4" />
+                  {unlockingContact ? "Unlocking..." : "Unlock contact"}
+                </button>
               )}
               {contactUnlocked && whatsapp && (
-                <a className="btn-primary gap-2" href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">
+                <a className="btn-secondary gap-2" href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">
                   <MessageCircle className="h-4 w-4" />
                   WhatsApp
                 </a>
@@ -935,180 +891,198 @@ const Profile = () => {
                   Email
                 </a>
               )}
-              {!isOwnProfile && (
-                <button type="button" className="btn-secondary gap-2" onClick={handleStartTip}>
-                  <Gift className="h-4 w-4" />
-                  Tip 1,000 RWF
-                </button>
-              )}
-              {isOwnProfile && !premiumActive && (
-                <button type="button" className="btn-primary gap-2" onClick={handleUpgradePremium}>
-                  <Sparkles className="h-4 w-4" />
-                  Upgrade Premium
-                </button>
-              )}
-            </div>
-            {followStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{followStatus}</div>}
-            {likeStatus && <div className="mt-4 rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{likeStatus}</div>}
-            {contactError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{contactError}</div>}
-            {paymentStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{paymentStatus}</div>}
-            {paymentError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{paymentError}</div>}
-
-            {paymentAction && (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-                <div className="flex items-center gap-3 text-sm font-bold text-amber-900">
-                  <CreditCard className="h-5 w-5" />
-                  {paymentAction.type === "tip"
-                    ? "Send creator tip"
-                    : paymentAction.type === "boost"
-                      ? "Boost this post"
-                      : paymentAction.type === "premium"
-                        ? "Activate premium"
-                        : "Unlock action"}
-                </div>
-                <p className="mt-2 text-xs font-semibold text-amber-800">
-                  Sandbox charge: {Number(paymentAction.amount || 0).toLocaleString()} {paymentAction.currency || "RWF"}
-                </p>
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {PAYMENT_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className="btn-secondary justify-start"
-                      onClick={() => handlePayment(option.value)}
-                      disabled={Boolean(processingPayment)}
-                    >
-                      {processingPayment === option.value ? "Verifying..." : option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          </div>
-
-          {bookingOpen && !isOwnProfile && (
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
-              <h2 className="text-lg font-black text-navy">Collaboration request</h2>
-              {bookingStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{bookingStatus}</div>}
-              {bookingError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{bookingError}</div>}
-              <form className="mt-4 space-y-4" onSubmit={handleBookingSubmit}>
-                <label className="space-y-2">
-                  <span className="label">Your name</span>
-                  <input className="field" name="userName" value={bookingForm.userName} onChange={handleBookingChange} required />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Place or project</span>
-                  <input className="field" name="businessName" value={bookingForm.businessName} onChange={handleBookingChange} required />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Location</span>
-                  <input className="field" name="location" value={bookingForm.location} onChange={handleBookingChange} required />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Date</span>
-                  <input className="field" type="date" name="eventDate" value={bookingForm.eventDate} onChange={handleBookingChange} />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Collaboration type</span>
-                  <input className="field" name="eventType" value={bookingForm.eventType} onChange={handleBookingChange} required />
-                </label>
-                <div className="grid gap-3 sm:grid-cols-[1fr_0.8fr]">
-                  <label className="space-y-2">
-                    <span className="label">Duration</span>
-                    <input
-                      className="field"
-                      type="number"
-                      min="1"
-                      name="durationValue"
-                      value={bookingForm.durationValue}
-                      onChange={handleBookingChange}
-                      required
-                    />
-                  </label>
-                  <label className="space-y-2">
-                    <span className="label">Unit</span>
-                    <select className="field" name="durationUnit" value={bookingForm.durationUnit} onChange={handleBookingChange}>
-                      <option value="days">Days</option>
-                      <option value="hours">Hours</option>
-                    </select>
-                  </label>
-                </div>
-                <label className="space-y-2">
-                  <span className="label">Budget</span>
-                  <input
-                    className="field"
-                    type="number"
-                    min="1"
-                    name="offeredPrice"
-                    value={bookingForm.offeredPrice}
-                    onChange={handleBookingChange}
-                    required
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Confirmed budget</span>
-                  <input
-                    className="field"
-                    type="number"
-                    min="1"
-                    name="finalAgreedPrice"
-                    value={bookingForm.finalAgreedPrice}
-                    onChange={handleBookingChange}
-                    placeholder="Optional"
-                  />
-                  <span className="text-xs text-slate-500">You can finalize details together in chat.</span>
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Message</span>
-                  <textarea
-                    className="field min-h-28 resize-y"
-                    name="message"
-                    value={bookingForm.message}
-                    onChange={handleBookingChange}
-                    required
-                  />
-                </label>
-                <button type="submit" className="btn-primary w-full" disabled={bookingSending}>
-                  {bookingSending ? "Sending..." : "Send request"}
-                </button>
-              </form>
             </div>
           )}
 
-          {offerOpen && !isOwnProfile && (
-            <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-soft">
-              <h2 className="text-lg font-black text-navy">Send proposal</h2>
-              {offerStatus && <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{offerStatus}</div>}
-              {offerError && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{offerError}</div>}
-              <form className="mt-4 space-y-4" onSubmit={handleOfferSubmit}>
-                <label className="space-y-2">
-                  <span className="label">Date</span>
-                  <input className="field" type="date" name="eventDate" value={offerForm.eventDate} onChange={handleOfferChange} />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Budget</span>
-                  <input
-                    className="field"
-                    type="number"
-                    min="1"
-                    name="offerPrice"
-                    value={offerForm.offerPrice}
-                    onChange={handleOfferChange}
-                    required
-                  />
-                </label>
-                <label className="space-y-2">
-                  <span className="label">Message</span>
-                  <textarea className="field min-h-28 resize-y" name="message" value={offerForm.message} onChange={handleOfferChange} />
-                </label>
-                <button type="submit" className="btn-primary w-full" disabled={offerSending}>
-                  {offerSending ? "Sending..." : "Send proposal"}
-                </button>
-              </form>
+          {(followStatus || likeStatus || contactError || paymentStatus || paymentError || lockedImageCount > 0) && (
+            <div className="mx-auto mt-4 grid max-w-3xl gap-2 text-left">
+              {followStatus && <div className="rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{followStatus}</div>}
+              {likeStatus && <div className="rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{likeStatus}</div>}
+              {contactError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{contactError}</div>}
+              {paymentStatus && <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{paymentStatus}</div>}
+              {paymentError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{paymentError}</div>}
+              {lockedImageCount > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-surface p-3 text-sm font-semibold text-slate-600">
+                  {lockedImageCount} gallery {lockedImageCount === 1 ? "item is" : "items are"} locked. Follow to unlock content.
+                </div>
+              )}
+            </div>
+          )}
+
+          {paymentAction && (
+            <div className="mx-auto mt-4 max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-4 text-left">
+              <div className="flex items-center gap-3 text-sm font-bold text-amber-900">
+                <CreditCard className="h-5 w-5" />
+                {paymentAction.type === "tip"
+                  ? "Send creator tip"
+                  : paymentAction.type === "boost"
+                    ? "Boost this post"
+                    : paymentAction.type === "premium"
+                      ? "Activate premium"
+                      : "Unlock action"}
+              </div>
+              <p className="mt-2 text-xs font-semibold text-amber-800">
+                Sandbox charge: {Number(paymentAction.amount || 0).toLocaleString()} {paymentAction.currency || "RWF"}
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {PAYMENT_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="btn-secondary justify-start"
+                    onClick={() => handlePayment(option.value)}
+                    disabled={Boolean(processingPayment)}
+                  >
+                    {processingPayment === option.value ? "Verifying..." : option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-3 shadow-soft sm:p-5">
+        <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-50 p-1">
+          {profileTabs.map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.label}
+                type="button"
+                className={`flex min-w-0 items-center justify-center gap-2 rounded-lg px-2 py-3 text-xs font-black transition sm:text-sm ${
+                  activeProfileTab === tab.label ? "bg-white text-navy shadow-sm" : "text-slate-500 hover:text-navy"
+                }`}
+                onClick={() => setActiveProfileTab(tab.label)}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="truncate">{tab.label}</span>
+                <span className="hidden rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 sm:inline">{tab.count}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {activeCommentPost && activeCommentPost.commentsEnabled !== false && (
+          <form className="mt-4 flex gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2" onSubmit={(event) => handlePostComment(event, activeCommentPost)}>
+            <input
+              className="field min-w-0 flex-1 bg-white"
+              value={profileCommentText}
+              onChange={(event) => setProfileCommentText(event.target.value)}
+              placeholder={`Comment on ${activeCommentPost.caption ? `"${activeCommentPost.caption.slice(0, 28)}"` : "this post"}`}
+            />
+            <button type="submit" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand text-navy" aria-label="Send comment">
+              <Send className="h-4 w-4" />
+            </button>
+          </form>
+        )}
+
+        {activeGridItems.length > 0 ? (
+          <div className="mt-4 grid grid-cols-3 gap-1.5 sm:gap-3 md:grid-cols-4 xl:grid-cols-5">
+            {activeGridItems.map((item, index) => {
+              const itemUrl = getPostUrl(item);
+              const itemIsVideo = isVideoPost(item);
+              const itemIsPost = Boolean(item._id && !String(item._id).startsWith("loose-"));
+              const durationLabel = itemIsVideo ? formatDuration(item.duration) : "";
+              const mediaPost = { ...item, url: itemUrl, type: itemIsVideo ? "video" : "image" };
+
+              return (
+                <article key={item._id || `${itemUrl}-${index}`} className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-slate-950 shadow-sm">
+                  {item.external ? (
+                    <iframe
+                      src={toEmbedUrl(itemUrl)}
+                      title={`${user.name} video ${index + 1}`}
+                      className="h-full w-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                      loading="lazy"
+                    />
+                  ) : (
+                    <PostMedia
+                      post={mediaPost}
+                      alt={`${user.name} post`}
+                      className="h-full w-full"
+                      imageClassName="h-full w-full object-cover"
+                      videoClassName="h-full w-full object-cover"
+                      placeholderClassName="h-full w-full"
+                      controls={false}
+                      muted
+                      minimal
+                      onViewed={itemIsPost ? (metrics) => handlePostViewed(item, metrics) : undefined}
+                    />
+                  )}
+
+                  <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-slate-950/60 to-transparent p-2 text-white">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-950/35 px-2 py-1 text-[10px] font-black backdrop-blur">
+                      {itemIsVideo ? <Play className="h-3 w-3 fill-white" /> : <ImageIcon className="h-3 w-3" />}
+                      {formatCompactNumber(item.views || item.viewCount || 0)}
+                    </span>
+                    {durationLabel && <span className="rounded-full bg-slate-950/45 px-2 py-1 text-[10px] font-black backdrop-blur">{durationLabel}</span>}
+                  </div>
+
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/85 via-slate-950/35 to-transparent p-2 text-white">
+                    {item.caption && <p className="line-clamp-2 text-xs font-bold leading-4">{item.caption}</p>}
+                    <div className="mt-2 flex items-center justify-between gap-1 text-[10px] font-black">
+                      <span className="inline-flex items-center gap-1">
+                        <Heart className={`h-3.5 w-3.5 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
+                        {formatCompactNumber(item.likes || item.likeCount || 0)}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        {formatCompactNumber(item.commentCount || 0)}
+                      </span>
+                    </div>
+                    {itemIsPost && (
+                      <div className="mt-2 grid grid-cols-4 gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+                        <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={() => handlePostLike(item)} aria-label="Like post">
+                          <Heart className={`mx-auto h-3.5 w-3.5 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md bg-white/15 p-1.5 backdrop-blur"
+                          onClick={() => setProfileCommentOpen((current) => (current === item._id ? "" : item._id))}
+                          aria-label="Comment on post"
+                        >
+                          <MessageCircle className="mx-auto h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={() => handlePostShare(item)} aria-label="Share post">
+                          <Share2 className="mx-auto h-3.5 w-3.5" />
+                        </button>
+                        {isOwnProfile ? (
+                          <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={() => setEditingPost(item)} aria-label="Edit post">
+                            <Pencil className="mx-auto h-3.5 w-3.5" />
+                          </button>
+                        ) : (
+                          <span className="rounded-md bg-white/15 p-1.5 backdrop-blur">
+                            <Eye className="mx-auto h-3.5 w-3.5" />
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {isOwnProfile && itemIsPost && (
+                    <button
+                      type="button"
+                      className="absolute right-2 top-10 rounded-full bg-slate-950/45 p-2 text-brand opacity-0 shadow backdrop-blur transition group-hover:opacity-100"
+                      onClick={() => handleBoostPost(item)}
+                      aria-label="Boost post"
+                    >
+                      <Rocket className="h-4 w-4" />
+                    </button>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="mt-4 flex min-h-56 items-center justify-center rounded-lg bg-slate-50 p-6 text-center text-sm font-bold text-slate-500">
+            <span className="inline-flex flex-col items-center gap-3">
+              {contentLocked ? <Lock className="h-8 w-8 text-slate-400" /> : <Grid3X3 className="h-8 w-8 text-slate-400" />}
+              {contentLocked ? "Follow to unlock content." : `No ${activeProfileTab.toLowerCase()} yet.`}
+            </span>
+          </div>
+        )}
       </div>
 
       {editingPost && (

@@ -51,6 +51,7 @@ export const uploadMedia = (formData, type, options = {}) => {
   return API.post(`/upload/${mediaType === "video" ? "video" : "image"}`, formData, {
     headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: options.onUploadProgress,
+    signal: options.signal,
   });
 };
 
@@ -58,6 +59,7 @@ export const uploadProfilePicture = (formData, options = {}) => {
   return API.post("/users/profile/image", formData, {
     headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: options.onUploadProgress,
+    signal: options.signal,
   });
 };
 
