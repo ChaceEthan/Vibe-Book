@@ -730,6 +730,7 @@ const Home = () => {
       <div
         ref={scrollerRef}
         className="home-feed-scroll mx-auto h-[calc(100dvh-3.5rem)] max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto bg-slate-950 sm:h-[calc(100dvh-4rem)]"
+        style={{ overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" }}
       >
         {visibleFeed.length ? (
           <>

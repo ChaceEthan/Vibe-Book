@@ -341,6 +341,26 @@ const ProfileMediaViewer = ({
           return (
             <section key={item._id || `${itemUrl}-${index}`} className="relative flex h-[100dvh] snap-start snap-always items-center justify-center overflow-hidden bg-slate-950 px-0 sm:px-12">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.14),rgba(2,6,23,0.72)_55%,#020617_100%)]" />
+              {!item.external && itemUrl && (
+                itemIsVideo ? (
+                  <video
+                    src={mediaUrl(itemUrl)}
+                    className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-20 blur-2xl"
+                    muted
+                    playsInline
+                    preload={shouldPreload ? "metadata" : "none"}
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <img
+                    src={mediaUrl(itemUrl)}
+                    alt=""
+                    className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl"
+                    loading={shouldPreload ? "eager" : "lazy"}
+                    aria-hidden="true"
+                  />
+                )
+              )}
               <div className={`relative h-full w-full ${itemIsVideo ? "max-w-[min(100vw,34rem)]" : "max-w-5xl"}`}>
                 {item.external ? (
                   <iframe
@@ -364,6 +384,7 @@ const ProfileMediaViewer = ({
                     loop={itemIsVideo}
                     muted
                     interactive={itemIsVideo && isActive}
+                    managedPlayback
                     preload={shouldPreload ? "auto" : "metadata"}
                     onViewed={itemIsPost ? (metrics) => onViewed(item, metrics) : undefined}
                   />

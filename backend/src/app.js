@@ -30,6 +30,7 @@ const authMiddleware = require("./middleware/authMiddleware");
 const responseMiddleware = require("./middleware/responseMiddleware");
 const errorMiddleware = require("./middleware/errorMiddleware");
 const { visitorMiddleware } = require("./middleware/visitorMiddleware");
+const { corsOptions } = require("./config/cors");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -49,57 +50,6 @@ const bookingLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Too many booking or payment requests. Please try again soon." },
 });
-
-const allowedOrigins = [
-  "https://vibe-book-kappa.vercel.app",
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://localhost:5175",
-  "http://localhost:5176",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-  "http://127.0.0.1:5175",
-  "http://127.0.0.1:5176",
-];
-
-const addAllowedOrigins = (...origins) => {
-  origins.filter(Boolean).forEach((origin) => {
-    origin
-      .split(",")
-      .map((value) => value.trim())
-      .filter(Boolean)
-      .forEach((value) => {
-        if (!allowedOrigins.includes(value)) {
-          allowedOrigins.push(value);
-        }
-      });
-  });
-};
-
-addAllowedOrigins(process.env.CLIENT_URL, process.env.FRONTEND_URL, process.env.CORS_ORIGIN);
-if (process.env.VERCEL_URL) {
-  addAllowedOrigins(`https://${process.env.VERCEL_URL.replace(/^https?:\/\//, "")}`);
-}
-
-const corsOptions = {
-  origin(origin, callback) {
-    if (!origin) {
-      return callback(null, true);
-    }
-
-    const normalizedOrigin = origin.trim();
-
-    if (allowedOrigins.includes(normalizedOrigin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error("Origin not allowed"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  optionsSuccessStatus: 200,
-};
 
 app.use(cors(corsOptions));
 // Express 5-safe wildcard preflight handler.

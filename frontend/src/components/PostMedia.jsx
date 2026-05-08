@@ -12,6 +12,7 @@ const PostMedia = ({
   loop = false,
   muted = false,
   preload = "auto",
+  managedPlayback = false,
   className = "",
   imageClassName = "",
   videoClassName = "",
@@ -83,6 +84,23 @@ const PostMedia = ({
 
     mediaRef.current.muted = isMuted;
   }, [isMuted, post?.type, rawUrl]);
+
+  useEffect(() => {
+    if (!managedPlayback || post?.type !== "video" || !mediaRef.current) {
+      return;
+    }
+
+    const video = mediaRef.current;
+    prepareVideo(video);
+
+    if (autoPlay) {
+      video.play?.().catch(() => undefined);
+      setIsPaused(false);
+    } else {
+      video.pause?.();
+      setIsPaused(true);
+    }
+  }, [autoPlay, managedPlayback, post?._id, post?.type, rawUrl]);
 
   useEffect(() => {
     return () => {
