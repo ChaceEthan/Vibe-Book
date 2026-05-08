@@ -25,7 +25,7 @@ import {
   Video,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
@@ -157,6 +157,389 @@ const formatDuration = (value = 0) => {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 };
 
+const formatRelativeTime = (value) => {
+  const timestamp = value ? new Date(value).getTime() : 0;
+
+  if (!timestamp) {
+    return "now";
+  }
+
+  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
+
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  if (seconds < 604800) return `${Math.round(seconds / 86400)}d`;
+
+  return new Date(value).toLocaleDateString();
+};
+
+const commentAuthor = (comment = {}) => comment.userId || comment.user || comment.author || {};
+
+const commentKeyFor = (comment = {}, index = 0) => comment._id || comment.id || `${comment.message || comment.text || "comment"}-${index}`;
+
+const ViewerActionButton = ({ active = false, count = "", disabled = false, label, onClick, children }) => (
+  <button
+    type="button"
+    className={`flex min-w-14 flex-col items-center gap-1 rounded-full px-2 py-1 text-white transition active:scale-95 ${
+      disabled ? "cursor-not-allowed opacity-45" : "hover:bg-white/10"
+    }`}
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={label}
+  >
+    <span className={`flex h-12 w-12 items-center justify-center rounded-full bg-slate-950/55 shadow-lg backdrop-blur ${active ? "text-brand" : ""}`}>
+      {children}
+    </span>
+    {count !== "" && <span className="max-w-16 truncate text-[11px] font-black drop-shadow">{count}</span>}
+  </button>
+);
+
+const ProfileMediaViewer = ({
+  viewer,
+  user,
+  profilePicture,
+  currentUser,
+  canEdit,
+  onClose,
+  onLike,
+  onSave,
+  onShare,
+  onViewed,
+  onComment,
+  onEdit,
+  onBoost,
+}) => {
+  const scrollerRef = useRef(null);
+  const scrollFrameRef = useRef(null);
+  const [activeIndex, setActiveIndex] = useState(viewer?.index || 0);
+  const [commentsOpen, setCommentsOpen] = useState(Boolean(viewer?.commentsOpen));
+  const [commentText, setCommentText] = useState("");
+  const [commentSending, setCommentSending] = useState(false);
+  const [likedComments, setLikedComments] = useState(new Set());
+  const items = viewer?.items || [];
+  const activeItem = items[activeIndex] || items[0];
+  const activeIsPost = Boolean(activeItem?._id && !String(activeItem._id).startsWith("loose-"));
+  const activeIsVideo = isVideoPost(activeItem);
+  const activeComments = Array.isArray(activeItem?.comments) ? activeItem.comments : [];
+  const activeTags = Array.isArray(activeItem?.tags) ? activeItem.tags : [];
+
+  useEffect(() => {
+    if (!viewer) {
+      return undefined;
+    }
+
+    const nextIndex = Math.min(Math.max(Number(viewer.index || 0), 0), Math.max(items.length - 1, 0));
+    setActiveIndex(nextIndex);
+    setCommentsOpen(Boolean(viewer.commentsOpen));
+    setCommentText("");
+
+    window.requestAnimationFrame(() => {
+      const node = scrollerRef.current;
+      if (node) {
+        node.scrollTop = node.clientHeight * nextIndex;
+      }
+    });
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKey = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        const node = scrollerRef.current;
+        const currentIndex = node?.clientHeight ? Math.round(node.scrollTop / node.clientHeight) : nextIndex;
+        scrollToIndex(currentIndex + 1);
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        const node = scrollerRef.current;
+        const currentIndex = node?.clientHeight ? Math.round(node.scrollTop / node.clientHeight) : nextIndex;
+        scrollToIndex(currentIndex - 1);
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKey);
+      if (scrollFrameRef.current) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [viewer]);
+
+  if (!viewer || !items.length) {
+    return null;
+  }
+
+  const scrollToIndex = (nextIndex) => {
+    const bounded = Math.min(Math.max(nextIndex, 0), items.length - 1);
+    const node = scrollerRef.current;
+
+    setActiveIndex(bounded);
+    node?.scrollTo({ top: node.clientHeight * bounded, behavior: "smooth" });
+  };
+
+  const handleScroll = () => {
+    if (scrollFrameRef.current) {
+      window.cancelAnimationFrame(scrollFrameRef.current);
+    }
+
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      const node = scrollerRef.current;
+
+      if (!node?.clientHeight) {
+        return;
+      }
+
+      const nextIndex = Math.min(items.length - 1, Math.max(0, Math.round(node.scrollTop / node.clientHeight)));
+      setActiveIndex(nextIndex);
+    });
+  };
+
+  const submitComment = async (event) => {
+    event.preventDefault();
+
+    if (!activeIsPost || !commentText.trim()) {
+      return;
+    }
+
+    setCommentSending(true);
+
+    try {
+      await onComment(activeItem, commentText.trim());
+      setCommentText("");
+    } finally {
+      setCommentSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[95] bg-slate-950 text-white">
+      <div
+        ref={scrollerRef}
+        className="h-[100dvh] snap-y snap-mandatory overflow-y-auto scroll-smooth"
+        onScroll={handleScroll}
+        style={{ touchAction: "pan-y" }}
+      >
+        {items.map((item, index) => {
+          const itemUrl = getPostUrl(item);
+          const itemIsVideo = isVideoPost(item);
+          const itemIsPost = Boolean(item._id && !String(item._id).startsWith("loose-"));
+          const mediaPost = { ...item, url: itemUrl, type: itemIsVideo ? "video" : "image" };
+          const isActive = index === activeIndex;
+          const shouldPreload = Math.abs(index - activeIndex) <= 1;
+
+          return (
+            <section key={item._id || `${itemUrl}-${index}`} className="relative flex h-[100dvh] snap-start snap-always items-center justify-center overflow-hidden bg-slate-950 px-0 sm:px-12">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.14),rgba(2,6,23,0.72)_55%,#020617_100%)]" />
+              <div className={`relative h-full w-full ${itemIsVideo ? "max-w-[min(100vw,34rem)]" : "max-w-5xl"}`}>
+                {item.external ? (
+                  <iframe
+                    src={toEmbedUrl(itemUrl)}
+                    title={`${user?.name || "VibeBook"} video ${index + 1}`}
+                    className="h-full w-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    loading={shouldPreload ? "eager" : "lazy"}
+                  />
+                ) : (
+                  <PostMedia
+                    post={mediaPost}
+                    alt={`${user?.name || "VibeBook"} post`}
+                    className="h-full w-full bg-slate-950"
+                    imageClassName="h-full w-full object-contain"
+                    videoClassName="h-full w-full object-contain"
+                    placeholderClassName="h-full w-full"
+                    autoPlay={itemIsVideo && isActive}
+                    controls={false}
+                    loop={itemIsVideo}
+                    muted
+                    interactive={itemIsVideo && isActive}
+                    preload={shouldPreload ? "auto" : "metadata"}
+                    onViewed={itemIsPost ? (metrics) => onViewed(item, metrics) : undefined}
+                  />
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        className="fixed left-3 top-3 z-[105] flex h-11 w-11 items-center justify-center rounded-full bg-slate-950/65 text-white shadow-lg backdrop-blur transition hover:bg-white/15"
+        onClick={onClose}
+        aria-label="Close media viewer"
+      >
+        <X className="h-5 w-5" />
+      </button>
+
+      <div className="fixed left-1/2 top-4 z-[104] -translate-x-1/2 rounded-full bg-slate-950/55 px-3 py-1 text-xs font-black text-white/80 backdrop-blur">
+        {activeIndex + 1} / {items.length}
+      </div>
+
+      <div className="fixed bottom-24 right-2 z-[104] flex flex-col items-center gap-2 sm:right-5">
+        <ViewerActionButton
+          active={Boolean(activeItem?.likedByViewer)}
+          count={formatCompactNumber(activeItem?.likes || activeItem?.likeCount || 0)}
+          label="Like post"
+          disabled={!activeIsPost}
+          onClick={() => activeIsPost && onLike(activeItem)}
+        >
+          <Heart className={`h-6 w-6 ${activeItem?.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
+        </ViewerActionButton>
+        <ViewerActionButton
+          count={formatCompactNumber(activeItem?.commentCount || activeComments.length || 0)}
+          label="Open comments"
+          disabled={!activeIsPost || activeItem?.commentsEnabled === false}
+          onClick={() => setCommentsOpen(true)}
+        >
+          <MessageCircle className="h-6 w-6" />
+        </ViewerActionButton>
+        <ViewerActionButton
+          count={formatCompactNumber(activeItem?.shareCount || 0)}
+          label="Share post"
+          disabled={!activeIsPost}
+          onClick={() => activeIsPost && onShare(activeItem)}
+        >
+          <Share2 className="h-6 w-6" />
+        </ViewerActionButton>
+        <ViewerActionButton
+          active={Boolean(activeItem?.savedByViewer)}
+          count={formatCompactNumber(activeItem?.saveCount || activeItem?.saves || 0)}
+          label="Save post"
+          disabled={!activeIsPost}
+          onClick={() => activeIsPost && onSave(activeItem)}
+        >
+          <Bookmark className={`h-6 w-6 ${activeItem?.savedByViewer ? "fill-brand text-brand" : ""}`} />
+        </ViewerActionButton>
+        {canEdit && activeIsPost && (
+          <ViewerActionButton label="Edit post" onClick={() => onEdit(activeItem)}>
+            <Pencil className="h-5 w-5" />
+          </ViewerActionButton>
+        )}
+        {canEdit && activeIsPost && (
+          <ViewerActionButton label="Boost post" onClick={() => onBoost(activeItem)}>
+            <Rocket className="h-5 w-5 text-brand" />
+          </ViewerActionButton>
+        )}
+      </div>
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[103] bg-gradient-to-t from-slate-950 via-slate-950/65 to-transparent px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-20 sm:px-8">
+        <div className="max-w-[min(84vw,42rem)]">
+          <div className="flex items-center gap-3">
+            <img src={mediaUrl(profilePicture || user?.profilePicture || "/logo.png")} alt="" className="h-10 w-10 rounded-full border border-white/30 object-cover" />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-black">@{user?.username || "creator"}</p>
+              <p className="text-xs font-semibold text-white/60">{activeIsVideo ? "Original video" : "Photo"} {activeItem?.duration ? `- ${formatDuration(activeItem.duration)}` : ""}</p>
+            </div>
+          </div>
+          {activeItem?.caption && <p className="mt-3 line-clamp-3 text-sm font-semibold leading-6 text-white">{activeItem.caption}</p>}
+          {activeTags.length > 0 && (
+            <p className="mt-2 line-clamp-1 text-xs font-black text-brand">
+              {activeTags.slice(0, 8).map((tag) => `#${tag}`).join(" ")}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {commentsOpen && (
+        <div className="fixed inset-x-0 bottom-0 z-[110] mx-auto max-h-[72dvh] max-w-2xl overflow-hidden rounded-t-lg bg-white text-slate-900 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <div>
+              <p className="text-sm font-black text-navy">Comments</p>
+              <p className="text-xs font-semibold text-slate-500">{formatCompactNumber(activeComments.length)} replies</p>
+            </div>
+            <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={() => setCommentsOpen(false)} aria-label="Close comments">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="max-h-[42dvh] overflow-y-auto px-4 py-3">
+            {activeComments.length > 0 ? (
+              <div className="space-y-4">
+                {activeComments.map((comment, index) => {
+                  const author = commentAuthor(comment);
+                  const key = commentKeyFor(comment, index);
+                  const liked = likedComments.has(key);
+                  const likeCount = Number(comment.likes || comment.likeCount || 0) + (liked ? 1 : 0);
+
+                  return (
+                    <article key={key} className="flex gap-3">
+                      <img
+                        src={mediaUrl(author.profilePicture || author.profileImage || author.images?.[0] || "/logo.png")}
+                        alt=""
+                        className="h-9 w-9 rounded-full bg-slate-100 object-cover"
+                        loading="lazy"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-black text-navy">@{author.username || author.name || "creator"}</p>
+                          <span className="text-[11px] font-bold text-slate-400">{formatRelativeTime(comment.createdAt || comment.updatedAt)}</span>
+                        </div>
+                        <p className="mt-1 text-sm font-semibold leading-5 text-slate-700">{comment.message || comment.text || comment.body || ""}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`flex flex-col items-center text-[10px] font-black ${liked ? "text-red-500" : "text-slate-400"}`}
+                        onClick={() =>
+                          setLikedComments((current) => {
+                            const next = new Set(current);
+                            if (next.has(key)) {
+                              next.delete(key);
+                            } else {
+                              next.add(key);
+                            }
+                            return next;
+                          })
+                        }
+                        aria-label="Like comment"
+                      >
+                        <Heart className={`h-4 w-4 ${liked ? "fill-red-500" : ""}`} />
+                        {likeCount || ""}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex min-h-32 items-center justify-center rounded-lg bg-slate-50 text-center text-sm font-bold text-slate-500">
+                Be the first to comment.
+              </div>
+            )}
+          </div>
+          <form className="flex gap-2 border-t border-slate-200 bg-white p-3" onSubmit={submitComment}>
+            <img src={mediaUrl(currentUser?.profilePicture || currentUser?.profileImage || "/logo.png")} alt="" className="h-10 w-10 rounded-full bg-slate-100 object-cover" />
+            <input
+              className="field min-w-0 flex-1"
+              value={commentText}
+              onChange={(event) => setCommentText(event.target.value)}
+              placeholder={activeIsPost ? "Add a comment..." : "Comments are available for posts"}
+              disabled={!activeIsPost || commentSending}
+            />
+            <button
+              type="submit"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand text-navy disabled:opacity-50"
+              disabled={!activeIsPost || !commentText.trim() || commentSending}
+              aria-label="Send comment"
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Profile = () => {
   const { id } = useParams();
   const { refreshProfile, user: currentUser } = useAuth();
@@ -192,6 +575,7 @@ const Profile = () => {
   const [profileCommentText, setProfileCommentText] = useState("");
   const [editingPost, setEditingPost] = useState(null);
   const [activeProfileTab, setActiveProfileTab] = useState("Videos");
+  const [mediaViewer, setMediaViewer] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -241,6 +625,7 @@ const Profile = () => {
     setProfileCommentText("");
     setEditingPost(null);
     setActiveProfileTab("Videos");
+    setMediaViewer(null);
   }, [id, currentUser]);
 
   useEffect(() => {
@@ -339,6 +724,18 @@ const Profile = () => {
   const activeGridItems =
     activeProfileTab === "Videos" ? videoItems : activeProfileTab === "Photos" ? photoItems : activeProfileTab === "Saved" ? savedItems : taggedItems;
   const activeCommentPost = profilePosts.find((post) => post._id === profileCommentOpen);
+
+  const openProfileMedia = (item, fallbackIndex = 0, commentsOpen = false) => {
+    const sourceItems = activeProfileTab === "Videos" ? videoItems : activeProfileTab === "Photos" ? photoItems : activeGridItems;
+    const itemKey = item?._id || getPostUrl(item);
+    const sourceIndex = sourceItems.findIndex((sourceItem) => (sourceItem?._id || getPostUrl(sourceItem)) === itemKey);
+
+    setMediaViewer({
+      items: sourceItems.length ? sourceItems : [item],
+      index: sourceIndex >= 0 ? sourceIndex : fallbackIndex,
+      commentsOpen,
+    });
+  };
 
   const goToImage = (direction) => {
     setActiveImage((current) => {
@@ -440,6 +837,14 @@ const Profile = () => {
     }
 
     replacePost(nextPost);
+    setMediaViewer((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.map((item) => (item?._id === nextPost._id ? { ...item, ...nextPost } : item)),
+          }
+        : current
+    );
     setUser((current) => ({
       ...current,
       posts: (current?.posts || []).map((post) => (post._id === nextPost._id ? { ...post, ...nextPost } : post)),
@@ -457,6 +862,24 @@ const Profile = () => {
       replaceProfilePost(data.feedItem);
     } catch {
       setLikeStatus("Unable to update post like.");
+    }
+  };
+
+  const handlePostSave = async (post) => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    if (!post?._id) {
+      return;
+    }
+
+    try {
+      const { data } = await feedApi.save(post._id);
+      replaceProfilePost(data.feedItem);
+    } catch (requestError) {
+      setLikeStatus(requestError.response?.data?.message || "Unable to save this post.");
     }
   };
 
@@ -503,25 +926,29 @@ const Profile = () => {
     }
   };
 
-  const handlePostComment = async (event, post) => {
-    event.preventDefault();
-
+  const handlePostCommentMessage = async (post, message) => {
     if (!currentUser) {
       navigate("/login");
       return;
     }
 
-    if (!profileCommentText.trim()) {
+    if (!post?._id || !message.trim()) {
       return;
     }
 
     try {
-      const { data } = await feedApi.addComment(post._id, { message: profileCommentText.trim() });
+      const { data } = await feedApi.addComment(post._id, { message: message.trim() });
       replaceProfilePost(data.feedItem);
       setProfileCommentText("");
+      return data.feedItem;
     } catch {
       setLikeStatus("Unable to add post comment.");
     }
+  };
+
+  const handlePostComment = async (event, post) => {
+    event.preventDefault();
+    await handlePostCommentMessage(post, profileCommentText);
   };
 
   const handleUnlockContact = async () => {
@@ -987,7 +1414,11 @@ const Profile = () => {
               const mediaPost = { ...item, url: itemUrl, type: itemIsVideo ? "video" : "image" };
 
               return (
-                <article key={item._id || `${itemUrl}-${index}`} className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-slate-950 shadow-sm">
+                <article
+                  key={item._id || `${itemUrl}-${index}`}
+                  className="group relative aspect-[3/4] overflow-hidden rounded-lg bg-slate-950 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]"
+                >
+                  <div className="absolute inset-0 animate-pulse bg-slate-800" />
                   {item.external ? (
                     <iframe
                       src={toEmbedUrl(itemUrl)}
@@ -1012,7 +1443,14 @@ const Profile = () => {
                     />
                   )}
 
-                  <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between bg-gradient-to-b from-slate-950/60 to-transparent p-2 text-white">
+                  <button
+                    type="button"
+                    className="absolute inset-0 z-20 cursor-pointer touch-manipulation"
+                    onClick={() => openProfileMedia(item, index)}
+                    aria-label={`Open ${itemIsVideo ? "video" : "photo"}`}
+                  />
+
+                  <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex items-start justify-between bg-gradient-to-b from-slate-950/60 to-transparent p-2 text-white">
                     <span className="inline-flex items-center gap-1 rounded-full bg-slate-950/35 px-2 py-1 text-[10px] font-black backdrop-blur">
                       {itemIsVideo ? <Play className="h-3 w-3 fill-white" /> : <ImageIcon className="h-3 w-3" />}
                       {formatCompactNumber(item.views || item.viewCount || 0)}
@@ -1020,7 +1458,7 @@ const Profile = () => {
                     {durationLabel && <span className="rounded-full bg-slate-950/45 px-2 py-1 text-[10px] font-black backdrop-blur">{durationLabel}</span>}
                   </div>
 
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/85 via-slate-950/35 to-transparent p-2 text-white">
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-slate-950/85 via-slate-950/35 to-transparent p-2 text-white">
                     {item.caption && <p className="line-clamp-2 text-xs font-bold leading-4">{item.caption}</p>}
                     <div className="mt-2 flex items-center justify-between gap-1 text-[10px] font-black">
                       <span className="inline-flex items-center gap-1">
@@ -1033,23 +1471,26 @@ const Profile = () => {
                       </span>
                     </div>
                     {itemIsPost && (
-                      <div className="mt-2 grid grid-cols-4 gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
-                        <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={() => handlePostLike(item)} aria-label="Like post">
+                      <div className="pointer-events-auto relative z-40 mt-2 grid grid-cols-4 gap-1 opacity-100 transition sm:opacity-0 sm:group-hover:opacity-100">
+                        <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); handlePostLike(item); }} aria-label="Like post">
                           <Heart className={`mx-auto h-3.5 w-3.5 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
                         </button>
                         <button
                           type="button"
                           className="rounded-md bg-white/15 p-1.5 backdrop-blur"
-                          onClick={() => setProfileCommentOpen((current) => (current === item._id ? "" : item._id))}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openProfileMedia(item, index, true);
+                          }}
                           aria-label="Comment on post"
                         >
                           <MessageCircle className="mx-auto h-3.5 w-3.5" />
                         </button>
-                        <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={() => handlePostShare(item)} aria-label="Share post">
+                        <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); handlePostShare(item); }} aria-label="Share post">
                           <Share2 className="mx-auto h-3.5 w-3.5" />
                         </button>
                         {isOwnProfile ? (
-                          <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={() => setEditingPost(item)} aria-label="Edit post">
+                          <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); setEditingPost(item); }} aria-label="Edit post">
                             <Pencil className="mx-auto h-3.5 w-3.5" />
                           </button>
                         ) : (
@@ -1064,8 +1505,11 @@ const Profile = () => {
                   {isOwnProfile && itemIsPost && (
                     <button
                       type="button"
-                      className="absolute right-2 top-10 rounded-full bg-slate-950/45 p-2 text-brand opacity-0 shadow backdrop-blur transition group-hover:opacity-100"
-                      onClick={() => handleBoostPost(item)}
+                      className="absolute right-2 top-10 z-40 rounded-full bg-slate-950/45 p-2 text-brand opacity-0 shadow backdrop-blur transition group-hover:opacity-100"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleBoostPost(item);
+                      }}
                       aria-label="Boost post"
                     >
                       <Rocket className="h-4 w-4" />
@@ -1084,6 +1528,28 @@ const Profile = () => {
           </div>
         )}
       </div>
+
+      <ProfileMediaViewer
+        viewer={mediaViewer}
+        user={user}
+        profilePicture={profilePicture || activeImageUrl}
+        currentUser={currentUser}
+        canEdit={isOwnProfile}
+        onClose={() => setMediaViewer(null)}
+        onLike={handlePostLike}
+        onSave={handlePostSave}
+        onShare={handlePostShare}
+        onViewed={handlePostViewed}
+        onComment={handlePostCommentMessage}
+        onEdit={(post) => {
+          setMediaViewer(null);
+          setEditingPost(post);
+        }}
+        onBoost={(post) => {
+          setMediaViewer(null);
+          handleBoostPost(post);
+        }}
+      />
 
       {editingPost && (
         <EditVideoModal

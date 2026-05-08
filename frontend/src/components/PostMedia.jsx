@@ -11,6 +11,7 @@ const PostMedia = ({
   controls = true,
   loop = false,
   muted = false,
+  preload = "auto",
   className = "",
   imageClassName = "",
   videoClassName = "",
@@ -315,7 +316,7 @@ const PostMedia = ({
           playsInline
           controls={controls}
           autoPlay={autoPlay}
-          preload="auto"
+          preload={minimal ? "metadata" : preload}
           onError={handleMediaError}
           onLoadedMetadata={(event) => {
             prepareVideo(event.currentTarget);
