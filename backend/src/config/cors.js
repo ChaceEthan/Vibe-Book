@@ -79,7 +79,7 @@ const isOriginAllowed = (origin) => {
 
 const corsOriginDelegate = (origin, callback) => {
   if (isOriginAllowed(origin)) {
-    return callback(null, true);
+    return callback(null, origin ? normalizeOrigin(origin) : true);
   }
 
   return callback(null, false);

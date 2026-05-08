@@ -107,17 +107,26 @@ const findUserByLoginIdentifier = async (identifier) => {
   }
 
   const phoneDigits = normalizePhoneDigits(normalizedIdentifier);
-  if (!phoneDigits) {
-    return null;
+  if (phoneDigits) {
+    const phoneUser = await User.findOne({
+      $or: [
+        { phone: normalizedIdentifier },
+        { phoneNumber: phoneDigits },
+        { phone: { $regex: `${escapeRegex(phoneDigits)}$` } },
+      ],
+    }).select("+password");
+
+    if (phoneUser) {
+      return phoneUser;
+    }
   }
 
-  return User.findOne({
-    $or: [
-      { phone: normalizedIdentifier },
-      { phoneNumber: phoneDigits },
-      { phone: { $regex: `${escapeRegex(phoneDigits)}$` } },
-    ],
-  }).select("+password");
+  const username = normalizeUsername(normalizedIdentifier);
+  if (username && usernamePattern.test(username)) {
+    return User.findOne({ username }).select("+password");
+  }
+
+  return null;
 };
 
 const findUserByPhoneFields = (phoneFields = {}, excludeId) => {
@@ -416,6 +425,10 @@ const login = async (req, res, next) => {
 
     const user = await findUserByLoginIdentifier(identifier);
     if (!user) {
+      return res.status(401).json({ message: "Invalid email or password" });
+    }
+
+    if (!user.password) {
       return res.status(401).json({ message: "Invalid email or password" });
     }
 

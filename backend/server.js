@@ -66,7 +66,7 @@ const startServer = async () => {
     const io = initSocket(server, {
       origin(origin, callback) {
         if (isOriginAllowed(origin)) {
-          return callback(null, true);
+          return callback(null, origin || true);
         }
 
         return callback(null, false);

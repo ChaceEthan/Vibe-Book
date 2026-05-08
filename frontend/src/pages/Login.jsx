@@ -25,10 +25,11 @@ const Login = () => {
     setError("");
 
     try {
-      await login(form);
+      const identifier = form.email.trim();
+      await login({ ...form, email: identifier, identifier });
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Login failed. Please check your details.");
+      setError(requestError.response?.data?.message || requestError.response?.data?.error || requestError.message || "Login failed. Please check your details.");
     } finally {
       setSubmitting(false);
     }

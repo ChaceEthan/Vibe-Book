@@ -60,6 +60,9 @@ const relativeTimeFor = (value) => {
 
 const commentKeyFor = (comment, index) => comment?._id || `${comment?.userId || comment?.name || "comment"}-${comment?.createdAt || index}`;
 
+const apiErrorMessage = (error, fallback) =>
+  error?.response?.data?.message || error?.response?.data?.error || error?.message || fallback;
+
 const ActionButton = memo(({ active = false, count, label, onClick, children }) => (
   <div className="flex min-w-0 flex-col items-center gap-1">
     <button
@@ -415,7 +418,8 @@ const Home = () => {
         ...(feedMode === "following" ? { mode: "following" } : {}),
       };
       const { data } = await feedApi.get(params);
-      const nextPosts = (Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : []).filter(isValidPost);
+      const rawPosts = Array.isArray(data?.posts) ? data.posts : Array.isArray(data?.feed) ? data.feed : [];
+      const nextPosts = rawPosts.filter(isValidPost);
 
       if (append) {
         mergePosts(nextPosts);
@@ -425,9 +429,9 @@ const Home = () => {
       }
 
       setPage(nextPage);
-      setHasMore(Boolean(data?.hasMore));
+      setHasMore(Boolean(data?.hasMore) && nextPosts.length > 0);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to load feed.");
+      setError(apiErrorMessage(requestError, "Unable to load feed."));
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -695,7 +699,12 @@ const Home = () => {
   if (error && !visibleFeed.length) {
     return (
       <section className="container-page flex min-h-[60vh] items-center justify-center py-10">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-red-700">{error}</div>
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-red-700">
+          <p className="font-bold">{error}</p>
+          <button type="button" className="btn-primary mt-4" onClick={() => loadFeed(1)}>
+            Retry feed
+          </button>
+        </div>
       </section>
     );
   }
