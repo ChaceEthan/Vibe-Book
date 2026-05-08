@@ -64,6 +64,34 @@ const escapeRegex = (value) => {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
+const normalizePhoneDigits = (value = "") => String(value || "").replace(/[^\d]/g, "");
+
+const findUserByPhoneFields = (phoneFields = {}, excludeId) => {
+  const phoneNumber = normalizePhoneDigits(phoneFields.phoneNumber || phoneFields.phone);
+  const fullPhone = String(phoneFields.phone || "").trim();
+  const conditions = [];
+
+  if (fullPhone) {
+    conditions.push({ phone: fullPhone });
+    conditions.push({ phone: { $regex: `${escapeRegex(fullPhone)}$` } });
+  }
+
+  if (phoneNumber && phoneFields.countryCode) {
+    conditions.push({ phoneNumber, countryCode: phoneFields.countryCode });
+  } else if (phoneNumber) {
+    conditions.push({ phoneNumber });
+  }
+
+  if (!conditions.length) {
+    return null;
+  }
+
+  return User.findOne({
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    $or: conditions,
+  });
+};
+
 const getReferralLink = (referralCode) => {
   if (!referralCode) {
     return "";
@@ -648,6 +676,34 @@ const updateProfile = async (req, res, next) => {
 
     if (errors.length) {
       return res.status(400).json({ message: errors[0], errors });
+    }
+
+    const phoneTouched =
+      Object.prototype.hasOwnProperty.call(req.body, "phone") ||
+      Object.prototype.hasOwnProperty.call(req.body, "phoneNumber") ||
+      Object.prototype.hasOwnProperty.call(req.body, "countryCode");
+
+    if (phoneTouched) {
+      const nextCountryCode = updates.countryCode || req.user.countryCode || "";
+      const codeDigits = normalizePhoneDigits(nextCountryCode);
+      let nextPhoneNumber = normalizePhoneDigits(updates.phoneNumber || updates.phone || req.user.phoneNumber || req.user.phone || "");
+      if (codeDigits && nextPhoneNumber.startsWith(codeDigits) && !updates.phoneNumber) {
+        nextPhoneNumber = nextPhoneNumber.slice(codeDigits.length);
+      }
+      const nextPhone = updates.phone || (nextPhoneNumber ? `${nextCountryCode}${nextPhoneNumber}` : "");
+      const existingPhone = await findUserByPhoneFields({ phone: nextPhone, phoneNumber: nextPhoneNumber, countryCode: nextCountryCode }, req.user._id);
+
+      if (existingPhone) {
+        return res.status(400).json({ message: "Phone already exists" });
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body, "phoneNumber")) {
+        updates.phoneNumber = nextPhoneNumber;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(req.body, "phone") || Object.prototype.hasOwnProperty.call(req.body, "phoneNumber") || Object.prototype.hasOwnProperty.call(req.body, "countryCode")) {
+        updates.phone = nextPhone;
+      }
     }
 
     if (

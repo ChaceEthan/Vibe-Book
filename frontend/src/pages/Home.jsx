@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { CalendarCheck, Eye, Heart, MessageCircle, Search, Send, Share2, Star, UserMinus, UserPlus } from "lucide-react";
+import { Eye, Heart, MessageCircle, Search, Send, Share2, User, UserMinus, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -56,7 +56,7 @@ const Home = () => {
         mergePosts(nextPosts);
       } else {
         setPosts(nextPosts);
-        scrollerRef.current?.scrollTo?.({ top: 0, behavior: "instant" });
+        scrollerRef.current?.scrollTo?.({ top: 0, behavior: "auto" });
       }
 
       setPage(nextPage);
@@ -84,6 +84,7 @@ const Home = () => {
       }
 
       prependPost(post);
+      scrollerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
     };
 
     window.addEventListener("vibebook:post-created", handlePostCreated);
@@ -129,10 +130,10 @@ const Home = () => {
   useEffect(() => {
     const preloaders = visibleFeed
       .filter((item) => item?.type === "video" && item.url)
-      .slice(1, 3)
+      .slice(1, 4)
       .map((item) => {
         const video = document.createElement("video");
-        video.preload = "metadata";
+        video.preload = "auto";
         video.muted = true;
         video.src = mediaUrl(item.url);
         video.load();
@@ -282,8 +283,8 @@ const Home = () => {
 
   if (loading) {
     return (
-      <section className="h-[calc(100dvh-9rem)] min-h-[560px] bg-slate-950 p-3">
-        <div className="h-full animate-pulse rounded-lg bg-slate-800" />
+      <section className="h-[calc(100dvh-7.5rem)] min-h-[520px] bg-slate-950 p-3 sm:h-[calc(100dvh-8rem)]">
+        <div className="mx-auto h-full max-w-[min(100vw,36rem)] animate-pulse rounded-lg bg-slate-800" />
       </section>
     );
   }
@@ -320,7 +321,7 @@ const Home = () => {
           </button>
         ))}
       </div>
-      <div ref={scrollerRef} className="mx-auto h-[calc(100dvh-9rem)] min-h-[560px] max-w-xl snap-y snap-mandatory overflow-y-auto scroll-smooth">
+      <div ref={scrollerRef} className="mx-auto h-[calc(100dvh-7.5rem)] min-h-[520px] max-w-[min(100vw,36rem)] snap-y snap-mandatory overflow-y-auto scroll-smooth sm:h-[calc(100dvh-8rem)]">
         {visibleFeed.length ? (
           <>
           {visibleFeed.map((item) => {
@@ -329,18 +330,20 @@ const Home = () => {
             const comments = Array.isArray(item.comments) ? item.comments : [];
 
             return (
-              <article key={item._id} className="relative h-full snap-start overflow-hidden bg-slate-900">
+              <article key={item._id} className="relative h-full snap-start overflow-hidden bg-slate-950">
                 <PostMedia
                   post={item}
                   alt={profile.name || "VibeBook media"}
-                  className="h-full w-full object-cover"
-                  imageClassName="h-full w-full object-cover"
-                  videoClassName="h-full w-full object-cover"
+                  className="group h-full w-full"
+                  imageClassName="h-full w-full object-contain"
+                  videoClassName="h-full w-full object-contain"
                   placeholderClassName="h-full w-full"
                   muted
                   loop
                   autoPlay
-                  controls
+                  controls={false}
+                  interactive
+                  onDoubleTap={() => handleLike(item)}
                   onViewed={(metrics) => handleViewed(item, metrics)}
                   onInvalid={() => removePost(item._id)}
                 />
@@ -353,26 +356,23 @@ const Home = () => {
                     </Link>
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">
-                        <h1 className="min-w-0 truncate text-2xl font-black">{profile.name}</h1>
+                        <h1 className="min-w-0 truncate text-xl font-black sm:text-2xl">{profile.name}</h1>
                         {profile.premiumBadge || profile.isPremium ? (
                           <span className="shrink-0 rounded-full bg-brand px-2 py-1 text-[10px] font-black uppercase text-navy">Premium</span>
                         ) : null}
                       </div>
                       <p className="mt-1 truncate text-sm font-semibold text-white/80">
-                        {profile.category || "Entertainment professional"}
+                        @{profile.username || "creator"}{profile.category ? ` - ${profile.category}` : ""}
                       </p>
                     </div>
                   </div>
 
                   <div className="mt-3 flex min-w-0 flex-wrap items-center gap-3 text-xs font-bold text-white/80">
                     <span className="inline-flex items-center gap-1">
-                      <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                      {Number(profile.rating || profile.averageRating || 0).toFixed(1)}
-                    </span>
-                    <span className="inline-flex items-center gap-1">
                       <Eye className="h-4 w-4" />
                       {Number(item.views || 0)}
                     </span>
+                    <span>{Number(profile.followerCount || 0).toLocaleString()} followers</span>
                     <span className="max-w-full truncate">
                       {profile.province || "Rwanda"}{profile.district ? `, ${profile.district}` : ""}
                     </span>
@@ -463,7 +463,7 @@ const Home = () => {
                     className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-navy shadow-lg"
                     aria-label="View profile"
                   >
-                    <CalendarCheck className="h-6 w-6" />
+                    <User className="h-6 w-6" />
                   </Link>
                 </div>
               </article>

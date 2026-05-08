@@ -45,9 +45,9 @@ const Navbar = () => {
       { to: "/", label: "Home", icon: Home },
       { to: "/explore", label: "Explore", icon: Compass },
       { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
-      { to: isAuthenticated ? "/dashboard" : "/login", label: "Profile", icon: User },
+      { to: isAuthenticated && user?._id ? `/profile/${user._id}` : "/login", label: "Profile", icon: User },
     ],
-    [isAuthenticated, unreadCount]
+    [isAuthenticated, unreadCount, user?._id]
   );
 
   const activeLanguage = languages.find((item) => item.code === language);
@@ -199,7 +199,7 @@ const Navbar = () => {
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <nav className="mx-auto flex min-h-14 w-full max-w-xs items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:max-w-full sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
+        <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
           <Link to="/" className="flex shrink-0 items-center gap-1.5 sm:gap-3">
             <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
             <span className="whitespace-nowrap text-base font-black text-navy sm:text-lg">VibeBook</span>

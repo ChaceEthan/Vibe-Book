@@ -120,6 +120,32 @@ const findUserByLoginIdentifier = async (identifier) => {
   }).select("+password");
 };
 
+const findUserByPhoneFields = (phoneFields = {}, excludeId) => {
+  const phoneNumber = normalizePhoneDigits(phoneFields.phoneNumber || phoneFields.phone);
+  const fullPhone = String(phoneFields.phone || (phoneNumber ? `${phoneFields.countryCode || ""}${phoneNumber}` : "")).trim();
+  const conditions = [];
+
+  if (fullPhone) {
+    conditions.push({ phone: fullPhone });
+    conditions.push({ phone: { $regex: `${escapeRegex(fullPhone)}$` } });
+  }
+
+  if (phoneNumber && phoneFields.countryCode) {
+    conditions.push({ phoneNumber, countryCode: phoneFields.countryCode });
+  } else if (phoneNumber) {
+    conditions.push({ phoneNumber });
+  }
+
+  if (!conditions.length) {
+    return null;
+  }
+
+  return User.findOne({
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    $or: conditions,
+  });
+};
+
 const createReferralCode = (name = "vibebook") => {
   const prefix = String(name)
     .toLowerCase()
@@ -293,6 +319,11 @@ const register = async (req, res, next) => {
       });
     }
 
+    const existingPhone = phoneFields.phoneNumber ? await findUserByPhoneFields(phoneFields) : null;
+    if (existingPhone) {
+      return res.status(400).json({ message: "Phone already exists" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const { data: userData, errors } = normalizeProfileFields(req.body, { allowRole: true });
 
@@ -422,6 +453,11 @@ const sendPhoneCode = async (req, res, next) => {
 
     if (!nextPhone) {
       return res.status(400).json({ message: "Phone number is required" });
+    }
+
+    const existingPhone = await findUserByPhoneFields(phoneFields, req.user._id);
+    if (existingPhone) {
+      return res.status(400).json({ message: "Phone already exists" });
     }
 
     const lastSent = req.user.phoneVerificationLastSentAt ? new Date(req.user.phoneVerificationLastSentAt).getTime() : 0;

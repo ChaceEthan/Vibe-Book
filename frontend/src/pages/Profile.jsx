@@ -1,13 +1,12 @@
 // @ts-nocheck
-import { BadgeCheck, CreditCard, Eye, Gift, Heart, Lock, Mail, MessageCircle, Pencil, Phone, Rocket, Send, Share2, Sparkles, Star, UserMinus, UserPlus, X } from "lucide-react";
+import { BadgeCheck, CreditCard, Eye, Gift, Heart, Lock, Mail, MessageCircle, Pencil, Phone, Rocket, Send, Share2, Sparkles, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
-import EditProfileModal from "../components/EditProfileModal.jsx";
 import EditVideoModal from "../components/EditVideoModal.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { bookingApi, feedApi, mediaUrl, paymentApi, ratingApi, userApi } from "../services/api";
+import { bookingApi, feedApi, mediaUrl, paymentApi, userApi } from "../services/api";
 import { usePostStore } from "../store/postStore";
 
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
@@ -119,16 +118,12 @@ const Profile = () => {
   const [paymentStatus, setPaymentStatus] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [processingPayment, setProcessingPayment] = useState("");
-  const [ratingValue, setRatingValue] = useState(0);
-  const [ratingStatus, setRatingStatus] = useState("");
-  const [ratingError, setRatingError] = useState("");
   const [likeStatus, setLikeStatus] = useState("");
   const [followStatus, setFollowStatus] = useState("");
   const [followUpdating, setFollowUpdating] = useState(false);
   const [viewedPosts, setViewedPosts] = useState(new Set());
   const [profileCommentOpen, setProfileCommentOpen] = useState("");
   const [profileCommentText, setProfileCommentText] = useState("");
-  const [profileEditOpen, setProfileEditOpen] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
   const navigate = useNavigate();
 
@@ -177,7 +172,6 @@ const Profile = () => {
     setViewedPosts(new Set());
     setProfileCommentOpen("");
     setProfileCommentText("");
-    setProfileEditOpen(false);
     setEditingPost(null);
   }, [id, currentUser]);
 
@@ -272,36 +266,17 @@ const Profile = () => {
       await bookingApi.create(buildBookingPayload());
       const { data } = await userApi.getById(id);
       setUser(data.user);
-      setBookingStatus("Booking request sent.");
+      setBookingStatus("Request sent.");
       setBookingForm(initialBookingForm(currentUser));
     } catch (requestError) {
       if (requestError.response?.status === 402) {
         setPaymentAction({ type: "booking", payload: buildBookingPayload(), ...getAccessPayment(requestError) });
-        setBookingError("Payment or free trial access is required before this booking is sent.");
+        setBookingError("Payment or free trial access is required before this request is sent.");
       } else {
-        setBookingError(requestError.response?.data?.message || "Booking request failed.");
+        setBookingError(requestError.response?.data?.message || "Request failed.");
       }
     } finally {
       setBookingSending(false);
-    }
-  };
-
-  const handleRatingSubmit = async (value) => {
-    setRatingValue(value);
-    setRatingStatus("");
-    setRatingError("");
-
-    try {
-      const { data } = await ratingApi.add(user._id, { value });
-      setUser((current) => ({
-        ...current,
-        averageRating: data.averageRating,
-        rating: data.averageRating,
-        ratings: data.ratings,
-      }));
-      setRatingStatus("Rating saved.");
-    } catch (requestError) {
-      setRatingError(requestError.response?.data?.message || "Unable to save rating.");
     }
   };
 
@@ -349,14 +324,6 @@ const Profile = () => {
       ...current,
       posts: (current?.posts || []).map((post) => (post._id === nextPost._id ? { ...post, ...nextPost } : post)),
     }));
-  };
-
-  const handleProfileSaved = async (nextUser) => {
-    if (nextUser) {
-      setUser((current) => ({ ...current, ...nextUser }));
-    }
-
-    await refreshProfile();
   };
 
   const handlePostLike = async (post) => {
@@ -583,7 +550,7 @@ const Profile = () => {
         await bookingApi.create(paymentAction.payload);
         const { data } = await userApi.getById(id);
         setUser(data.user);
-        setBookingStatus("Payment verified. Booking request sent.");
+        setBookingStatus("Payment verified. Request sent.");
         setBookingForm(initialBookingForm(currentUser));
       }
 
@@ -768,9 +735,10 @@ const Profile = () => {
                       <PostMedia
                         post={post}
                         alt={`${user.name} post`}
-                        imageClassName="max-h-[300px] w-full rounded-lg object-cover"
-                        videoClassName="max-h-[350px] w-full bg-slate-950 object-cover"
-                        placeholderClassName="rounded-lg"
+                        className="aspect-[9/12] max-h-[420px] w-full"
+                        imageClassName="h-full w-full object-contain"
+                        videoClassName="h-full w-full object-contain"
+                        placeholderClassName="min-h-[280px] rounded-lg"
                         controls
                         onViewed={(metrics) => handlePostViewed(post, metrics)}
                       />
@@ -870,8 +838,8 @@ const Profile = () => {
                 </p>
               </div>
               <div className="rounded-lg bg-slate-100 px-4 py-3 text-center">
-                <p className="text-xs font-semibold uppercase text-slate-500">Rating</p>
-                <p className="text-xl font-black text-navy">{Number(user.averageRating || user.rating || 0).toFixed(1)}</p>
+                <p className="text-xs font-semibold uppercase text-slate-500">Following</p>
+                <p className="text-xl font-black text-navy">{Number(user.followingCount || user.following?.length || 0).toLocaleString()}</p>
               </div>
             </div>
 
@@ -890,7 +858,7 @@ const Profile = () => {
 
             {skills.length > 0 && (
               <div className="mt-6">
-                <h2 className="text-lg font-bold text-navy">Skills</h2>
+                <h2 className="text-lg font-bold text-navy">Interests</h2>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {skills.map((skill) => (
                     <span key={skill} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-600">
@@ -910,10 +878,10 @@ const Profile = () => {
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
               {isOwnProfile && (
-                <button type="button" className="btn-primary gap-2" onClick={() => setProfileEditOpen(true)}>
+                <Link to="/settings" className="btn-primary gap-2">
                   <Pencil className="h-4 w-4" />
                   Edit Profile
-                </button>
+                </Link>
               )}
               {!isOwnProfile && (
                 <button
@@ -968,16 +936,6 @@ const Profile = () => {
                 </a>
               )}
               {!isOwnProfile && (
-                <button type="button" className="btn-primary" onClick={() => setBookingOpen((value) => !value)}>
-                  Request collab
-                </button>
-              )}
-              {!isOwnProfile && (
-                <button type="button" className="btn-secondary" onClick={() => setOfferOpen((value) => !value)}>
-                  Send proposal
-                </button>
-              )}
-              {!isOwnProfile && (
                 <button type="button" className="btn-secondary gap-2" onClick={handleStartTip}>
                   <Gift className="h-4 w-4" />
                   Tip 1,000 RWF
@@ -1027,26 +985,6 @@ const Profile = () => {
               </div>
             )}
 
-            {!isOwnProfile && (
-              <div className="mt-6 rounded-lg bg-surface p-4">
-                <p className="text-xs font-semibold uppercase text-slate-500">Rate this profile</p>
-                <div className="mt-3 flex gap-2">
-                  {[1, 2, 3, 4, 5].map((value) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-amber-500"
-                      onClick={() => handleRatingSubmit(value)}
-                      aria-label={`Rate ${value} stars`}
-                    >
-                      <Star className={`h-5 w-5 ${value <= ratingValue ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
-                    </button>
-                  ))}
-                </div>
-                {ratingStatus && <p className="mt-2 text-sm text-green-700">{ratingStatus}</p>}
-                {ratingError && <p className="mt-2 text-sm text-red-700">{ratingError}</p>}
-              </div>
-            )}
           </div>
 
           {bookingOpen && !isOwnProfile && (
@@ -1172,14 +1110,6 @@ const Profile = () => {
           )}
         </div>
       </div>
-
-      {profileEditOpen && (
-        <EditProfileModal
-          user={user}
-          onClose={() => setProfileEditOpen(false)}
-          onSave={handleProfileSaved}
-        />
-      )}
 
       {editingPost && (
         <EditVideoModal

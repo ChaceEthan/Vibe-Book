@@ -16,7 +16,7 @@ const PAYMENT_OPTIONS = [
 const formatPrice = (value) => {
   const amount = Number(value || 0);
   if (!amount) {
-    return "Pending negotiation";
+    return "Not set";
   }
 
   return new Intl.NumberFormat("en-US", {
@@ -43,7 +43,7 @@ const Bookings = () => {
       setBookings(Array.isArray(data?.bookings) ? data.bookings : []);
     } catch (requestError) {
       setBookings([]);
-      setError(requestError.response?.data?.message || "Unable to load bookings.");
+      setError(requestError.response?.data?.message || "Unable to load collaborations.");
     } finally {
       setLoading(false);
     }
@@ -59,10 +59,10 @@ const Bookings = () => {
 
     try {
       await bookingApi.updateStatus(bookingId, { status: nextStatus });
-      setStatus(`Booking ${nextStatus}.`);
+      setStatus(`Request ${nextStatus}.`);
       await loadBookings();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to update booking.");
+      setError(requestError.response?.data?.message || "Unable to update request.");
     }
   };
 
@@ -96,8 +96,8 @@ const Bookings = () => {
   return (
     <section className="container-page py-10">
       <div className="mb-8">
-        <p className="text-sm font-semibold uppercase text-brand">Bookings</p>
-        <h1 className="mt-2 text-3xl font-black text-navy">Booking Requests</h1>
+        <p className="text-sm font-semibold uppercase text-brand">Collaborations</p>
+        <h1 className="mt-2 text-3xl font-black text-navy">Creator Requests</h1>
       </div>
 
       {status && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{status}</div>}
@@ -121,7 +121,7 @@ const Bookings = () => {
                   <div className="flex gap-4">
                     <img src={mediaUrl(image)} alt="" className="h-16 w-16 rounded-lg object-cover" />
                     <div>
-                      <h2 className="text-lg font-black text-navy">{otherUser.name || booking.businessName || "Booking"}</h2>
+                      <h2 className="text-lg font-black text-navy">{otherUser.name || booking.businessName || "Creator request"}</h2>
                       <p className="mt-1 text-sm text-slate-600">{booking.location || "Location pending"}</p>
                       <p className="mt-1 text-sm text-slate-600">
                         Duration: {booking.durationValue || booking.numberOfDays || 1} {booking.durationUnit || "days"}
@@ -136,11 +136,11 @@ const Bookings = () => {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg bg-surface p-4">
-                    <p className="text-xs font-semibold uppercase text-slate-500">Starting offer</p>
+                    <p className="text-xs font-semibold uppercase text-slate-500">Budget</p>
                     <p className="mt-1 font-bold text-navy">{formatPrice(booking.offeredPrice || booking.offerPrice)}</p>
                   </div>
                   <div className="rounded-lg bg-surface p-4">
-                    <p className="text-xs font-semibold uppercase text-slate-500">Final agreed price</p>
+                    <p className="text-xs font-semibold uppercase text-slate-500">Confirmed budget</p>
                     <p className="mt-1 font-bold text-navy">{formatPrice(booking.finalAgreedPrice)}</p>
                   </div>
                 </div>
@@ -187,7 +187,7 @@ const Bookings = () => {
         </div>
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
-          <h2 className="text-lg font-bold text-navy">No bookings yet</h2>
+          <h2 className="text-lg font-bold text-navy">No requests yet</h2>
           <p className="mt-2 text-sm text-slate-600">Collaboration requests appear here after someone sends a request.</p>
         </div>
       )}

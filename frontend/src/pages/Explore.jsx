@@ -21,9 +21,9 @@ const VideoCard = ({ post, featured = false }) => {
           controls
           muted
           loop
-          className="h-full w-full object-cover"
-          imageClassName="h-full w-full object-cover"
-          videoClassName="h-full w-full object-cover"
+          className="h-full w-full"
+          imageClassName="h-full w-full object-contain"
+          videoClassName="h-full w-full object-contain"
           placeholderClassName="h-full w-full"
         />
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/90 to-transparent p-4 text-white">

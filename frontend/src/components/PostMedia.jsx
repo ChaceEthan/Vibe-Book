@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Volume2, VolumeX } from "lucide-react";
+import { Heart, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../services/api";
@@ -15,6 +15,8 @@ const PostMedia = ({
   imageClassName = "",
   videoClassName = "",
   placeholderClassName = "",
+  interactive = false,
+  onDoubleTap,
   onViewed,
   onInvalid,
 }) => {
@@ -23,8 +25,16 @@ const PostMedia = ({
   const maxWatchedRef = useRef(0);
   const lastTimeRef = useRef(0);
   const replaysRef = useRef(0);
+  const lastTapRef = useRef(0);
+  const tapTimerRef = useRef(null);
+  const holdTimerRef = useRef(null);
+  const heldToPauseRef = useRef(false);
+  const resumeAfterHoldRef = useRef(false);
   const [failed, setFailed] = useState(false);
   const [isMuted, setIsMuted] = useState(Boolean(muted));
+  const [isPaused, setIsPaused] = useState(!autoPlay);
+  const [progress, setProgress] = useState(0);
+  const [likePulse, setLikePulse] = useState(false);
   const rawUrl = post?.url || "";
   const src = rawUrl ? mediaUrl(rawUrl) : "";
 
@@ -59,7 +69,9 @@ const PostMedia = ({
     replaysRef.current = 0;
     setFailed(false);
     setIsMuted(Boolean(muted));
-  }, [muted, post?._id, rawUrl]);
+    setIsPaused(!autoPlay);
+    setProgress(0);
+  }, [autoPlay, muted, post?._id, rawUrl]);
 
   useEffect(() => {
     if (post?.type !== "video" || !mediaRef.current) {
@@ -68,6 +80,18 @@ const PostMedia = ({
 
     mediaRef.current.muted = isMuted;
   }, [isMuted, post?.type, rawUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (tapTimerRef.current) {
+        window.clearTimeout(tapTimerRef.current);
+      }
+
+      if (holdTimerRef.current) {
+        window.clearTimeout(holdTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleMediaError = (event) => {
     console.error("Media failed to render:", {
@@ -96,6 +120,93 @@ const PostMedia = ({
     }
 
     setIsMuted(nextMuted);
+  };
+
+  const togglePlayback = () => {
+    const video = mediaRef.current;
+
+    if (!video) {
+      return;
+    }
+
+    if (video.paused) {
+      video.play?.().catch(() => undefined);
+      setIsPaused(false);
+    } else {
+      video.pause?.();
+      setIsPaused(true);
+    }
+  };
+
+  const handleInteractiveTap = (event) => {
+    if (!interactive || post?.type !== "video" || controls) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (heldToPauseRef.current) {
+      heldToPauseRef.current = false;
+      return;
+    }
+
+    const now = Date.now();
+
+    if (now - lastTapRef.current < 280) {
+      if (tapTimerRef.current) {
+        window.clearTimeout(tapTimerRef.current);
+      }
+
+      lastTapRef.current = 0;
+      setLikePulse(true);
+      window.setTimeout(() => setLikePulse(false), 520);
+      onDoubleTap?.();
+      return;
+    }
+
+    lastTapRef.current = now;
+    tapTimerRef.current = window.setTimeout(() => {
+      togglePlayback();
+      lastTapRef.current = 0;
+    }, 220);
+  };
+
+  const handlePointerDown = () => {
+    if (!interactive || post?.type !== "video" || controls) {
+      return;
+    }
+
+    if (holdTimerRef.current) {
+      window.clearTimeout(holdTimerRef.current);
+    }
+
+    holdTimerRef.current = window.setTimeout(() => {
+      const video = mediaRef.current;
+      if (!video || video.paused) {
+        resumeAfterHoldRef.current = false;
+        return;
+      }
+
+      resumeAfterHoldRef.current = true;
+      heldToPauseRef.current = true;
+      video.pause?.();
+      setIsPaused(true);
+    }, 360);
+  };
+
+  const handlePointerUp = () => {
+    if (holdTimerRef.current) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+
+    if (resumeAfterHoldRef.current && mediaRef.current) {
+      mediaRef.current.play?.().catch(() => undefined);
+      setIsPaused(false);
+    }
+
+    resumeAfterHoldRef.current = false;
   };
 
   useEffect(() => {
@@ -159,19 +270,41 @@ const PostMedia = ({
 
   if (post.type === "video") {
     return (
-      <div className={`relative ${className}`}>
+      <div
+        className={`relative overflow-hidden bg-slate-950 ${className}`}
+        onClick={handleInteractiveTap}
+        onPointerDown={handlePointerDown}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        onPointerUp={handlePointerUp}
+      >
+        <video
+          aria-hidden="true"
+          src={src}
+          className="absolute inset-0 h-full w-full scale-110 object-cover opacity-30 blur-2xl"
+          muted
+          loop
+          playsInline
+          autoPlay={autoPlay}
+          preload="metadata"
+        />
         <video
           ref={mediaRef}
           src={src}
-          className={`h-full w-full max-h-[450px] object-cover ${videoClassName}`}
+          className={`relative z-10 h-full w-full object-contain ${videoClassName}`}
           muted={isMuted}
           loop={loop}
           playsInline
           controls={controls}
           autoPlay={autoPlay}
-          preload="metadata"
+          preload="auto"
           onError={handleMediaError}
-          onLoadedMetadata={(event) => setIsMuted(event.currentTarget.muted)}
+          onLoadedMetadata={(event) => {
+            setIsMuted(event.currentTarget.muted);
+            setIsPaused(event.currentTarget.paused);
+          }}
+          onPlay={() => setIsPaused(false)}
+          onPause={() => setIsPaused(true)}
           onVolumeChange={(event) => setIsMuted(event.currentTarget.muted)}
           onTimeUpdate={(event) => {
             const video = event.currentTarget;
@@ -184,6 +317,7 @@ const PostMedia = ({
 
             lastTimeRef.current = currentTime;
             maxWatchedRef.current = Math.max(maxWatchedRef.current, currentTime);
+            setProgress(duration ? Math.min(100, (currentTime / duration) * 100) : 0);
 
             const threshold = duration && duration <= 8 ? duration * 0.85 : 3;
 
@@ -192,34 +326,61 @@ const PostMedia = ({
             }
           }}
           onEnded={(event) => markViewed(metricsFor(event.currentTarget, { completionRate: 1 }))}
-          style={{ width: "100%", borderRadius: "12px" }}
         />
+
+        {interactive && !controls && isPaused && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-950/55 text-white backdrop-blur">
+              <Play className="h-8 w-8 fill-white" />
+            </span>
+          </div>
+        )}
+
+        {interactive && !controls && likePulse && (
+          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
+            <Heart className="h-24 w-24 animate-ping fill-red-500 text-red-500 drop-shadow-2xl" />
+          </div>
+        )}
+
+        {interactive && !controls && !isPaused && (
+          <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-full bg-slate-950/40 p-2 text-white opacity-0 transition group-hover:opacity-100">
+            <Pause className="h-4 w-4" />
+          </div>
+        )}
+
         <button
           type="button"
-          className="absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur"
+          className="absolute right-3 top-3 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur"
           onClick={handleMuteToggle}
           aria-label={isMuted ? "Unmute video" : "Mute video"}
         >
           {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
         </button>
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-[3px] bg-white/15">
+          <div className="h-full bg-brand transition-all" style={{ width: `${progress}%` }} />
+        </div>
       </div>
     );
   }
 
   return (
-    <img
-      ref={mediaRef}
-      src={src}
-      alt={alt}
-      className={`${className} ${imageClassName}`}
-      onError={handleMediaError}
-      onLoad={() => {
-        if (!window.IntersectionObserver) {
-          markViewed({ watchTime: 1, duration: 1, completionRate: 1 });
-        }
-      }}
-      loading="lazy"
-    />
+    <div className={`relative overflow-hidden bg-slate-950 ${className}`}>
+      <img src={src} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl" aria-hidden="true" />
+      <img
+        ref={mediaRef}
+        src={src}
+        alt={alt}
+        className={`relative z-10 h-full w-full object-contain ${imageClassName}`}
+        onError={handleMediaError}
+        onLoad={() => {
+          if (!window.IntersectionObserver) {
+            markViewed({ watchTime: 1, duration: 1, completionRate: 1 });
+          }
+        }}
+        loading="lazy"
+      />
+    </div>
   );
 };
 

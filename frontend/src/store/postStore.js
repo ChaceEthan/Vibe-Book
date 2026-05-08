@@ -1,7 +1,12 @@
 import { create } from "zustand";
 
 const isCloudinaryUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(String(value || "").trim());
-const isValidPost = (post) => isCloudinaryUrl(post?.url);
+const isRenderableMediaUrl = (value) => {
+  const url = String(value || "").trim();
+
+  return Boolean(url && (/^(https?:|blob:|data:)/i.test(url) || url.startsWith("/uploads") || url.startsWith("uploads/") || url.startsWith("/")));
+};
+const isValidPost = (post) => isRenderableMediaUrl(post?.url);
 
 const newestFirst = (items) =>
   [...items].sort((left, right) => {
@@ -55,4 +60,4 @@ export const usePostStore = create((set) => ({
     })),
 }));
 
-export { isCloudinaryUrl, isValidPost };
+export { isCloudinaryUrl, isRenderableMediaUrl, isValidPost };

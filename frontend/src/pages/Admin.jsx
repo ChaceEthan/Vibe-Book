@@ -67,7 +67,7 @@ const Admin = () => {
         {[
           ["Total users", stats?.totalUsers || 0],
           ["Total posts", stats?.totalPosts || stats?.totalUploads || 0],
-          ["Total bookings", stats?.totalBookings || 0],
+          ["Total requests", stats?.totalBookings || 0],
           ["Engagement", `${stats?.engagementRate || 0}%`],
         ].map(([label, value]) => (
           <div key={label} className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
