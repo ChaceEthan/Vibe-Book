@@ -62,7 +62,9 @@
   .home-feed-scroll {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
+    scroll-snap-type: y mandatory;
     scrollbar-width: none;
+    touch-action: pan-y;
   }
 
   .home-feed-scroll::-webkit-scrollbar {
@@ -70,7 +72,13 @@
   }
 
   .comment-sheet-in {
-    animation: commentSheetIn 180ms ease-out;
+    animation: commentSheetIn 160ms ease-out;
+    will-change: transform, opacity;
+  }
+
+  .activity-bubble {
+    animation: activityBubble 1400ms ease-out forwards;
+    will-change: transform, opacity;
   }
 }
 
@@ -83,5 +91,22 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes activityBubble {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.94);
+  }
+
+  15% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(-8px, -42px, 0) scale(0.98);
   }
 }

@@ -64,21 +64,21 @@ const ActionButton = memo(({ active = false, count, label, onClick, children }) 
   <div className="flex min-w-0 flex-col items-center gap-1">
     <button
       type="button"
-      className={`flex h-12 w-12 items-center justify-center rounded-full text-white shadow-xl backdrop-blur transition active:scale-95 ${
-        active ? "bg-white text-navy" : "bg-slate-950/35 hover:bg-slate-950/50"
+      className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-lg backdrop-blur transition duration-150 active:scale-90 sm:h-12 sm:w-12 ${
+        active ? "scale-105 bg-white text-navy" : "bg-slate-950/28 hover:bg-slate-950/45"
       }`}
       onClick={onClick}
       aria-label={label}
     >
       {children}
     </button>
-    <span className="max-w-14 truncate text-[11px] font-black leading-none text-white drop-shadow">{count}</span>
+    <span className="max-w-14 truncate text-[10px] font-black leading-none text-white drop-shadow sm:text-[11px]">{count}</span>
   </div>
 ));
 
 const FeedItem = memo(
   ({
-    currentUserId,
+    currentUser,
     isAuthenticated,
     item,
     onFollow,
@@ -89,19 +89,55 @@ const FeedItem = memo(
     onShare,
     onViewed,
   }) => {
+    const [captionExpanded, setCaptionExpanded] = useState(false);
+    const [activityBursts, setActivityBursts] = useState([]);
+    const lastViewsRef = useRef(Number(item.views || 0));
+    const burstTimersRef = useRef([]);
     const profile = item.userId || {};
     const profileImage = profile.profilePicture || profile.profileImage || profile.images?.[0] || "/logo.png";
     const profilePath = isAuthenticated ? `/profile/${profile._id}` : "/login";
-    const isOwnProfile = currentUserId && profile._id && currentUserId === profile._id;
+    const isOwnProfile = currentUser?._id && profile._id && currentUser._id === profile._id;
     const verified = Boolean(profile.verified || profile.isVerified);
     const comments = Array.isArray(item.comments) ? item.comments : [];
     const commentsCount = item.commentCount ?? item.commentsCount ?? comments.length;
     const saveCount = item.saveCount ?? item.saves ?? 0;
+    const caption = String(item.caption || "");
+    const hasLongCaption = caption.length > 120;
+    const currentUserImage = currentUser?.profilePicture || currentUser?.profileImage || currentUser?.images?.[0] || "";
+
+    const addActivityBurst = (kind) => {
+      const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setActivityBursts((current) => [...current.slice(-2), { id, kind }]);
+      const timer = window.setTimeout(() => {
+        setActivityBursts((current) => current.filter((burst) => burst.id !== id));
+        burstTimersRef.current = burstTimersRef.current.filter((item) => item !== timer);
+      }, 1500);
+      burstTimersRef.current.push(timer);
+    };
+
+    const handleLikePress = () => {
+      addActivityBurst("like");
+      onLike(item);
+    };
+
+    useEffect(() => {
+      const nextViews = Number(item.views || 0);
+      if (nextViews > lastViewsRef.current) {
+        addActivityBurst("view");
+      }
+      lastViewsRef.current = nextViews;
+    }, [item.views]);
+
+    useEffect(() => {
+      return () => {
+        burstTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+        burstTimersRef.current = [];
+      };
+    }, []);
 
     return (
       <article
-        className="relative h-[calc(100dvh-3.5rem)] min-h-[560px] snap-start snap-always overflow-hidden bg-slate-950 sm:h-[calc(100dvh-4rem)]"
-        style={{ contentVisibility: "auto", containIntrinsicSize: "100vh" }}
+        className="relative h-[calc(100dvh-3.5rem)] snap-start snap-always overflow-hidden bg-slate-950 sm:h-[calc(100dvh-4rem)]"
       >
         <PostMedia
           post={item}
@@ -115,14 +151,15 @@ const FeedItem = memo(
           autoPlay
           controls={false}
           interactive
-          onDoubleTap={() => onLike(item)}
+          onDoubleTap={handleLikePress}
           onViewed={(metrics) => onViewed(item, metrics)}
           onInvalid={() => onInvalid(item._id)}
         />
 
-        <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-slate-950/95 via-slate-950/18 to-slate-950/10" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-slate-950/35 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[34%] bg-gradient-to-t from-slate-950/70 via-slate-950/18 to-transparent" />
 
-        <div className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-3 right-[5.25rem] z-20 text-white sm:bottom-[calc(6.2rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
+        <div className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-center gap-3">
             <Link to={profilePath} className="shrink-0" aria-label="Open creator profile">
               <img src={mediaUrl(profileImage)} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
@@ -154,16 +191,46 @@ const FeedItem = memo(
             )}
           </div>
 
-          {item.caption && <p className="mt-3 line-clamp-3 text-sm font-semibold leading-5 text-white drop-shadow">{item.caption}</p>}
+          {caption && (
+            <div className="mt-2 max-w-[34rem] text-sm font-semibold leading-5 text-white drop-shadow">
+              <p className={captionExpanded ? "" : "line-clamp-2"}>{caption}</p>
+              {hasLongCaption && (
+                <button
+                  type="button"
+                  className="mt-1 text-xs font-black text-white/75 hover:text-white"
+                  onClick={() => setCaptionExpanded((value) => !value)}
+                >
+                  {captionExpanded ? "less" : "more"}
+                </button>
+              )}
+            </div>
+          )}
           {Array.isArray(item.tags) && item.tags.length > 0 && (
-            <p className="mt-2 line-clamp-2 text-xs font-black leading-5 text-brand drop-shadow">
+            <p className="mt-1 line-clamp-1 text-xs font-black leading-5 text-brand drop-shadow">
               {item.tags.slice(0, 6).map((tag) => `#${tag}`).join(" ")}
             </p>
           )}
         </div>
 
-        <div className="absolute bottom-[calc(5.6rem+env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-3 sm:bottom-[calc(6rem+env(safe-area-inset-bottom))] sm:right-5">
-          <ActionButton active={item.likedByViewer} count={formatCount(item.likes || item.likeCount)} label="Like media" onClick={() => onLike(item)}>
+        <div className="pointer-events-none absolute bottom-[calc(9rem+env(safe-area-inset-bottom))] right-16 z-30 flex flex-col items-end gap-2">
+          {activityBursts.map((burst) => (
+            <div key={burst.id} className="activity-bubble flex items-center gap-2 rounded-full bg-white/90 py-1 pl-1 pr-3 text-xs font-black text-navy shadow-xl">
+              <span className={`flex h-7 w-7 items-center justify-center overflow-hidden rounded-full ${burst.kind === "like" ? "bg-red-500 text-white" : "bg-brand text-navy"}`}>
+                {burst.kind === "like" && currentUserImage ? (
+                  <img src={mediaUrl(currentUserImage)} alt="" className="h-full w-full object-cover" />
+                ) : burst.kind === "like" ? (
+                  <Heart className="h-4 w-4 fill-white text-white" />
+                ) : (
+                  initialsFor(currentUser?.name || "view")
+                )}
+              </span>
+              {burst.kind === "like" ? "liked" : "viewed"}
+            </div>
+          ))}
+        </div>
+
+        <div className="absolute bottom-[calc(4.9rem+env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-2.5 sm:bottom-[calc(5.3rem+env(safe-area-inset-bottom))] sm:right-5">
+          <ActionButton active={item.likedByViewer} count={formatCount(item.likes || item.likeCount)} label="Like media" onClick={handleLikePress}>
             <Heart className={`h-6 w-6 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
           </ActionButton>
 
@@ -196,6 +263,27 @@ const CommentsSheet = ({
 }) => {
   const comments = Array.isArray(post?.comments) ? post.comments : [];
   const profile = post?.userId || {};
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (!post) {
+      return undefined;
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus?.(), 120);
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose, post]);
 
   if (!post) {
     return null;
@@ -261,6 +349,7 @@ const CommentsSheet = ({
 
         <form className="sticky bottom-0 flex gap-2 border-t border-slate-200 bg-white p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]" onSubmit={(event) => onSubmit(event, post)}>
           <input
+            ref={inputRef}
             className="min-w-0 flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20"
             value={commentText}
             onChange={(event) => onCommentTextChange(event.target.value)}
@@ -352,6 +441,19 @@ const Home = () => {
   }, [loadFeed]);
 
   useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverscroll = document.documentElement.style.overscrollBehaviorY;
+
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overscrollBehaviorY = "none";
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overscrollBehaviorY = previousHtmlOverscroll;
+    };
+  }, []);
+
+  useEffect(() => {
     const handlePostCreated = (event) => {
       const post = event.detail?.post;
 
@@ -408,7 +510,7 @@ const Home = () => {
   useEffect(() => {
     const preloaders = visibleFeed
       .filter((item) => item?.type === "video" && item.url)
-      .slice(1, 5)
+      .slice(1, 2)
       .map((item) => {
         const video = document.createElement("video");
         video.preload = "auto";
@@ -584,7 +686,7 @@ const Home = () => {
 
   if (loading) {
     return (
-      <section className="h-[calc(100dvh-3.5rem)] min-h-[560px] bg-slate-950 p-2 sm:h-[calc(100dvh-4rem)]">
+      <section className="h-[calc(100dvh-3.5rem)] bg-slate-950 p-2 sm:h-[calc(100dvh-4rem)]">
         <div className="mx-auto h-full max-w-[min(100vw,48rem)] animate-pulse rounded-lg bg-slate-800" />
       </section>
     );
@@ -599,7 +701,7 @@ const Home = () => {
   }
 
   return (
-    <section className="relative min-h-[calc(100dvh-3.5rem)] overflow-hidden bg-slate-950 text-white sm:min-h-[calc(100dvh-4rem)]">
+    <section className="relative h-[calc(100dvh-3.5rem)] overflow-hidden bg-slate-950 text-white sm:h-[calc(100dvh-4rem)]">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center pt-3">
         <div className="pointer-events-auto flex rounded-full bg-slate-950/55 p-1 text-xs font-black text-white shadow-xl backdrop-blur">
           {[
@@ -627,14 +729,14 @@ const Home = () => {
 
       <div
         ref={scrollerRef}
-        className="home-feed-scroll mx-auto h-[calc(100dvh-3.5rem)] min-h-[560px] max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto scroll-smooth bg-slate-950 sm:h-[calc(100dvh-4rem)]"
+        className="home-feed-scroll mx-auto h-[calc(100dvh-3.5rem)] max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto bg-slate-950 sm:h-[calc(100dvh-4rem)]"
       >
         {visibleFeed.length ? (
           <>
             {visibleFeed.map((item) => (
               <FeedItem
                 key={item._id}
-                currentUserId={currentUser?._id}
+                currentUser={currentUser}
                 isAuthenticated={isAuthenticated}
                 item={item}
                 onFollow={handleFollow}

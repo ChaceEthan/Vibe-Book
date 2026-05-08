@@ -28,6 +28,7 @@ const PostMedia = ({
   const lastTapRef = useRef(0);
   const tapTimerRef = useRef(null);
   const holdTimerRef = useRef(null);
+  const likeTimerRef = useRef(null);
   const heldToPauseRef = useRef(false);
   const resumeAfterHoldRef = useRef(false);
   const [failed, setFailed] = useState(false);
@@ -90,6 +91,10 @@ const PostMedia = ({
       if (holdTimerRef.current) {
         window.clearTimeout(holdTimerRef.current);
       }
+
+      if (likeTimerRef.current) {
+        window.clearTimeout(likeTimerRef.current);
+      }
     };
   }, []);
 
@@ -120,6 +125,15 @@ const PostMedia = ({
     }
 
     setIsMuted(nextMuted);
+  };
+
+  const prepareVideo = (video) => {
+    if (!video) {
+      return;
+    }
+
+    video.playbackRate = 1;
+    video.defaultPlaybackRate = 1;
   };
 
   const togglePlayback = () => {
@@ -160,7 +174,13 @@ const PostMedia = ({
 
       lastTapRef.current = 0;
       setLikePulse(true);
-      window.setTimeout(() => setLikePulse(false), 520);
+      if (likeTimerRef.current) {
+        window.clearTimeout(likeTimerRef.current);
+      }
+      likeTimerRef.current = window.setTimeout(() => {
+        setLikePulse(false);
+        likeTimerRef.current = null;
+      }, 520);
       onDoubleTap?.();
       return;
     }
@@ -220,22 +240,28 @@ const PostMedia = ({
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (!mediaRef.current) {
+        const video = mediaRef.current;
+
+        if (!video) {
           return;
         }
 
-        if (entry.isIntersecting) {
-          mediaRef.current.play?.().catch(() => undefined);
-        } else {
-          mediaRef.current.pause?.();
+        prepareVideo(video);
+
+        if (entry.intersectionRatio >= 0.68) {
+          if (video.paused) {
+            video.play?.().catch(() => undefined);
+          }
+        } else if (entry.intersectionRatio <= 0.28 && !video.paused) {
+          video.pause?.();
         }
       },
-      { threshold: 0.6 }
+      { threshold: [0, 0.28, 0.68, 1] }
     );
 
     observer.observe(mediaRef.current);
     return () => observer.disconnect();
-  }, [autoPlay, failed, post, post?.type, rawUrl, src]);
+  }, [autoPlay, failed, post?._id, post?.type, rawUrl, src]);
 
   useEffect(() => {
     if (post?.type === "video" || !mediaRef.current || failed) {
@@ -278,16 +304,7 @@ const PostMedia = ({
         onPointerLeave={handlePointerUp}
         onPointerUp={handlePointerUp}
       >
-        <video
-          aria-hidden="true"
-          src={src}
-          className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-30 blur-2xl"
-          muted
-          loop
-          playsInline
-          autoPlay={autoPlay}
-          preload="metadata"
-        />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.18),rgba(15,23,42,0.92)_58%,#020617_100%)]" />
         <video
           ref={mediaRef}
           src={src}
@@ -300,10 +317,14 @@ const PostMedia = ({
           preload="auto"
           onError={handleMediaError}
           onLoadedMetadata={(event) => {
+            prepareVideo(event.currentTarget);
             setIsMuted(event.currentTarget.muted);
             setIsPaused(event.currentTarget.paused);
           }}
-          onPlay={() => setIsPaused(false)}
+          onPlay={(event) => {
+            prepareVideo(event.currentTarget);
+            setIsPaused(false);
+          }}
           onPause={() => setIsPaused(true)}
           onVolumeChange={(event) => setIsMuted(event.currentTarget.muted)}
           onTimeUpdate={(event) => {
@@ -358,7 +379,7 @@ const PostMedia = ({
         </button>
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-[3px] bg-white/15">
-          <div className="h-full bg-brand transition-all" style={{ width: `${progress}%` }} />
+          <div className="h-full bg-brand" style={{ width: `${progress}%` }} />
         </div>
       </div>
     );
