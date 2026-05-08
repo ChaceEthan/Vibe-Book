@@ -234,6 +234,10 @@ const userSchema = new mongoose.Schema({
           ref: "Feed",
           required: true,
         },
+        creatorId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
         topics: {
           type: [String],
           default: [],
@@ -339,6 +343,26 @@ const userSchema = new mongoose.Schema({
       trim: true,
       default: "",
     },
+    tiktok: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    youtube: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    x: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    website: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   availability: {
     type: String,
@@ -424,6 +448,96 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
     min: 0,
+  },
+  username: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    lowercase: true,
+    minlength: 3,
+    maxlength: 30,
+  },
+  usernameHistory: {
+    type: [String],
+    default: [],
+  },
+  coverImage: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  website: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  profileTheme: {
+    type: String,
+    trim: true,
+    default: "classic",
+    maxlength: 40,
+  },
+  creatorCategory: {
+    type: String,
+    trim: true,
+    default: "",
+    maxlength: 80,
+  },
+  creatorSkills: {
+    type: [String],
+    default: [],
+  },
+  publicEmail: {
+    type: Boolean,
+    default: false,
+  },
+  creatorTier: {
+    type: String,
+    enum: ["none", "emerging", "established", "verified"],
+    default: "none",
+    index: true,
+  },
+  creatorLevel: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  creatorBadges: {
+    type: [String],
+    default: [],
+  },
+  monetizationEnabled: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  totalRevenue: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  estimatedRevenue: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  payoutEligible: {
+    type: Boolean,
+    default: false,
+  },
+  payoutMethod: {
+    type: String,
+    enum: ["momo", "bank", "wallet"],
+    default: "wallet",
+  },
+  payoutEmail: {
+    type: String,
+    trim: true,
+    default: "",
+  },
+  lastPayoutAt: {
+    type: Date,
   },
   createdAt: {
     type: Date,

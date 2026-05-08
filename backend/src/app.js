@@ -10,6 +10,7 @@ const adminRoutes = require("./routes/adminRoutes");
 const ruleRoutes = require("./routes/ruleRoutes");
 const healthRoutes = require("./routes/healthRoutes");
 const ratingRoutes = require("./routes/ratingRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const mediaRoutes = require("./routes/mediaRoutes");
@@ -159,6 +160,7 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/rules", ruleRoutes);
 app.use("/api/health", healthRoutes);
 app.use("/api/ratings", ratingRoutes);
+app.use("/api/notifications", notificationRoutes);
 app.post("/api/book", bookingLimiter, authMiddleware, createBooking);
 app.use("/api/bookings", bookingLimiter, bookingRoutes);
 

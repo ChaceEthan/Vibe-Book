@@ -199,6 +199,37 @@ const activeBoostScoreFor = (post) => {
 
 const premiumBoostFor = (post) => (post?.userId?.isPremium || post?.userId?.premiumBadge ? 15 : 0);
 
+const recentHistoryFor = (viewer) => {
+  if (!Array.isArray(viewer?.watchHistory)) {
+    return [];
+  }
+
+  return viewer.watchHistory.slice(-120);
+};
+
+const repeatPenaltyFor = (post, viewer) => {
+  const history = recentHistoryFor(viewer);
+
+  if (!history.length) {
+    return 0;
+  }
+
+  const postId = idOf(post?._id);
+  const creatorId = idOf(post?.userId);
+  const postSeen = postId && history.some((entry) => idOf(entry?.postId) === postId);
+
+  if (postSeen) {
+    return 140;
+  }
+
+  if (!creatorId) {
+    return 0;
+  }
+
+  const recentCreatorViews = history.filter((entry) => idOf(entry?.creatorId) === creatorId).length;
+  return clamp(recentCreatorViews * 8, 0, 48);
+};
+
 const viralScoreFor = (post) => {
   const counts = engagementCountsFor(post);
   const score =
@@ -324,6 +355,7 @@ const scorePostForViewer = (post, viewer = null, options = {}) => {
   const boostScore = activeBoostScoreFor(post);
   const premiumBoost = premiumBoostFor(post);
   const distributionBoost = distributionBoostFor(post, viralScore);
+  const repeatPenalty = repeatPenaltyFor(post, viewer);
   const finalScore =
     viralScore +
     interestMatchScore +
@@ -334,7 +366,8 @@ const scorePostForViewer = (post, viewer = null, options = {}) => {
     emotionBoost +
     boostScore +
     premiumBoost +
-    distributionBoost;
+    distributionBoost -
+    repeatPenalty;
 
   return {
     finalScore: roundScore(finalScore),
@@ -348,6 +381,7 @@ const scorePostForViewer = (post, viewer = null, options = {}) => {
     boostScore: roundScore(boostScore),
     premiumBoost,
     distributionBoost,
+    repeatPenalty,
     distributionStage: distributionStageFor(post, viralScore),
   };
 };

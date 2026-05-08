@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   addFeedComment,
+  editPost,
   getFeed,
   incrementPostView,
   recordPostFeedback,
@@ -16,6 +17,7 @@ const router = express.Router();
 
 router.get("/", optionalAuthMiddleware, getFeed);
 router.post("/:id/view", optionalAuthMiddleware, incrementPostView);
+router.patch("/:id/edit", authMiddleware, editPost);
 router.post("/:id/share", optionalAuthMiddleware, sharePost);
 router.post("/:id/like", authMiddleware, toggleFeedLike);
 router.post("/:id/save", authMiddleware, togglePostSave);

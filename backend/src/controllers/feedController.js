@@ -4,6 +4,7 @@ const Feed = require("../models/Feed");
 const User = require("../models/User");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { addMonetizationScore } = require("../utils/monetization");
+const { createNotification } = require("../utils/notifications");
 const {
   isCloudinarySecureUrl,
   normalizeStoredUploadPath,
@@ -19,9 +20,10 @@ const {
   roundScore,
   scorePostForViewer,
   topicSignalsForPost,
+  uniqueTopics,
 } = require("../utils/feedRanking");
 
-const userSelect = "name role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt";
+const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt";
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 30;
 
@@ -76,6 +78,12 @@ const safeCount = (value, max = 1000) => {
   return Number.isFinite(count) && count > 0 ? Math.min(count, max) : 0;
 };
 
+const queueNotification = (payload) => {
+  createNotification(payload).catch((error) => {
+    console.error(`[notification:feed] ${error.message}`);
+  });
+};
+
 const updateRankingFields = (item, options = {}) => {
   const fields = rankingFieldsForPost(item, options);
 
@@ -108,17 +116,17 @@ const buildInterestUpdate = (item, weight, options = {}) => {
   }
 
   if (options.addLikedTopics && topics.length) {
-    update.$addToSet = {
-      ...(update.$addToSet || {}),
-      likedTopics: { $each: topics },
+    update.$push = {
+      ...(update.$push || {}),
+      likedTopics: { $each: topics, $slice: -100 },
     };
   }
 
   const creatorId = idOf(item.userId);
   if (options.addFavoriteCreator && creatorId) {
-    update.$addToSet = {
-      ...(update.$addToSet || {}),
-      favoriteCreators: creatorId,
+    update.$push = {
+      ...(update.$push || {}),
+      favoriteCreators: { $each: [creatorId], $slice: -100 },
     };
   }
 
@@ -128,6 +136,7 @@ const buildInterestUpdate = (item, weight, options = {}) => {
         $each: [
           {
             postId: item._id,
+            creatorId: creatorId || undefined,
             topics,
             watchedSeconds: options.watchEvent.watchedSeconds,
             completionRate: options.watchEvent.completionRate,
@@ -137,10 +146,47 @@ const buildInterestUpdate = (item, weight, options = {}) => {
         ],
         $slice: -200,
       },
+      ...(update.$push || {}),
     };
   }
 
   return update;
+};
+
+const pruneViewerSignals = async (viewerId) => {
+  const user = await User.findById(viewerId).select("interests likedTopics favoriteCreators watchHistory").catch(() => null);
+
+  if (!user) {
+    return;
+  }
+
+  const updates = {};
+  const interests = user.interests instanceof Map ? Object.fromEntries(user.interests) : user.interests || {};
+  const interestEntries = Object.entries(interests)
+    .map(([topic, score]) => [normalizeTopic(topic), Number(score || 0)])
+    .filter(([topic, score]) => topic && Number.isFinite(score))
+    .sort((left, right) => Math.abs(right[1]) - Math.abs(left[1]))
+    .slice(0, 80);
+
+  if (Object.keys(interests).length > 80) {
+    updates.interests = Object.fromEntries(interestEntries);
+  }
+
+  if (Array.isArray(user.likedTopics) && user.likedTopics.length > 100) {
+    updates.likedTopics = uniqueTopics(user.likedTopics).slice(-100);
+  }
+
+  if (Array.isArray(user.favoriteCreators) && user.favoriteCreators.length > 100) {
+    updates.favoriteCreators = user.favoriteCreators.slice(-100);
+  }
+
+  if (Array.isArray(user.watchHistory) && user.watchHistory.length > 200) {
+    updates.watchHistory = user.watchHistory.slice(-200);
+  }
+
+  if (Object.keys(updates).length) {
+    await User.findByIdAndUpdate(viewerId, { $set: updates }, { runValidators: true }).catch(() => null);
+  }
 };
 
 const updateViewerInterests = async (viewer, item, weight, options = {}) => {
@@ -157,6 +203,7 @@ const updateViewerInterests = async (viewer, item, weight, options = {}) => {
   }
 
   await User.findByIdAndUpdate(viewerId, update, { runValidators: true }).catch(() => null);
+  pruneViewerSignals(viewerId).catch(() => null);
 };
 
 const viewMetricsFromBody = (body = {}, item = {}) => {
@@ -198,6 +245,7 @@ const buildProfile = (user, viewer = null) => {
   return {
     _id: user?._id,
     name: user?.name || "VibeBook user",
+    username: user?.username || user?.name || "",
     role: user?.role || "",
     category: user?.category || "",
     skills: Array.isArray(user?.skills) ? user.skills : [],
@@ -268,6 +316,9 @@ const serializeFeedItem = (item, viewer = null, virtual = false, options = {}) =
     commentCount: Array.isArray(item.comments) ? item.comments.length : 0,
     commentsCount: Array.isArray(item.comments) ? item.comments.length : 0,
     shareCount: Number(item.shareCount || 0),
+    visibility: item.visibility || "public",
+    commentsEnabled: item.commentsEnabled !== false,
+    category: item.category || item.aiMetadata?.category || "",
     skips: Number(item.skips || 0),
     reports: Number(item.reports || 0),
     notInterestedCount: Number(item.notInterestedCount || 0),
@@ -376,6 +427,7 @@ const getFeed = async (req, res, next) => {
 
     const query = {
       mediaUrl: cloudinaryMediaQuery,
+      $or: [{ visibility: "public" }, { visibility: { $exists: false } }],
       ...(followingOnly ? { userId: { $in: Array.from(followedIds) } } : {}),
       ...(req.user?._id
         ? {
@@ -456,6 +508,7 @@ const getRecommendations = async (req, res, next) => {
     );
     const query = {
       mediaUrl: cloudinaryMediaQuery,
+      $or: [{ visibility: "public" }, { visibility: { $exists: false } }],
       likedBy: { $ne: requestedUserId },
       reportedBy: { $ne: requestedUserId },
       notInterestedBy: { $ne: requestedUserId },
@@ -521,6 +574,16 @@ const toggleFeedLike = async (req, res, next) => {
         addMonetizationScore(item.userId, "like"),
         updateViewerInterests(req.user, item, 8, { addLikedTopics: true }),
       ]);
+
+      queueNotification({
+        userId: idOf(item.userId),
+        type: "like",
+        title: "New like",
+        message: `${req.user.name || "Someone"} liked your post`,
+        actorId: req.user._id,
+        postId: item._id,
+        dedupeKey: `post-like:${item._id}:${req.user._id}`,
+      });
     }
 
     return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: liked ? "Like removed" : "Liked" });
@@ -547,6 +610,10 @@ const addFeedComment = async (req, res, next) => {
       return res.status(404).json({ message: "Feed item not found" });
     }
 
+    if (item.commentsEnabled === false) {
+      return res.status(403).json({ message: "Comments are turned off for this post" });
+    }
+
     item.comments.push({
       userId: req.user._id,
       name: req.user.name,
@@ -556,6 +623,21 @@ const addFeedComment = async (req, res, next) => {
     await item.save();
     await item.populate("userId", userSelect);
     await updateViewerInterests(req.user, item, 6, { addLikedTopics: true });
+
+    if (idOf(item.userId) !== idOf(req.user._id)) {
+      const comment = item.comments[item.comments.length - 1];
+
+      queueNotification({
+        userId: idOf(item.userId),
+        type: "comment",
+        title: "New comment",
+        message: `${req.user.name || "Someone"} commented on your post`,
+        actorId: req.user._id,
+        postId: item._id,
+        data: { commentId: comment?._id?.toString?.() || "" },
+        dedupeKey: `post-comment:${comment?._id || `${item._id}:${req.user._id}:${Date.now()}`}`,
+      });
+    }
 
     return res.status(201).json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: "Comment added" });
   } catch (error) {
@@ -606,6 +688,7 @@ const incrementPostView = async (req, res, next) => {
     if (req.user?._id) {
       const interestWeight = metrics.skipped ? -2 : 2 + metrics.completionRate * 8 + metrics.replays * 4;
       await updateViewerInterests(req.user, item, interestWeight, {
+        addFavoriteCreator: metrics.completionRate >= 0.6 || metrics.replays > 0,
         watchEvent: {
           watchedSeconds: metrics.watchedSeconds,
           completionRate: metrics.completionRate,
@@ -736,8 +819,89 @@ const recordPostFeedback = async (req, res, next) => {
   }
 };
 
+const editPost = async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Valid post id is required" });
+    }
+
+    const item = await Feed.findById(req.params.id);
+
+    if (!item || !hasMediaUrl(item.mediaUrl)) {
+      return res.status(404).json({ message: "Feed item not found" });
+    }
+
+    // Only post owner can edit
+    const userId = idOf(req.user._id);
+    const postOwner = idOf(item.userId);
+    if (userId !== postOwner) {
+      return res.status(403).json({ message: "You can only edit your own posts" });
+    }
+
+    // Only update metadata, not media
+    const updates = {};
+
+    if (req.body.caption !== undefined) {
+      const caption = String(req.body.caption || "").trim().slice(0, 500);
+      updates.caption = caption;
+    }
+
+    if (req.body.tags !== undefined) {
+      let tags = req.body.tags;
+      if (typeof tags === "string") {
+        tags = tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean).slice(0, 10);
+      } else if (Array.isArray(tags)) {
+        tags = tags.map((t) => String(t || "").trim().toLowerCase()).filter(Boolean).slice(0, 10);
+      } else {
+        tags = [];
+      }
+      updates.tags = uniqueTopics(tags);
+    }
+
+    if (req.body.visibility !== undefined) {
+      const visibility = String(req.body.visibility || "public").trim().toLowerCase();
+      if (["public", "private", "draft"].includes(visibility)) {
+        updates.visibility = visibility;
+      }
+    }
+
+    if (req.body.category !== undefined) {
+      const category = String(req.body.category || "").trim();
+      updates.category = category;
+    }
+
+    if (req.body.commentsEnabled !== undefined) {
+      updates.commentsEnabled = req.body.commentsEnabled === true || req.body.commentsEnabled === "true";
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ message: "No valid updates provided" });
+    }
+
+    updates.updatedAt = new Date();
+
+    const updatedItem = await Feed.findByIdAndUpdate(req.params.id, { $set: updates }, {
+      returnDocument: "after",
+      runValidators: true,
+    }).populate("userId", userSelect);
+
+    if (!updatedItem) {
+      return res.status(404).json({ message: "Failed to update post" });
+    }
+
+    return res.json({
+      feedItem: serializeFeedItem(updatedItem, req.user, false, { req }),
+      message: "Post updated successfully",
+    });
+  } catch (error) {
+    console.error(`[post:edit] ${error.message}`);
+    return next(error);
+  }
+};
+
 module.exports = {
   addFeedComment,
+  editPost,
   getFeed,
   getRecommendations,
   incrementPostView,

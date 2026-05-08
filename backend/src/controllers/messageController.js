@@ -2,6 +2,7 @@ const Message = require("../models/Message");
 const Booking = require("../models/Booking");
 const User = require("../models/User");
 const { getIo, isUserOnline } = require("../socket");
+const { createNotification } = require("../utils/notifications");
 const {
   PLATFORM_ACCESS_AMOUNT,
   PLATFORM_ACCESS_CURRENCY,
@@ -11,6 +12,12 @@ const {
 
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
 const getMessageText = (body = {}) => trimText(body.message || body.text);
+
+const queueNotification = (payload) => {
+  createNotification(payload).catch((error) => {
+    console.error(`[notification:message] ${error.message}`);
+  });
+};
 
 const requireMessageAccess = (req, res) => {
   return true;
@@ -298,6 +305,15 @@ const sendDirectMessage = async (req, res, next) => {
       deliveredAt: populatedMessage.deliveredAt,
     });
     await emitUnreadCount(recipient._id);
+    queueNotification({
+      userId: recipient._id,
+      type: "message",
+      title: "New message",
+      message: `${req.user.name || "Someone"} sent you a message`,
+      actorId: req.user._id,
+      messageId: populatedMessage._id,
+      dedupeKey: `message:${populatedMessage._id}`,
+    });
 
     return res.status(201).json({
       message: "Message sent",
@@ -415,6 +431,15 @@ const replyToMessage = async (req, res, next) => {
     io?.to(idOf(recipient)).emit("receive_message", realtimeMessage);
     io?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
     await emitUnreadCount(recipient);
+    queueNotification({
+      userId: recipient,
+      type: "message",
+      title: "New message",
+      message: `${req.user.name || "Someone"} replied to you`,
+      actorId: req.user._id,
+      messageId: populatedReply._id,
+      dedupeKey: `message:${populatedReply._id}`,
+    });
 
     return res.status(201).json({ inboxMessage: populatedReply });
   } catch (error) {

@@ -97,7 +97,20 @@ export const feedApi = {
   share: (id) => API.post(`/posts/${id}/share`),
   save: (id) => API.post(`/posts/${id}/save`),
   feedback: (id, payload) => API.post(`/posts/${id}/feedback`, payload),
+  edit: (id, payload) => API.patch(`/posts/${id}/edit`, payload),
   recommendations: (userId, params = {}) => API.get(`/recommendations/${userId}`, { params }),
+};
+
+export const creatorApi = {
+  dashboard: () => API.get("/creator/dashboard"),
+};
+
+export const notificationApi = {
+  list: (params = {}) => API.get("/notifications", { params }),
+  unreadCount: () => API.get("/notifications/unread-count"),
+  markRead: (id) => API.patch(`/notifications/${id}/read`),
+  markAllRead: () => API.patch("/notifications/read/all"),
+  delete: (id) => API.delete(`/notifications/${id}`),
 };
 
 export const exploreApi = {

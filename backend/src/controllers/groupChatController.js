@@ -6,11 +6,28 @@ const GroupMessage = require("../models/GroupMessage");
 const User = require("../models/User");
 const { getIo, isUserOnline } = require("../socket");
 const { sanitizeChatMessage, validateChatMessage } = require("../utils/chatModeration");
+const { createNotification } = require("../utils/notifications");
 
 const memberSelect = "name role profileImage profilePicture images gallery";
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 const isProduction = process.env.NODE_ENV === "production";
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
+
+const queueNotification = (payload) => {
+  createNotification(payload).catch((error) => {
+    console.error(`[notification:group] ${error.message}`);
+  });
+};
+
+const textMentionsName = (text = "", name = "") => {
+  const safeName = trimText(name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  if (!safeName) {
+    return false;
+  }
+
+  return new RegExp(`(^|\\s)@${safeName}(?=\\s|$|[.,!?])`, "i").test(text);
+};
 
 const logServerError = (scope, error) => {
   const message = error?.message || "Unexpected error";
@@ -384,6 +401,28 @@ const sendGroupMessage = async (req, res) => {
       groupId: group._id,
       message: messagePayload,
     });
+
+    User.find({ _id: { $in: group.members }, isBlocked: false })
+      .select("name")
+      .then((members) => {
+        members
+          .filter((member) => normalizeId(member._id) !== normalizeId(req.user._id))
+          .forEach((member) => {
+            const mentioned = textMentionsName(validation.message, member.name);
+
+            queueNotification({
+              userId: member._id,
+              type: mentioned ? "mention" : "group_message",
+              title: mentioned ? "You were mentioned" : "New group message",
+              message: `${req.user.name || "Someone"} posted in ${group.groupName || group.name || "a group"}`,
+              actorId: req.user._id,
+              groupId: group._id,
+              data: { groupMessageId: groupMessage._id?.toString?.() || "" },
+              dedupeKey: `${mentioned ? "mention" : "group-message"}:${groupMessage._id}:${member._id}`,
+            });
+          });
+      })
+      .catch((error) => logServerError("group:notify", error));
 
     return res.status(201).json({ groupMessage: messagePayload, message: "Message sent" });
   } catch (error) {

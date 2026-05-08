@@ -1,3 +1,4 @@
+// @ts-nocheck
 const bcrypt = require("bcryptjs");
 
 const Booking = require("../models/Booking");
@@ -11,6 +12,7 @@ const {
 } = require("../utils/accessControl");
 const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
+const { createNotification } = require("../utils/notifications");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const {
   isCloudinarySecureUrl,
@@ -83,6 +85,12 @@ const hasPaidForProfile = (viewer, profileId) => {
 
 const sameId = (left, right) => {
   return Boolean(left && right && left.toString() === right.toString());
+};
+
+const queueNotification = (payload) => {
+  createNotification(payload).catch((error) => {
+    console.error(`[notification:user] ${error.message}`);
+  });
 };
 
 const hasId = (items, id) => {
@@ -250,6 +258,9 @@ const serializeProfilePost = (post, viewer = null, req = null) => {
     commentCount: Array.isArray(post.comments) ? post.comments.length : 0,
     commentsCount: Array.isArray(post.comments) ? post.comments.length : 0,
     shareCount: Number(post.shareCount || 0),
+    visibility: post.visibility || "public",
+    commentsEnabled: post.commentsEnabled !== false,
+    category: post.category || post.aiMetadata?.category || "",
     emotion: post.emotion || post.aiMetadata?.emotion || "neutral",
     distributionStage: post.distributionStage || "test",
     score: Number(post.viralScore || post.engagementScore || 0),
@@ -259,9 +270,11 @@ const serializeProfilePost = (post, viewer = null, req = null) => {
 
 const getProfilePosts = async (user, viewer = null, req = null) => {
   await ensureProfilePosts(user);
+  const isOwner = sameId(viewer?._id, user._id);
   const posts = await Feed.find({
     userId: user._id,
     mediaUrl: cloudinaryMediaQuery,
+    ...(isOwner ? {} : { $or: [{ visibility: "public" }, { visibility: { $exists: false } }] }),
   })
     .sort({ createdAt: -1 })
     .limit(100);
@@ -293,6 +306,10 @@ const profileResponse = (user, viewer = null, options = {}) => {
   const posts = Array.isArray(options.posts) && isUnlocked ? options.posts : [];
   const socialLinks = {
     instagram: user.socialLinks?.instagram || "",
+    tiktok: user.socialLinks?.tiktok || "",
+    youtube: user.socialLinks?.youtube || "",
+    x: user.socialLinks?.x || "",
+    website: user.socialLinks?.website || user.website || "",
     whatsapp: contactUnlocked ? user.whatsapp || user.whatsappNumber || user.socialLinks?.whatsapp || "" : "",
   };
   const followerCount = Array.isArray(user.followers) ? user.followers.length : 0;
@@ -301,8 +318,8 @@ const profileResponse = (user, viewer = null, options = {}) => {
   return {
     _id: user._id,
     name: user.name,
-    username: user.name,
-    email: contactUnlocked ? user.email || "" : "",
+    username: user.username || user.name,
+    email: user.publicEmail || contactUnlocked ? user.email || "" : "",
     role: user.role,
     accountRole: options.includePrivate ? user.accountRole || (user.role === "admin" ? "admin" : "user") : undefined,
     protected: options.includePrivate ? Boolean(user.protected || user.role === "admin") : undefined,
@@ -320,6 +337,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     district: user.district,
     profileImage,
     profilePicture: profileImage,
+    coverImage: user.coverImage || "",
     images: visibleImages,
     gallery: visibleImages,
     galleryImageCount: storedImages.length,
@@ -335,6 +353,11 @@ const profileResponse = (user, viewer = null, options = {}) => {
     posts,
     postCount: Number(options.postCount ?? options.posts?.length ?? posts.length),
     bio: isUnlocked ? user.bio : "",
+    website: user.website || user.socialLinks?.website || "",
+    profileTheme: user.profileTheme || "classic",
+    creatorCategory: user.creatorCategory || user.category || "",
+    creatorSkills: Array.isArray(user.creatorSkills) ? user.creatorSkills : [],
+    publicEmail: Boolean(user.publicEmail),
     socialLinks,
     availability: user.availability,
     rating: user.averageRating || user.rating || 0,
@@ -380,6 +403,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     contactUnlockCurrency: CONTACT_UNLOCK_CURRENCY,
     language: options.includePrivate ? user.language || "en" : undefined,
     notificationEnabled: options.includePrivate ? user.notificationEnabled !== false : undefined,
+    usernameHistory: options.includePrivate ? user.usernameHistory || [] : undefined,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -410,6 +434,14 @@ const getUserById = async (req, res, next) => {
     const bookingStarted = await hasBookingOrPaymentAccess(req.user, user._id);
 
     const posts = await getProfilePosts(user, req.user, req);
+
+    if (req.user?._id && !sameId(req.user._id, user._id)) {
+      User.findByIdAndUpdate(req.user._id, {
+        $push: {
+          favoriteCreators: { $each: [user._id], $slice: -100 },
+        },
+      }).catch(() => null);
+    }
 
     return res.json({ user: profileResponse(user, req.user, { bookingStarted, posts, postCount: posts.length }) });
   } catch (error) {
@@ -554,6 +586,51 @@ const searchUsers = async (req, res, next) => {
 const updateProfile = async (req, res, next) => {
   try {
     const { data: updates, errors } = normalizeProfileFields(req.body);
+
+    // Validate and sanitize new fields
+    if (req.body.username) {
+      const username = String(req.body.username || "").trim().toLowerCase();
+      if (username.length < 3 || username.length > 30) {
+        return res.status(400).json({ message: "Username must be 3-30 characters long" });
+      }
+      if (!/^[a-z0-9_-]+$/.test(username)) {
+        return res.status(400).json({ message: "Username can only contain letters, numbers, hyphens, and underscores" });
+      }
+      // Check for duplicate username (excluding current user)
+      const existingUser = await User.findOne({ username, _id: { $ne: req.user._id } });
+      if (existingUser) {
+        return res.status(400).json({ message: "Username already taken" });
+      }
+      updates.username = username;
+
+      if (req.user.username && req.user.username !== username) {
+        updates.usernameHistory = Array.from(new Set([...(req.user.usernameHistory || []), req.user.username])).slice(-10);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "bio")) {
+      const bio = normalizeText(req.body.bio || "").slice(0, 200);
+      updates.bio = bio;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "website")) {
+      updates.website = normalizeText(req.body.website || "").slice(0, 200);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "profileTheme")) {
+      updates.profileTheme = normalizeText(req.body.profileTheme || "classic").slice(0, 40) || "classic";
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "creatorCategory")) {
+      updates.creatorCategory = normalizeText(req.body.creatorCategory || "").slice(0, 80);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "coverImage")) {
+      const coverImage = String(req.body.coverImage || "").trim();
+      if (!coverImage || isCloudinarySecureUrl(normalizeStoredUploadPath(coverImage))) {
+        updates.coverImage = coverImage;
+      }
+    }
 
     if (!updates.name && !req.user.name) {
       errors.push("Name is required");
@@ -754,6 +831,14 @@ const likeProfile = async (req, res, next) => {
 
     if (!alreadyLiked) {
       await addMonetizationScore(user._id, "like");
+      queueNotification({
+        userId: user._id,
+        type: "like",
+        title: "New profile like",
+        message: `${req.user.name || "Someone"} liked your profile`,
+        actorId: req.user._id,
+        dedupeKey: `profile-like:${user._id}:${req.user._id}`,
+      });
     }
 
     return res.json({ user: profileResponse(user, req.user), message: "Profile liked" });
@@ -812,6 +897,19 @@ const followProfile = async (req, res, next) => {
 
     if (!alreadyFollowing) {
       await addMonetizationScore(target._id, "follower");
+      User.findByIdAndUpdate(req.user._id, {
+        $push: {
+          favoriteCreators: { $each: [target._id], $slice: -100 },
+        },
+      }).catch(() => null);
+      queueNotification({
+        userId: target._id,
+        type: "follow",
+        title: "New follower",
+        message: `${req.user.name || "Someone"} followed you`,
+        actorId: req.user._id,
+        dedupeKey: `follow:${target._id}:${req.user._id}`,
+      });
     }
 
     const [viewer, user] = await Promise.all([

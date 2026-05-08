@@ -1,9 +1,11 @@
 // @ts-nocheck
-import { BadgeCheck, CreditCard, Eye, Gift, Heart, Lock, Mail, MessageCircle, Phone, Rocket, Send, Share2, Sparkles, Star, UserMinus, UserPlus, X } from "lucide-react";
+import { BadgeCheck, CreditCard, Eye, Gift, Heart, Lock, Mail, MessageCircle, Pencil, Phone, Rocket, Send, Share2, Sparkles, Star, UserMinus, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
+import EditProfileModal from "../components/EditProfileModal.jsx";
+import EditVideoModal from "../components/EditVideoModal.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { bookingApi, feedApi, mediaUrl, paymentApi, ratingApi, userApi } from "../services/api";
 import { usePostStore } from "../store/postStore";
@@ -126,6 +128,8 @@ const Profile = () => {
   const [viewedPosts, setViewedPosts] = useState(new Set());
   const [profileCommentOpen, setProfileCommentOpen] = useState("");
   const [profileCommentText, setProfileCommentText] = useState("");
+  const [profileEditOpen, setProfileEditOpen] = useState(false);
+  const [editingPost, setEditingPost] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -173,6 +177,8 @@ const Profile = () => {
     setViewedPosts(new Set());
     setProfileCommentOpen("");
     setProfileCommentText("");
+    setProfileEditOpen(false);
+    setEditingPost(null);
   }, [id, currentUser]);
 
   useEffect(() => {
@@ -343,6 +349,14 @@ const Profile = () => {
       ...current,
       posts: (current?.posts || []).map((post) => (post._id === nextPost._id ? { ...post, ...nextPost } : post)),
     }));
+  };
+
+  const handleProfileSaved = async (nextUser) => {
+    if (nextUser) {
+      setUser((current) => ({ ...current, ...nextUser }));
+    }
+
+    await refreshProfile();
   };
 
   const handlePostLike = async (post) => {
@@ -767,7 +781,7 @@ const Profile = () => {
                             {post.tags.slice(0, 5).map((tag) => `#${tag}`).join(" ")}
                           </p>
                         )}
-                        <div className={`mt-3 grid gap-2 text-xs font-bold text-slate-600 ${isOwnProfile ? "grid-cols-5" : "grid-cols-4"}`}>
+                        <div className={`mt-3 grid gap-2 text-xs font-bold text-slate-600 ${isOwnProfile ? "grid-cols-6" : "grid-cols-4"}`}>
                           <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2" onClick={() => handlePostLike(post)}>
                             <Heart className={`h-4 w-4 ${post.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
                             {Number(post.likes || post.likeCount || 0)}
@@ -794,8 +808,14 @@ const Profile = () => {
                               Boost
                             </button>
                           )}
+                          {isOwnProfile && (
+                            <button type="button" className="flex items-center gap-1 rounded-lg bg-white px-2 py-2 text-navy" onClick={() => setEditingPost(post)}>
+                              <Pencil className="h-4 w-4" />
+                              Edit
+                            </button>
+                          )}
                         </div>
-                        {profileCommentOpen === post._id && (
+                        {profileCommentOpen === post._id && post.commentsEnabled !== false && (
                           <form className="mt-3 flex gap-2" onSubmit={(event) => handlePostComment(event, post)}>
                             <input
                               className="field min-w-0 flex-1"
@@ -888,6 +908,12 @@ const Profile = () => {
             </div>
 
             <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {isOwnProfile && (
+                <button type="button" className="btn-primary gap-2" onClick={() => setProfileEditOpen(true)}>
+                  <Pencil className="h-4 w-4" />
+                  Edit Profile
+                </button>
+              )}
               {!isOwnProfile && (
                 <button
                   type="button"
@@ -1145,6 +1171,26 @@ const Profile = () => {
           )}
         </div>
       </div>
+
+      {profileEditOpen && (
+        <EditProfileModal
+          user={user}
+          onClose={() => setProfileEditOpen(false)}
+          onSave={handleProfileSaved}
+        />
+      )}
+
+      {editingPost && (
+        <EditVideoModal
+          post={editingPost}
+          onClose={() => setEditingPost(null)}
+          onSave={(nextPost) => {
+            if (nextPost) {
+              replaceProfilePost(nextPost);
+            }
+          }}
+        />
+      )}
 
       {previewImage && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">

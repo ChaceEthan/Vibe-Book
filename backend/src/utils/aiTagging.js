@@ -1,3 +1,4 @@
+// @ts-nocheck
 const { normalizeTopic, uniqueTopics } = require("./feedRanking");
 
 const DEFAULT_METADATA = Object.freeze({

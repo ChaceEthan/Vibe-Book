@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {
+  BarChart3,
   Compass,
   Home,
   LogIn,
@@ -13,6 +14,7 @@ import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import Upload from "./Upload.jsx";
+import NotificationBell from "./NotificationBell.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { messageApi } from "../services/api";
@@ -44,6 +46,7 @@ const Navbar = () => {
       { to: "/", label: "Home", icon: Home },
       { to: "/explore", label: "Explore", icon: Compass },
       { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
+      { to: isAuthenticated ? "/creator-studio" : "/login", label: "Creator Studio", icon: BarChart3 },
       { to: isAuthenticated ? "/dashboard" : "/login", label: "Profile", icon: User },
     ],
     [isAuthenticated, unreadCount]
@@ -207,6 +210,47 @@ const Navbar = () => {
             <span className="truncate text-lg font-black text-navy">VibeBook</span>
           </Link>
 
+          <div className="hidden min-w-0 items-center gap-1 md:flex">
+            {navItems.slice(0, 2).map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.label}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition ${
+                      isActive ? "bg-brand/15 text-navy" : "text-slate-600 hover:bg-slate-100"
+                    }`
+                  }
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="hidden lg:inline">{item.label}</span>
+                </NavLink>
+              );
+            })}
+            <button type="button" className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100" onClick={() => openUpload("image")}>
+              <Plus className="h-4 w-4" />
+              <span className="hidden lg:inline">Upload</span>
+            </button>
+            {navItems.slice(2).map((item) => {
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.label}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-bold transition ${
+                      isActive ? "bg-brand/15 text-navy" : "text-slate-600 hover:bg-slate-100"
+                    }`
+                  }
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="hidden lg:inline">{item.label}</span>
+                </NavLink>
+              );
+            })}
+          </div>
+
           <div className="flex items-center gap-2">
             <select
               className="hidden rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 sm:block"
@@ -222,6 +266,7 @@ const Navbar = () => {
             </select>
             {isAuthenticated ? (
               <>
+                <NotificationBell />
                 {(user?.role === "admin" || user?.accountRole === "admin") && (
                   <Link to="/admin" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Admin">
                     <User className="h-5 w-5" />
@@ -246,7 +291,7 @@ const Navbar = () => {
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-3 pb-[calc(0.6rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="mx-auto grid max-w-lg grid-cols-5 items-end gap-1">
+        <div className="mx-auto grid max-w-xl grid-cols-6 items-end gap-1">
           {navItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
@@ -259,11 +304,11 @@ const Navbar = () => {
 
           <button
             type="button"
-            className="-mt-8 flex flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-bold text-navy"
+            className="flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-bold text-navy"
             onClick={() => openUpload("image")}
           >
-            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-brand text-navy shadow-lg ring-4 ring-white">
-              <Plus className="h-8 w-8" />
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand text-navy shadow-lg ring-4 ring-white">
+              <Plus className="h-5 w-5" />
             </span>
             <span>Upload</span>
           </button>

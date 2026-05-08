@@ -225,6 +225,84 @@ const feedSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    viewedBy: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        viewedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        watchedSeconds: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        completionRate: {
+          type: Number,
+          default: 0,
+          min: 0,
+          max: 1,
+        },
+      },
+    ],
+    uniqueViewerCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    lastViewedAt: {
+      type: Date,
+    },
+    ownerViewTracked: {
+      type: Boolean,
+      default: false,
+    },
+    visibility: {
+      type: String,
+      enum: ["public", "private", "draft"],
+      default: "public",
+      index: true,
+    },
+    commentsEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    category: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    monetized: {
+      type: Boolean,
+      default: false,
+    },
+    adSafe: {
+      type: Boolean,
+      default: true,
+    },
+    copyrightSafe: {
+      type: Boolean,
+      default: true,
+    },
+    rpm: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    cpm: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    revenueGenerated: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     comments: {
       type: [feedCommentSchema],
       default: [],
@@ -239,5 +317,6 @@ const feedSchema = new mongoose.Schema(
 feedSchema.index({ userId: 1, mediaUrl: 1 }, { unique: true });
 feedSchema.index({ type: 1, viralScore: -1, createdAt: -1 });
 feedSchema.index({ tags: 1, createdAt: -1 });
+feedSchema.index({ visibility: 1, type: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Feed", feedSchema);

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Suspense, lazy } from "react";
 
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
@@ -17,6 +18,8 @@ import Profile from "./pages/Profile.jsx";
 import Register from "./pages/Register.jsx";
 import Search from "./pages/Search.jsx";
 import Settings from "./pages/Settings.jsx";
+
+const CreatorDashboard = lazy(() => import("./components/CreatorDashboard.jsx"));
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -93,6 +96,22 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Chat />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/creator-studio"
+            element={
+              <ProtectedRoute>
+                <Suspense
+                  fallback={
+                    <div className="container-page flex min-h-[60vh] items-center justify-center">
+                      <p className="text-sm font-medium text-slate-500">Loading Creator Studio...</p>
+                    </div>
+                  }
+                >
+                  <CreatorDashboard />
+                </Suspense>
               </ProtectedRoute>
             }
           />

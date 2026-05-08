@@ -10,6 +10,7 @@ const Message = require("./models/Message");
 const User = require("./models/User");
 const VisitorStat = require("./models/VisitorStat");
 const { validateChatMessage } = require("./utils/chatModeration");
+const { createNotification } = require("./utils/notifications");
 
 let ioInstance = null;
 const onlineUsers = new Map();
@@ -78,6 +79,20 @@ const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
 const normalizeObjectId = (value) => {
   const id = value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
   return mongoose.isValidObjectId(id) ? id : "";
+};
+const queueNotification = (payload) => {
+  createNotification(payload).catch((error) => {
+    logSocketError("socket:notification", error);
+  });
+};
+const textMentionsName = (text = "", name = "") => {
+  const safeName = String(name || "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  if (!safeName) {
+    return false;
+  }
+
+  return new RegExp(`(^|\\s)@${safeName}(?=\\s|$|[.,!?])`, "i").test(text);
 };
 
 const serializeDirectMessage = (message) => ({
@@ -372,6 +387,15 @@ const initSocket = (server, corsOptions = {}) => {
           deliveredAt: directMessage.deliveredAt,
         });
         await emitUnreadCount(receiver._id);
+        queueNotification({
+          userId: receiver._id,
+          type: "message",
+          title: "New message",
+          message: `${socket.user.name || "Someone"} sent you a message`,
+          actorId: socket.user._id,
+          messageId: directMessage._id,
+          dedupeKey: `message:${directMessage._id}`,
+        });
         callback?.({ success: true, message: "Message sent", data: messagePayload });
       } catch (error) {
         logSocketError("socket:send_message", error);
@@ -549,6 +573,27 @@ const initSocket = (server, corsOptions = {}) => {
           groupId: group._id,
           message: messagePayload,
         });
+        User.find({ _id: { $in: group.members }, isBlocked: false })
+          .select("name")
+          .then((members) => {
+            members
+              .filter((member) => idOf(member._id) !== userId)
+              .forEach((member) => {
+                const mentioned = textMentionsName(validation.message, member.name);
+
+                queueNotification({
+                  userId: member._id,
+                  type: mentioned ? "mention" : "group_message",
+                  title: mentioned ? "You were mentioned" : "New group message",
+                  message: `${socket.user.name || "Someone"} posted in ${group.groupName || group.name || "a group"}`,
+                  actorId: socket.user._id,
+                  groupId: group._id,
+                  data: { groupMessageId: groupMessage._id?.toString?.() || "" },
+                  dedupeKey: `${mentioned ? "mention" : "group-message"}:${groupMessage._id}:${member._id}`,
+                });
+              });
+          })
+          .catch((error) => logSocketError("socket:group_notification", error));
         callback?.({ success: true, message: "Message sent", data: messagePayload });
       } catch (error) {
         if (!error?.vibeBookLogged) {

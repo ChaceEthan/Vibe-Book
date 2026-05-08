@@ -169,6 +169,10 @@ const normalizeSocialLinks = (value) => {
     value: {
       whatsapp: normalizeText(value.whatsapp),
       instagram: normalizeText(value.instagram),
+      tiktok: normalizeText(value.tiktok),
+      youtube: normalizeText(value.youtube),
+      x: normalizeText(value.x || value.twitter),
+      website: normalizeText(value.website),
     },
   };
 };
@@ -235,11 +239,22 @@ const normalizeProfileFields = (body, options = {}) => {
       .slice(0, 20);
   }
 
-  ["phone", "whatsappNumber", "whatsapp", "location", "province", "district", "bio"].forEach((field) => {
+  ["phone", "whatsappNumber", "whatsapp", "location", "province", "district", "bio", "website", "profileTheme", "creatorCategory"].forEach((field) => {
     if (hasOwn(body, field)) {
       data[field] = normalizeText(body[field]);
     }
   });
+
+  if (hasOwn(body, "creatorSkills")) {
+    data.creatorSkills = normalizeStringArray(body.creatorSkills)
+      .map((skill) => skill.replace(/^#/, "").trim())
+      .filter(Boolean)
+      .slice(0, 25);
+  }
+
+  if (hasOwn(body, "publicEmail")) {
+    data.publicEmail = body.publicEmail === true || body.publicEmail === "true";
+  }
 
   if (hasOwn(data, "whatsapp") && !hasOwn(data, "whatsappNumber")) {
     data.whatsappNumber = data.whatsapp;
