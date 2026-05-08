@@ -70,7 +70,50 @@ const feedSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    watchTime: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    completionRate: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 1,
+    },
+    replays: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    engagementScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    viralScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      index: true,
+    },
+    trendScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+      index: true,
+    },
+    engagementVelocity: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     shareCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    saves: {
       type: Number,
       default: 0,
       min: 0,
@@ -79,6 +122,76 @@ const feedSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    skips: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    reports: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    notInterestedCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    emotion: {
+      type: String,
+      trim: true,
+      default: "neutral",
+      index: true,
+    },
+    distributionStage: {
+      type: String,
+      enum: ["test", "expansion_1k", "expansion_10k", "viral"],
+      default: "test",
+      index: true,
+    },
+    lastEngagementAt: {
+      type: Date,
+    },
+    aiMetadata: {
+      topics: {
+        type: [String],
+        default: [],
+      },
+      emotion: {
+        type: String,
+        trim: true,
+        default: "neutral",
+      },
+      language: {
+        type: String,
+        trim: true,
+        default: "unknown",
+      },
+      hashtags: {
+        type: [String],
+        default: [],
+      },
+      category: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      moderation: {
+        type: String,
+        trim: true,
+        default: "pending",
+      },
+      transcript: {
+        type: String,
+        trim: true,
+        default: "",
+      },
+      subtitleUrl: {
+        type: String,
+        trim: true,
+        default: "",
+      },
     },
     boostedUntil: {
       type: Date,
@@ -89,6 +202,24 @@ const feedSchema = new mongoose.Schema(
       min: 0,
     },
     likedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    savedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    reportedBy: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    notInterestedBy: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
@@ -106,5 +237,7 @@ const feedSchema = new mongoose.Schema(
 );
 
 feedSchema.index({ userId: 1, mediaUrl: 1 }, { unique: true });
+feedSchema.index({ type: 1, viralScore: -1, createdAt: -1 });
+feedSchema.index({ tags: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Feed", feedSchema);

@@ -39,13 +39,15 @@ const chatGroupSchema = new mongoose.Schema(
   }
 );
 
-chatGroupSchema.pre("validate", function syncGroupAliases(next) {
-  if (!this.groupName && this.name) {
-    this.groupName = this.name;
+const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+
+chatGroupSchema.methods.syncGroupAliases = function () {
+  if (this.groupName && !this.name) {
+    this.name = this.groupName;
   }
 
-  if (!this.name && this.groupName) {
-    this.name = this.groupName;
+  if (this.name && !this.groupName) {
+    this.groupName = this.name;
   }
 
   if (!this.createdBy && this.adminId) {
@@ -56,7 +58,19 @@ chatGroupSchema.pre("validate", function syncGroupAliases(next) {
     this.adminId = this.createdBy;
   }
 
-  next();
+  if (!Array.isArray(this.members)) {
+    this.members = [];
+  }
+
+  this.members = Array.from(new Set(this.members.map(idOf).filter(Boolean)));
+};
+
+chatGroupSchema.pre("validate", function () {
+  this.syncGroupAliases();
+});
+
+chatGroupSchema.pre("save", function () {
+  this.syncGroupAliases();
 });
 
 module.exports = mongoose.model("ChatGroup", chatGroupSchema);

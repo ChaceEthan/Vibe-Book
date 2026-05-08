@@ -139,7 +139,7 @@ const Explore = () => {
           </p>
           <h1 className="mt-5 text-4xl font-black leading-tight md:text-6xl">Discover creators people are actually watching.</h1>
           <p className="mt-4 text-sm leading-6 text-white/70">
-            Trending uses views * 1 + likes * 3 + comments * 2, with separate premium and boost visibility inside the feed.
+            Trending now weighs watch time, completion, replays, shares, saves, comments, freshness, and small-creator momentum.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link to="/search" className="btn-primary">

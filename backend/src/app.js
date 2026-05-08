@@ -15,11 +15,13 @@ const uploadRoutes = require("./routes/uploadRoutes");
 const mediaRoutes = require("./routes/mediaRoutes");
 const chatRoutes = require("./routes/chatRoutes");
 const groupRoutes = require("./routes/groupRoutes");
+const creatorRoutes = require("./routes/creatorRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const feedRoutes = require("./routes/feedRoutes");
 const exploreRoutes = require("./routes/exploreRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
+const videoRoutes = require("./routes/videoRoutes");
 const { createBooking } = require("./controllers/bookingController");
 const { followProfile, getProfile, searchUsers, unfollowProfile, updateProfile } = require("./controllers/userController");
 const optionalAuthMiddleware = require("./middleware/optionalAuthMiddleware");
@@ -116,7 +118,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/groups", "/api/admin", "/api/bookings", "/api/payments"];
+  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/groups", "/api/creator", "/api/admin", "/api/bookings", "/api/payments"];
   if (privatePrefixes.some((prefix) => req.path.startsWith(prefix))) {
     res.set("Cache-Control", "no-store");
   } else {
@@ -141,6 +143,8 @@ app.post("/api/unfollow/:id", authMiddleware, unfollowProfile);
 app.get("/api/search", optionalAuthMiddleware, searchUsers);
 app.use("/api/feed", feedRoutes);
 app.use("/api/posts", feedRoutes);
+app.use("/api/creator", creatorRoutes);
+app.use("/api/videos", videoRoutes);
 app.use("/api/explore", exploreRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/upload", uploadLimiter, uploadRoutes);

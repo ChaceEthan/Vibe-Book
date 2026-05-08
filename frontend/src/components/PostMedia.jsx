@@ -20,22 +20,43 @@ const PostMedia = ({
 }) => {
   const mediaRef = useRef(null);
   const viewedRef = useRef(false);
+  const maxWatchedRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const replaysRef = useRef(0);
   const [failed, setFailed] = useState(false);
   const [isMuted, setIsMuted] = useState(Boolean(muted));
   const rawUrl = post?.url || "";
   const src = rawUrl ? mediaUrl(rawUrl) : "";
 
-  const markViewed = () => {
+  const metricsFor = (video, extra = {}) => {
+    const duration = Number.isFinite(video?.duration) ? video.duration : Number(post?.duration || 0);
+    const watchTime = Math.max(maxWatchedRef.current, Number(video?.currentTime || 0), 0);
+    const completionRate = duration > 0 ? Math.min(watchTime / duration, 1) : extra.completionRate || 0;
+
+    return {
+      watchTime: Number(watchTime.toFixed(2)),
+      duration: Number((duration || 0).toFixed(2)),
+      completionRate: Number(completionRate.toFixed(4)),
+      replays: replaysRef.current,
+      replayed: replaysRef.current > 0,
+      ...extra,
+    };
+  };
+
+  const markViewed = (metrics = {}) => {
     if (viewedRef.current) {
       return;
     }
 
     viewedRef.current = true;
-    onViewed?.();
+    onViewed?.(metrics);
   };
 
   useEffect(() => {
     viewedRef.current = false;
+    maxWatchedRef.current = 0;
+    lastTimeRef.current = 0;
+    replaysRef.current = 0;
     setFailed(false);
     setIsMuted(Boolean(muted));
   }, [muted, post?._id, rawUrl]);
@@ -117,7 +138,7 @@ const PostMedia = ({
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          markViewed();
+          markViewed({ watchTime: 1, duration: 1, completionRate: 1 });
           observer.disconnect();
         }
       },
@@ -153,10 +174,24 @@ const PostMedia = ({
           onLoadedMetadata={(event) => setIsMuted(event.currentTarget.muted)}
           onVolumeChange={(event) => setIsMuted(event.currentTarget.muted)}
           onTimeUpdate={(event) => {
-            if (event.currentTarget.currentTime >= 3) {
-              markViewed();
+            const video = event.currentTarget;
+            const currentTime = Number(video.currentTime || 0);
+            const duration = Number.isFinite(video.duration) ? video.duration : Number(post?.duration || 0);
+
+            if (lastTimeRef.current && currentTime + 1 < lastTimeRef.current) {
+              replaysRef.current += 1;
+            }
+
+            lastTimeRef.current = currentTime;
+            maxWatchedRef.current = Math.max(maxWatchedRef.current, currentTime);
+
+            const threshold = duration && duration <= 8 ? duration * 0.85 : 3;
+
+            if (currentTime >= Math.max(1, threshold)) {
+              markViewed(metricsFor(video));
             }
           }}
+          onEnded={(event) => markViewed(metricsFor(event.currentTarget, { completionRate: 1 }))}
           style={{ width: "100%", borderRadius: "12px" }}
         />
         <button
@@ -180,7 +215,7 @@ const PostMedia = ({
       onError={handleMediaError}
       onLoad={() => {
         if (!window.IntersectionObserver) {
-          markViewed();
+          markViewed({ watchTime: 1, duration: 1, completionRate: 1 });
         }
       }}
       loading="lazy"

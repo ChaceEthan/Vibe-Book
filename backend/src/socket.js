@@ -1,5 +1,6 @@
 // @ts-nocheck
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 
 const ChatMessage = require("./models/ChatMessage");
@@ -12,8 +13,29 @@ const { validateChatMessage } = require("./utils/chatModeration");
 
 let ioInstance = null;
 const onlineUsers = new Map();
+const isProduction = process.env.NODE_ENV === "production";
 
 const getDateKey = () => new Date().toISOString().slice(0, 10);
+const logSocketError = (scope, error) => {
+  const message = error?.message || "Unexpected socket error";
+
+  if (isProduction) {
+    console.error(`[${scope}] ${message}`);
+    return;
+  }
+
+  console.error(`[${scope}]`, error);
+};
+
+const saveSocketDocument = async (document, scope) => {
+  try {
+    return await document.save();
+  } catch (error) {
+    logSocketError(`${scope}:mongoose-save`, error);
+    error.vibeBookLogged = true;
+    throw error;
+  }
+};
 
 const getOnlineUsersCount = () => onlineUsers.size;
 
@@ -52,6 +74,10 @@ const removeOnlineUser = (userId, socketId) => {
 
 const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
+const normalizeObjectId = (value) => {
+  const id = value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
+  return mongoose.isValidObjectId(id) ? id : "";
+};
 
 const serializeDirectMessage = (message) => ({
   _id: message._id,
@@ -188,6 +214,7 @@ const initSocket = (server, corsOptions = {}) => {
       addOnlineUser(userId, socket.id);
       socket.join("global");
       socket.join(userId);
+      await joinUserGroupRooms(socket, userId);
       socket.data.activeGroupRoom = "";
       console.log(`Socket connected: ${userId}${socket.recovered ? " (recovered)" : ""}`);
       await emitStats();
@@ -285,7 +312,13 @@ const initSocket = (server, corsOptions = {}) => {
 
     socket.on("join_group", async (payload = {}, callback) => {
       try {
-        const groupId = payload.groupId?.toString?.() || payload?.toString?.() || "";
+        const groupId = normalizeObjectId(payload.groupId || payload);
+
+        if (!groupId) {
+          callback?.({ success: false, message: "Valid groupId is required" });
+          return;
+        }
+
         const group = await ChatGroup.findOne({ _id: groupId, isActive: true }).select("members");
 
         if (!group || !userIsGroupMember(group, userId)) {
@@ -308,28 +341,40 @@ const initSocket = (server, corsOptions = {}) => {
     });
 
     socket.on("leave_group", (payload = {}, callback) => {
-      const groupId = payload.groupId?.toString?.() || payload?.toString?.() || "";
+      try {
+        const groupId = normalizeObjectId(payload.groupId || payload);
 
-      if (!groupId) {
-        callback?.({ success: false, message: "groupId is required" });
-        return;
+        if (!groupId) {
+          callback?.({ success: false, message: "Valid groupId is required" });
+          return;
+        }
+
+        const room = groupRoomFor(groupId);
+        socket.leave(room);
+
+        if (socket.data.activeGroupRoom === room) {
+          socket.data.activeGroupRoom = "";
+        }
+
+        console.log(`[socket] ${userId} left group ${groupId}`);
+        callback?.({ success: true, groupId });
+      } catch (error) {
+        logSocketError("socket:leave_group", error);
+        callback?.({ success: false, message: "Unable to leave group room" });
       }
-
-      const room = groupRoomFor(groupId);
-      socket.leave(room);
-
-      if (socket.data.activeGroupRoom === room) {
-        socket.data.activeGroupRoom = "";
-      }
-
-      console.log(`[socket] ${userId} left group ${groupId}`);
-      callback?.({ success: true, groupId });
     });
 
     socket.on("send_group_message", async (payload = {}, callback) => {
       try {
-        const groupId = payload.groupId?.toString?.() || "";
-        const validation = validateChatMessage(payload.message || payload.text);
+        const groupId = normalizeObjectId(payload.groupId);
+        const rawMessage = payload.message || payload.text;
+
+        if (!groupId || !rawMessage) {
+          callback?.({ success: false, message: "Invalid payload" });
+          return;
+        }
+
+        const validation = validateChatMessage(rawMessage);
 
         if (validation.error) {
           callback?.({ success: false, message: validation.error });
@@ -354,7 +399,7 @@ const initSocket = (server, corsOptions = {}) => {
         });
 
         group.updatedAt = new Date();
-        await group.save();
+        await saveSocketDocument(group, "socket:send_group_message");
         await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
 
         const room = groupRoomFor(group._id);
@@ -366,7 +411,9 @@ const initSocket = (server, corsOptions = {}) => {
         });
         callback?.({ success: true, message: "Message sent", data: messagePayload });
       } catch (error) {
-        console.error(`Socket send_group_message failed: ${error.message}`);
+        if (!error?.vibeBookLogged) {
+          logSocketError("socket:send_group_message", error);
+        }
         callback?.({ success: false, message: "Group message failed" });
       }
     });

@@ -3,6 +3,7 @@ const User = require("../models/User");
 const { serializeFeedItem, userSelect } = require("./feedController");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { isCloudinarySecureUrl, normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
+const { scorePostForViewer, viralScoreFor } = require("../utils/feedRanking");
 
 const mediaQuery = {
   mediaUrl: { $regex: /^https:\/\/res\.cloudinary\.com\//i },
@@ -18,7 +19,7 @@ const engagementFor = (post) => {
     views: Number(post.views || 0),
     likes,
     comments,
-    score: Number(post.views || 0) + likes * 3 + comments * 2,
+    score: viralScoreFor(post),
   };
 };
 
@@ -69,7 +70,8 @@ const getExplore = async (req, res, next) => {
     const enrichedPosts = validPosts
       .map((post) => {
         const counts = engagementFor(post);
-        const feedItem = serializeFeedItem(post, req.user, false, { req });
+        const ranking = scorePostForViewer(post, req.user);
+        const feedItem = serializeFeedItem(post, req.user, false, { req, ranking });
         return feedItem
           ? {
               ...feedItem,
@@ -111,7 +113,7 @@ const getExplore = async (req, res, next) => {
       mostLikedVideos,
       mostViewedCreators,
       recommendedCreators,
-      formula: "views * 1 + likes * 3 + comments * 2",
+      formula: "views * 1 + likes * 3 + comments * 4 + shares * 6 + saves * 5 + watchTime * 0.08 + completionRate * 50 + replays * 8",
     });
   } catch (error) {
     return next(error);

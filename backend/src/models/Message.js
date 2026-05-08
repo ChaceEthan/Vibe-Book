@@ -75,7 +75,7 @@ const messageSchema = new mongoose.Schema(
   }
 );
 
-messageSchema.pre("validate", function syncMessageAliases(next) {
+messageSchema.methods.syncMessageAliases = function () {
   if (!this.sender && this.senderId) {
     this.sender = this.senderId;
   }
@@ -115,8 +115,10 @@ messageSchema.pre("validate", function syncMessageAliases(next) {
   if (!this.text && this.message) {
     this.text = this.message;
   }
+};
 
-  next();
+messageSchema.pre("validate", function () {
+  this.syncMessageAliases();
 });
 
 module.exports = mongoose.model("Message", messageSchema);

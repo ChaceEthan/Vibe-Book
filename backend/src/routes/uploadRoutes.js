@@ -12,6 +12,8 @@ const {
   uploadSingleMedia,
 } = require("../middleware/uploadMiddleware");
 const { removeFiles } = require("../utils/fileCleanup");
+const { analyzePostMetadata } = require("../utils/aiTagging");
+const { rankingFieldsForPost, uniqueTopics } = require("../utils/feedRanking");
 const { getUploadedVideoDurationSeconds } = require("../utils/videoDuration");
 
 const router = express.Router();
@@ -48,6 +50,13 @@ const parseTags = (value) => {
     .filter((tag, index, tags) => tags.indexOf(tag) === index)
     .slice(0, 10);
 };
+
+const mergeUploadTags = (tags = [], aiMetadata = {}) =>
+  uniqueTopics([
+    ...tags,
+    ...(Array.isArray(aiMetadata.topics) ? aiMetadata.topics : []),
+    ...(Array.isArray(aiMetadata.hashtags) ? aiMetadata.hashtags : []),
+  ]).slice(0, 12);
 
 const getUploadedFile = (req) => {
   return req.file || req.files?.media?.[0] || (Array.isArray(req.files) ? req.files[0] : null);
@@ -110,6 +119,13 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     const tags = parseTags(req.body.tags);
     const orientation = normalizeOrientation(req.body.orientation);
     const duration = type === "video" ? parseDuration(req.body.duration) || (await getUploadedVideoDurationSeconds(file)) || 0 : 0;
+    const aiMetadata = await analyzePostMetadata({
+      caption,
+      tags,
+      type,
+      duration,
+    });
+    const rankedTags = mergeUploadTags(tags, aiMetadata);
     const update = {
       $addToSet: {
         [mediaField]: url,
@@ -143,21 +159,55 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       {
         $set: {
           caption,
-          tags,
+          tags: rankedTags,
           orientation,
           duration,
+          aiMetadata,
+          emotion: aiMetadata.emotion || "neutral",
+          ...rankingFieldsForPost({
+            userId: req.user,
+            mediaUrl: url,
+            type,
+            caption,
+            tags: rankedTags,
+            orientation,
+            duration,
+            aiMetadata,
+            emotion: aiMetadata.emotion || "neutral",
+            views: 0,
+            watchTime: 0,
+            completionRate: 0,
+            replays: 0,
+            shareCount: 0,
+            saves: 0,
+            likes: 0,
+            comments: [],
+            createdAt: new Date(),
+          }),
         },
         $setOnInsert: {
           userId: req.user._id,
           mediaUrl: url,
           type,
           views: 0,
+          watchTime: 0,
+          completionRate: 0,
+          replays: 0,
+          engagementScore: 0,
+          viralScore: 0,
+          trendScore: 0,
+          engagementVelocity: 0,
           likes: 0,
           shareCount: 0,
+          saves: 0,
+          skips: 0,
+          reports: 0,
+          notInterestedCount: 0,
+          distributionStage: "test",
           comments: [],
         },
       },
-      { new: true, upsert: true, runValidators: true }
+      { returnDocument: "after", upsert: true, runValidators: true }
     );
 
     return res.status(201).json({

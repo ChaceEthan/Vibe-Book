@@ -1,21 +1,43 @@
+// @ts-nocheck
+const mongoose = require("mongoose");
+
 const ChatGroup = require("../models/ChatGroup");
 const GroupMessage = require("../models/GroupMessage");
 const User = require("../models/User");
 const { getIo, isUserOnline } = require("../socket");
 const { sanitizeChatMessage, validateChatMessage } = require("../utils/chatModeration");
-const mongoose = require("mongoose");
 
 const memberSelect = "name role profileImage profilePicture images gallery";
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
+const isProduction = process.env.NODE_ENV === "production";
+
+const logServerError = (scope, error) => {
+  const message = error?.message || "Unexpected error";
+
+  if (isProduction) {
+    console.error(`[${scope}] ${message}`);
+    return;
+  }
+
+  console.error(`[${scope}]`, error);
+};
+
+const saveDocument = async (document, scope) => {
+  try {
+    return await document.save();
+  } catch (error) {
+    logServerError(`${scope}:mongoose-save`, error);
+    error.vibeBookLogged = true;
+    throw error;
+  }
+};
 
 const normalizeId = (value) => {
   const id = value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
   return mongoose.isValidObjectId(id) ? id : "";
 };
 
-const uniqueIds = (values = []) => {
-  return Array.from(new Set(values.map(normalizeId).filter(Boolean)));
-};
+const uniqueIds = (values = []) => Array.from(new Set(values.map(normalizeId).filter(Boolean)));
 
 const normalizeMembers = (value) => {
   if (Array.isArray(value)) {
@@ -28,11 +50,13 @@ const normalizeMembers = (value) => {
 const isValidGroupId = (value) => Boolean(normalizeId(value));
 
 const sendGroupError = (res, scope, error, fallback = "Group request failed") => {
-  console.error(`[${scope}]`, error);
-
   const isClientError = error?.name === "CastError" || error?.name === "ValidationError";
   const status = error?.statusCode || error?.status || (isClientError ? 400 : 500);
   const message = status >= 500 ? fallback : error?.message || fallback;
+
+  if (status >= 500 && !error?.vibeBookLogged) {
+    logServerError(scope, error);
+  }
 
   return res.status(status).json({
     success: false,
@@ -42,11 +66,9 @@ const sendGroupError = (res, scope, error, fallback = "Group request failed") =>
 
 const ensureMember = (group, userId) => {
   const members = Array.isArray(group?.members) ? group.members : [];
+  const targetId = normalizeId(userId);
 
-  return members.some((member) => {
-    const id = member?._id?.toString?.() || member?.toString?.();
-    return id === userId?.toString?.();
-  });
+  return members.some((member) => normalizeId(member) === targetId);
 };
 
 const serializeGroup = (group) => {
@@ -98,7 +120,8 @@ const listGroups = async (req, res) => {
 const createGroup = async (req, res) => {
   try {
     const body = req.body || {};
-    const groupName = sanitizeChatMessage(body.groupName || body.name).slice(0, 80);
+    const rawName = body.groupName || body.name || "";
+    const groupName = sanitizeChatMessage(rawName).slice(0, 80);
     const requestedMembers = normalizeMembers(body.members);
     const creator = await User.findById(req.user._id).select("followers following");
     const memberIds = uniqueIds([
@@ -109,7 +132,7 @@ const createGroup = async (req, res) => {
     ]);
 
     if (!groupName) {
-      return res.status(400).json({ message: "Group name is required" });
+      return res.status(400).json({ success: false, message: "Group name is required" });
     }
 
     const members = await User.find({
@@ -120,28 +143,31 @@ const createGroup = async (req, res) => {
     const activeMemberIds = uniqueIds(members.map((member) => member._id));
 
     if (!activeMemberIds.length) {
-      return res.status(400).json({ message: "Unable to add group members" });
+      return res.status(400).json({ success: false, message: "Unable to add group members" });
     }
 
-    const group = await ChatGroup.create({
+    const group = new ChatGroup({
       groupName,
       name: groupName,
       createdBy: req.user._id,
       adminId: req.user._id,
       members: activeMemberIds,
+      isActive: true,
     });
 
+    await saveDocument(group, "group:create");
     await group.populate("members", memberSelect);
+
     const serializedGroup = serializeGroup(group);
     const io = getIo();
 
     if (io) {
       activeMemberIds.forEach((memberId) => {
-        io.to(memberId).emit("group:created", { group: serializedGroup });
+        io.to(memberId.toString()).emit("group:created", { group: serializedGroup });
       });
     }
 
-    return res.status(201).json({ group: serializedGroup, message: "Group created" });
+    return res.status(201).json({ success: true, group: serializedGroup, message: "Group created" });
   } catch (error) {
     return sendGroupError(res, "group:create", error, "Unable to create group");
   }
@@ -159,11 +185,11 @@ const listMembers = async (req, res) => {
     }).populate("members", memberSelect);
 
     if (!group) {
-      return res.status(404).json({ message: "Group not found" });
+      return res.status(404).json({ success: false, message: "Group not found" });
     }
 
     if (!ensureMember(group, req.user._id)) {
-      return res.status(403).json({ message: "You are not a member of this group" });
+      return res.status(403).json({ success: false, message: "You are not a member of this group" });
     }
 
     return res.json({ group: serializeGroup(group), members: group.members || [] });
@@ -184,15 +210,15 @@ const joinGroup = async (req, res) => {
     });
 
     if (!group) {
-      return res.status(404).json({ message: "Group not found" });
+      return res.status(404).json({ success: false, message: "Group not found" });
     }
 
     const wasMember = ensureMember(group, req.user._id);
 
     if (!wasMember) {
-      group.members.addToSet(req.user._id);
+      group.members = uniqueIds([...(group.members || []), req.user._id]);
       group.updatedAt = new Date();
-      await group.save();
+      await saveDocument(group, "group:join");
     }
 
     const groupMessage = wasMember
@@ -234,11 +260,11 @@ const leaveGroup = async (req, res) => {
     });
 
     if (!group) {
-      return res.status(404).json({ message: "Group not found" });
+      return res.status(404).json({ success: false, message: "Group not found" });
     }
 
     if (!ensureMember(group, req.user._id)) {
-      return res.status(403).json({ message: "You are not a member of this group" });
+      return res.status(403).json({ success: false, message: "You are not a member of this group" });
     }
 
     const leavingUserId = req.user._id.toString();
@@ -255,7 +281,7 @@ const leaveGroup = async (req, res) => {
     }
 
     group.updatedAt = new Date();
-    await group.save();
+    await saveDocument(group, "group:leave");
     getIo()?.in(leavingUserId).socketsLeave(groupRoomFor(group._id));
 
     const groupMessage = await GroupMessage.create({
@@ -293,11 +319,11 @@ const getGroupMessages = async (req, res) => {
     }).populate("members", memberSelect);
 
     if (!group) {
-      return res.status(404).json({ message: "Group not found" });
+      return res.status(404).json({ success: false, message: "Group not found" });
     }
 
     if (!ensureMember(group, req.user._id)) {
-      return res.status(403).json({ message: "You are not a member of this group" });
+      return res.status(403).json({ success: false, message: "You are not a member of this group" });
     }
 
     const messages = await GroupMessage.find({ group: group._id })
@@ -321,7 +347,7 @@ const sendGroupMessage = async (req, res) => {
     const validation = validateChatMessage(body.message || body.text);
 
     if (validation.error) {
-      return res.status(400).json({ message: validation.error });
+      return res.status(400).json({ success: false, message: validation.error });
     }
 
     const group = await ChatGroup.findOne({
@@ -330,11 +356,11 @@ const sendGroupMessage = async (req, res) => {
     });
 
     if (!group) {
-      return res.status(404).json({ message: "Group not found" });
+      return res.status(404).json({ success: false, message: "Group not found" });
     }
 
     if (!ensureMember(group, req.user._id)) {
-      return res.status(403).json({ message: "You are not a member of this group" });
+      return res.status(403).json({ success: false, message: "You are not a member of this group" });
     }
 
     const groupMessage = await GroupMessage.create({
@@ -344,11 +370,10 @@ const sendGroupMessage = async (req, res) => {
     });
 
     group.updatedAt = new Date();
-    await group.save();
+    await saveDocument(group, "group:message");
     await groupMessage.populate("sender", memberSelect);
 
     const messagePayload = serializeGroupMessage(groupMessage);
-
     const io = getIo();
 
     io?.to(groupRoomFor(group._id)).emit("receive_group_message", messagePayload);

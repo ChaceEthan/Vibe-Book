@@ -214,7 +214,7 @@ const Home = () => {
     }
   };
 
-  const handleViewed = async (item) => {
+  const handleViewed = async (item, metrics = {}) => {
     if (!item?._id || item.virtual || viewedPosts.has(item._id)) {
       return;
     }
@@ -226,7 +226,7 @@ const Home = () => {
     });
 
     try {
-      const { data } = await feedApi.recordView(item._id);
+      const { data } = await feedApi.recordView(item._id, metrics);
       replaceFeedItem(data.feedItem);
     } catch {
       // View tracking should never interrupt playback.
@@ -341,7 +341,7 @@ const Home = () => {
                   loop
                   autoPlay
                   controls
-                  onViewed={() => handleViewed(item)}
+                  onViewed={(metrics) => handleViewed(item, metrics)}
                   onInvalid={() => removePost(item._id)}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/10 to-transparent" />

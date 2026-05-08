@@ -93,8 +93,10 @@ export const feedApi = {
   get: (params = {}) => API.get("/posts", { params }),
   toggleLike: (id) => API.post(`/posts/${id}/like`),
   addComment: (id, payload) => API.post(`/posts/${id}/comments`, payload),
-  recordView: (id) => API.post(`/posts/${id}/view`),
+  recordView: (id, payload = {}) => API.post(`/posts/${id}/view`, payload),
   share: (id) => API.post(`/posts/${id}/share`),
+  save: (id) => API.post(`/posts/${id}/save`),
+  feedback: (id, payload) => API.post(`/posts/${id}/feedback`, payload),
   recommendations: (userId, params = {}) => API.get(`/recommendations/${userId}`, { params }),
 };
 

@@ -211,6 +211,72 @@ const userSchema = new mongoose.Schema({
       ref: "User",
     },
   ],
+  viewsCount: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  totalWatchTime: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  interests: {
+    type: Map,
+    of: Number,
+    default: {},
+  },
+  watchHistory: {
+    type: [
+      {
+        postId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Feed",
+          required: true,
+        },
+        topics: {
+          type: [String],
+          default: [],
+        },
+        watchedSeconds: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        completionRate: {
+          type: Number,
+          default: 0,
+          min: 0,
+          max: 1,
+        },
+        replays: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        watchedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    default: [],
+  },
+  likedTopics: {
+    type: [String],
+    default: [],
+  },
+  favoriteCreators: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+  ],
+  earnings: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
   balance: {
     type: Number,
     default: 0,

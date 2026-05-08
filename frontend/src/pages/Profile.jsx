@@ -359,7 +359,7 @@ const Profile = () => {
     }
   };
 
-  const handlePostViewed = async (post) => {
+  const handlePostViewed = async (post, metrics = {}) => {
     if (!post?._id || viewedPosts.has(post._id)) {
       return;
     }
@@ -371,7 +371,7 @@ const Profile = () => {
     });
 
     try {
-      const { data } = await feedApi.recordView(post._id);
+      const { data } = await feedApi.recordView(post._id, metrics);
       replaceProfilePost(data.feedItem);
     } catch {
       // View tracking is best-effort and should not interrupt media playback.
@@ -758,7 +758,7 @@ const Profile = () => {
                         videoClassName="max-h-[350px] w-full bg-slate-950 object-cover"
                         placeholderClassName="rounded-lg"
                         controls
-                        onViewed={() => handlePostViewed(post)}
+                        onViewed={(metrics) => handlePostViewed(post, metrics)}
                       />
                       <div className="p-3">
                         {post.caption && <p className="line-clamp-2 text-sm font-semibold text-slate-700">{post.caption}</p>}
