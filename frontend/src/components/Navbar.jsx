@@ -10,25 +10,34 @@ import {
   User,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import Upload from "./Upload.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { messageApi } from "../services/api";
+import { connectSocket } from "../services/socket";
 
 const navClass = ({ isActive }) =>
   `flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-bold transition ${
     isActive ? "text-brand" : "text-slate-500"
   }`;
 
+const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+
+const notificationTitleFor = (payload = {}, fallback = "New message") => payload.sender?.name || payload.name || fallback;
+
+const notificationBodyFor = (payload = {}) => payload.message || payload.text || "Open VibeBook to view it";
+
 const Navbar = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadType, setUploadType] = useState("image");
-  const { isAuthenticated, logout, user } = useAuth();
+  const { isAuthenticated, logout, user, token } = useAuth();
   const { language, languages, setLanguage } = useLanguage();
   const navigate = useNavigate();
+  const notificationCacheRef = useRef(new Map());
+  const audioContextRef = useRef(null);
 
   const navItems = useMemo(
     () => [
@@ -67,6 +76,103 @@ const Navbar = () => {
       clearInterval(timer);
     };
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !token || !user?._id) {
+      return undefined;
+    }
+
+    const socket = connectSocket(token);
+
+    if (!socket) {
+      return undefined;
+    }
+
+    const playMessageSound = () => {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+        if (!AudioContext) {
+          return;
+        }
+
+        audioContextRef.current = audioContextRef.current || new AudioContext();
+        const context = audioContextRef.current;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+
+        oscillator.frequency.value = 660;
+        gain.gain.value = 0.025;
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.08);
+      } catch {
+        // Notification sound is best-effort.
+      }
+    };
+
+    const notify = (key, title, body) => {
+      const now = Date.now();
+      const lastShown = notificationCacheRef.current.get(key) || 0;
+
+      if (now - lastShown < 2500) {
+        return;
+      }
+
+      notificationCacheRef.current.set(key, now);
+      playMessageSound();
+
+      if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") {
+        new Notification(title, {
+          body,
+          icon: "/logo.png",
+          tag: key,
+        });
+      }
+    };
+
+    const handleDirectMessage = (payload = {}) => {
+      const senderId = idOf(payload.sender || payload.senderId);
+
+      if (!senderId || senderId === user._id) {
+        return;
+      }
+
+      setUnreadCount((current) => Math.max(0, Number(current || 0) + 1));
+      notify(`dm:${payload._id || payload.clientId || senderId}`, notificationTitleFor(payload.sender, "New direct message"), notificationBodyFor(payload));
+    };
+
+    const handleGroupMessage = (payload = {}) => {
+      const message = payload.message || payload;
+      const senderId = idOf(message.sender || message.senderId);
+
+      if (!senderId || senderId === user._id) {
+        return;
+      }
+
+      const mention = new RegExp(`@${String(user.name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(message.message || "");
+      notify(
+        `group:${message._id || message.clientId || message.groupId}`,
+        mention ? "You were mentioned" : "New group message",
+        `${notificationTitleFor(message.sender, "Group")}: ${notificationBodyFor(message)}`
+      );
+    };
+
+    const handleUnreadUpdate = (payload = {}) => {
+      setUnreadCount(Number(payload.unreadCount || 0));
+    };
+
+    socket.on("receive_message", handleDirectMessage);
+    socket.on("receive_group_message", handleGroupMessage);
+    socket.on("unread:update", handleUnreadUpdate);
+
+    return () => {
+      socket.off("receive_message", handleDirectMessage);
+      socket.off("receive_group_message", handleGroupMessage);
+      socket.off("unread:update", handleUnreadUpdate);
+    };
+  }, [isAuthenticated, token, user?._id, user?.name]);
 
   useEffect(() => {
     const openFromEvent = (event) => {

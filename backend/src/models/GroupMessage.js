@@ -13,6 +13,12 @@ const groupMessageSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    clientId: {
+      type: String,
+      trim: true,
+      index: true,
+      sparse: true,
+    },
     message: {
       type: String,
       required: true,

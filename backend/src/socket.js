@@ -74,6 +74,7 @@ const removeOnlineUser = (userId, socketId) => {
 
 const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
+const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
 const normalizeObjectId = (value) => {
   const id = value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
   return mongoose.isValidObjectId(id) ? id : "";
@@ -82,11 +83,17 @@ const normalizeObjectId = (value) => {
 const serializeDirectMessage = (message) => ({
   _id: message._id,
   chatId: message.chatId,
+  clientId: message.clientId,
   senderId: message.senderId || message.sender?.toString?.() || "",
   receiverId: message.receiverId || message.recipient?.toString?.() || message.receiver?.toString?.() || "",
   message: message.message,
   text: message.text || message.message,
   createdAt: message.createdAt,
+  deliveredAt: message.deliveredAt,
+  readAt: message.readAt,
+  seenAt: message.seenAt,
+  deliveryStatus: message.deliveryStatus || (message.readAt ? "seen" : message.deliveredAt ? "delivered" : "sent"),
+  status: message.deliveryStatus || (message.readAt ? "seen" : message.deliveredAt ? "delivered" : "sent"),
   sender: message.sender,
   recipient: message.recipient,
   receiver: message.receiver || message.recipient,
@@ -94,6 +101,7 @@ const serializeDirectMessage = (message) => ({
 
 const serializeGroupMessage = (message) => ({
   _id: message._id,
+  clientId: message.clientId,
   group: message.group,
   groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
   sender: message.sender,
@@ -120,6 +128,62 @@ const joinUserGroupRooms = async (socket, userId) => {
   }).select("_id");
 
   groups.forEach((group) => socket.join(groupRoomFor(group._id)));
+};
+
+const unreadCountFor = (userId) =>
+  Message.countDocuments({
+    $or: [{ recipient: userId }, { receiver: userId }],
+    isDraft: false,
+    readAt: { $exists: false },
+    hiddenFor: { $ne: userId },
+  });
+
+const emitUnreadCount = async (userId) => {
+  if (!ioInstance || !userId) {
+    return;
+  }
+
+  const unreadCount = await unreadCountFor(userId);
+  ioInstance.to(userId.toString()).emit("unread:update", { unreadCount });
+};
+
+const markPendingMessagesDelivered = async (userId) => {
+  const pendingMessages = await Message.find({
+    $or: [{ recipient: userId }, { receiver: userId }],
+    isDraft: false,
+    deliveredAt: { $exists: false },
+    deliveryStatus: { $in: ["sent", null] },
+  }).select("_id chatId clientId sender");
+
+  if (!pendingMessages.length) {
+    await emitUnreadCount(userId);
+    return;
+  }
+
+  const deliveredAt = new Date();
+  const ids = pendingMessages.map((message) => message._id);
+
+  await Message.updateMany(
+    { _id: { $in: ids } },
+    {
+      $set: {
+        deliveredAt,
+        deliveryStatus: "delivered",
+      },
+    }
+  );
+
+  pendingMessages.forEach((message) => {
+    ioInstance?.to(idOf(message.sender)).emit("message:delivery", {
+      messageId: message._id,
+      clientId: message.clientId,
+      chatId: message.chatId,
+      status: "delivered",
+      deliveredAt,
+    });
+  });
+
+  await emitUnreadCount(userId);
 };
 
 const emitStats = async () => {
@@ -215,6 +279,7 @@ const initSocket = (server, corsOptions = {}) => {
       socket.join("global");
       socket.join(userId);
       await joinUserGroupRooms(socket, userId);
+      await markPendingMessagesDelivered(userId);
       socket.data.activeGroupRoom = "";
       console.log(`Socket connected: ${userId}${socket.recovered ? " (recovered)" : ""}`);
       await emitStats();
@@ -235,6 +300,7 @@ const initSocket = (server, corsOptions = {}) => {
 
       addOnlineUser(userId, socket.id);
       socket.join(userId);
+      await markPendingMessagesDelivered(userId);
       await emitStats();
       callback?.({ success: true, userId, socketId: socket.id, onlineUserIds: getOnlineUserIds() });
     });
@@ -272,8 +338,10 @@ const initSocket = (server, corsOptions = {}) => {
           return;
         }
 
+        const receiverOnline = isUserOnline(receiver._id);
         const directMessage = await Message.create({
           chatId: payload.chatId || chatIdFor(userId, receiverId),
+          clientId: payload.clientId,
           sender: userId,
           senderId: userId,
           recipient: receiver._id,
@@ -283,14 +351,30 @@ const initSocket = (server, corsOptions = {}) => {
           message: validation.message,
           text: validation.message,
           type: "reply",
+          deliveryStatus: receiverOnline ? "delivered" : "sent",
+          deliveredAt: receiverOnline ? new Date() : undefined,
         });
+
+        await directMessage.populate([
+          { path: "sender", select: "name role profileImage profilePicture images gallery" },
+          { path: "recipient", select: "name role profileImage profilePicture images gallery" },
+          { path: "receiver", select: "name role profileImage profilePicture images gallery" },
+        ]);
         const messagePayload = serializeDirectMessage(directMessage);
 
         ioInstance.to(receiver._id.toString()).emit("receive_message", messagePayload);
         ioInstance.to(userId).emit("receive_message", messagePayload);
+        ioInstance.to(userId).emit("message:delivery", {
+          messageId: directMessage._id,
+          clientId: directMessage.clientId,
+          chatId: directMessage.chatId,
+          status: directMessage.deliveryStatus,
+          deliveredAt: directMessage.deliveredAt,
+        });
+        await emitUnreadCount(receiver._id);
         callback?.({ success: true, message: "Message sent", data: messagePayload });
       } catch (error) {
-        console.error(`Socket send_message failed: ${error.message}`);
+        logSocketError("socket:send_message", error);
         callback?.({ success: false, message: "Message failed" });
       }
     });
@@ -308,6 +392,61 @@ const initSocket = (server, corsOptions = {}) => {
         chatId: payload.chatId || chatIdFor(userId, receiverId),
         typing: Boolean(payload.typing),
       });
+    });
+
+    socket.on("message:seen", async (payload = {}, callback) => {
+      try {
+        const otherUserId = normalizeObjectId(payload.userId || payload.senderId || payload.otherUserId);
+
+        if (!otherUserId) {
+          callback?.({ success: false, message: "Valid userId is required" });
+          return;
+        }
+
+        const unseenMessages = await Message.find({
+          sender: otherUserId,
+          $or: [{ recipient: userId }, { receiver: userId }],
+          isDraft: false,
+          readAt: { $exists: false },
+        }).select("_id chatId clientId sender");
+
+        if (!unseenMessages.length) {
+          await emitUnreadCount(userId);
+          callback?.({ success: true, count: 0 });
+          return;
+        }
+
+        const seenAt = new Date();
+        const ids = unseenMessages.map((message) => message._id);
+
+        await Message.updateMany(
+          { _id: { $in: ids } },
+          {
+            $set: {
+              readAt: seenAt,
+              seenAt,
+              deliveryStatus: "seen",
+            },
+          }
+        );
+
+        unseenMessages.forEach((message) => {
+          ioInstance.to(otherUserId).emit("message:delivery", {
+            messageId: message._id,
+            clientId: message.clientId,
+            chatId: message.chatId,
+            status: "seen",
+            seenAt,
+            readAt: seenAt,
+          });
+        });
+
+        await emitUnreadCount(userId);
+        callback?.({ success: true, count: unseenMessages.length });
+      } catch (error) {
+        logSocketError("socket:message_seen", error);
+        callback?.({ success: false, message: "Unable to mark messages seen" });
+      }
     });
 
     socket.on("join_group", async (payload = {}, callback) => {
@@ -395,6 +534,7 @@ const initSocket = (server, corsOptions = {}) => {
         const groupMessage = await GroupMessage.create({
           group: group._id,
           sender: socket.user._id,
+          clientId: payload.clientId,
           message: validation.message,
         });
 

@@ -18,6 +18,12 @@ const messageSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    clientId: {
+      type: String,
+      trim: true,
+      index: true,
+      sparse: true,
+    },
     sender: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -62,6 +68,18 @@ const messageSchema = new mongoose.Schema(
     },
     readAt: {
       type: Date,
+    },
+    deliveredAt: {
+      type: Date,
+    },
+    seenAt: {
+      type: Date,
+    },
+    deliveryStatus: {
+      type: String,
+      enum: ["sending", "sent", "delivered", "seen", "failed"],
+      default: "sent",
+      index: true,
     },
     hiddenFor: [
       {

@@ -10,6 +10,7 @@ const { sanitizeChatMessage, validateChatMessage } = require("../utils/chatModer
 const memberSelect = "name role profileImage profilePicture images gallery";
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 const isProduction = process.env.NODE_ENV === "production";
+const trimText = (value) => (typeof value === "string" ? value.trim() : "");
 
 const logServerError = (scope, error) => {
   const message = error?.message || "Unexpected error";
@@ -91,6 +92,7 @@ const serializeGroup = (group) => {
 
 const serializeGroupMessage = (message) => ({
   _id: message._id,
+  clientId: message.clientId,
   group: message.group,
   groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
   sender: message.sender,
@@ -366,6 +368,7 @@ const sendGroupMessage = async (req, res) => {
     const groupMessage = await GroupMessage.create({
       group: group._id,
       sender: req.user._id,
+      clientId: trimText(body.clientId),
       message: validation.message,
     });
 

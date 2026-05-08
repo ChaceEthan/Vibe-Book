@@ -1,7 +1,7 @@
 // @ts-nocheck
-import { Plus, Send, UserMinus, Users } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { AlertCircle, Check, CheckCheck, Clock3, Plus, Send, UserMinus, Users } from "lucide-react";
+import { memo, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { groupChatApi, mediaUrl, messageApi, userApi } from "../services/api";
@@ -33,9 +33,21 @@ const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
 const messageSenderId = (item) => item?.senderId || idOf(item?.sender);
 const messageReceiverId = (item) => item?.receiverId || idOf(item?.recipient || item?.receiver);
 const messageKey = (item) =>
-  item?._id ||
   item?.clientId ||
+  item?._id ||
   `${messageSenderId(item)}:${messageReceiverId(item)}:${item?.createdAt || ""}:${item?.message || item?.text || ""}`;
+
+const messageStatus = (item) => {
+  if (item?.failed || item?.deliveryStatus === "failed") {
+    return "failed";
+  }
+
+  if (item?.pending || item?.deliveryStatus === "sending") {
+    return "sending";
+  }
+
+  return item?.deliveryStatus || item?.status || (item?.readAt ? "seen" : item?.deliveredAt ? "delivered" : "sent");
+};
 
 const normalizeSocketMessage = (item = {}) => ({
   ...item,
@@ -47,11 +59,12 @@ const normalizeSocketMessage = (item = {}) => ({
   message: item.message || item.text || "",
   text: item.text || item.message || "",
   createdAt: item.createdAt || new Date().toISOString(),
+  deliveryStatus: messageStatus(item),
 });
 
 const groupMessageKey = (item) =>
-  item?._id ||
   item?.clientId ||
+  item?._id ||
   `${item?.groupId || idOf(item?.group)}:${idOf(item?.sender) || item?.senderId || ""}:${item?.createdAt || ""}:${item?.message || ""}`;
 
 const normalizeGroupMessage = (item = {}) => ({
@@ -62,6 +75,7 @@ const normalizeGroupMessage = (item = {}) => ({
   message: item.message || "",
   type: item.type || "message",
   createdAt: item.createdAt || new Date().toISOString(),
+  deliveryStatus: messageStatus(item),
 });
 
 const sortGroupMessages = (items = []) => {
@@ -72,9 +86,79 @@ const sortGroupMessages = (items = []) => {
   });
 };
 
+const initialsFor = (value = "") => {
+  const words = String(value || "VB").trim().split(/\s+/).slice(0, 2);
+  return words.map((word) => word[0]?.toUpperCase()).join("") || "VB";
+};
+
+const avatarImageFor = (profile = {}) =>
+  profile?.profilePicture || profile?.profileImage || profile?.images?.[0] || profile?.gallery?.[0] || "";
+
+const Avatar = memo(({ profile, size = "h-9 w-9", className = "" }) => {
+  const image = avatarImageFor(profile || {});
+  const name = profile?.name || "VibeBook user";
+
+  if (image) {
+    return <img src={mediaUrl(image)} alt="" loading="lazy" className={`${size} rounded-full object-cover ${className}`} />;
+  }
+
+  return (
+    <span className={`${size} inline-flex shrink-0 items-center justify-center rounded-full bg-navy text-xs font-black text-white ${className}`}>
+      {initialsFor(name)}
+    </span>
+  );
+});
+
+Avatar.displayName = "Avatar";
+
+const DeliveryState = ({ status, failed, onRetry }) => {
+  const state = failed ? "failed" : status;
+
+  if (state === "failed") {
+    return (
+      <button type="button" className="inline-flex items-center gap-1 font-bold text-red-700" onClick={onRetry}>
+        <AlertCircle className="h-3.5 w-3.5" />
+        Retry
+      </button>
+    );
+  }
+
+  if (state === "sending") {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Clock3 className="h-3.5 w-3.5" />
+        Sending
+      </span>
+    );
+  }
+
+  if (state === "delivered" || state === "seen") {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <CheckCheck className="h-3.5 w-3.5" />
+        {state === "seen" ? "Seen" : "Delivered"}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Check className="h-3.5 w-3.5" />
+      Sent
+    </span>
+  );
+};
+
+const memberCountLabel = (group = {}) => {
+  const total = Array.isArray(group.members) ? group.members.length : Number(group.memberCount || 0);
+  const online = Number(group.onlineUsersCount || group.activeUsers?.length || 0);
+  return `${total} member${total === 1 ? "" : "s"} • ${online} online`;
+};
+
 const Chat = () => {
   const { userId } = useParams();
   const { user, token, payAccess } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(userId ? "direct" : "groups");
   const [messages, setMessages] = useState([]);
   const [otherUser, setOtherUser] = useState(null);
@@ -118,7 +202,9 @@ const Chat = () => {
       const existingIndex = current.findIndex((item) => messageKey(item) === messageKey(normalized));
 
       if (existingIndex >= 0) {
-        return current.map((item, index) => (index === existingIndex ? { ...item, ...normalized, pending: false } : item));
+        return current.map((item, index) =>
+          index === existingIndex ? { ...item, ...normalized, pending: false, failed: false, deliveryStatus: messageStatus(normalized) } : item
+        );
       }
 
       const pendingIndex = current.findIndex((item) => {
@@ -131,7 +217,9 @@ const Chat = () => {
       });
 
       if (pendingIndex >= 0) {
-        return current.map((item, index) => (index === pendingIndex ? { ...normalized, pending: false } : item));
+        return current.map((item, index) =>
+          index === pendingIndex ? { ...item, ...normalized, pending: false, failed: false, deliveryStatus: messageStatus(normalized) } : item
+        );
       }
 
       return [...current, normalized];
@@ -145,7 +233,11 @@ const Chat = () => {
       const existingIndex = current.findIndex((item) => groupMessageKey(item) === groupMessageKey(normalized));
 
       if (existingIndex >= 0) {
-        return sortGroupMessages(current.map((item, index) => (index === existingIndex ? { ...item, ...normalized, pending: false } : item)));
+        return sortGroupMessages(
+          current.map((item, index) =>
+            index === existingIndex ? { ...item, ...normalized, pending: false, failed: false, deliveryStatus: messageStatus(normalized) } : item
+          )
+        );
       }
 
       const pendingIndex = current.findIndex((item) => {
@@ -158,11 +250,45 @@ const Chat = () => {
       });
 
       if (pendingIndex >= 0) {
-        return sortGroupMessages(current.map((item, index) => (index === pendingIndex ? { ...normalized, pending: false } : item)));
+        return sortGroupMessages(
+          current.map((item, index) =>
+            index === pendingIndex ? { ...item, ...normalized, pending: false, failed: false, deliveryStatus: messageStatus(normalized) } : item
+          )
+        );
       }
 
       return sortGroupMessages([...current, normalized]);
     });
+  };
+
+  const updateDirectMessageStatus = (identity = {}, updates = {}) => {
+    setMessages((current) =>
+      current.map((item) => {
+        const sameClient = identity.clientId && item.clientId === identity.clientId;
+        const sameMessage = identity.messageId && item._id === identity.messageId;
+
+        if (!sameClient && !sameMessage) {
+          return item;
+        }
+
+        return { ...item, ...updates };
+      })
+    );
+  };
+
+  const updateGroupMessageStatus = (identity = {}, updates = {}) => {
+    setGroupMessages((current) =>
+      current.map((item) => {
+        const sameClient = identity.clientId && item.clientId === identity.clientId;
+        const sameMessage = identity.messageId && item._id === identity.messageId;
+
+        if (!sameClient && !sameMessage) {
+          return item;
+        }
+
+        return { ...item, ...updates };
+      })
+    );
   };
 
   const loadConversation = async ({ silent = false } = {}) => {
@@ -178,9 +304,14 @@ const Chat = () => {
 
     try {
       const { data } = await messageApi.getConversation(userId);
-      setMessages(Array.isArray(data?.messages) ? data.messages : []);
+      setMessages((Array.isArray(data?.messages) ? data.messages : []).map(normalizeSocketMessage));
       setOtherUser(data?.otherUser || null);
       setOnline(Boolean(data?.online));
+
+      const socket = connectSocket(token);
+      if (socket?.connected) {
+        socket.emit("message:seen", { userId }, () => undefined);
+      }
     } catch (requestError) {
       setError(requestMessage(requestError, "Unable to load chat."));
     } finally {
@@ -409,7 +540,25 @@ const Chat = () => {
 
       if (belongsToOpenChat) {
         appendDirectMessage(normalized);
+
+        if (senderId === openUserId && receiverId === currentUserId) {
+          socket.emit("message:seen", { userId: senderId }, () => undefined);
+        }
       }
+    };
+
+    const handleDeliveryUpdate = (payload = {}) => {
+      updateDirectMessageStatus(
+        { messageId: payload.messageId, clientId: payload.clientId },
+        {
+          deliveryStatus: payload.status,
+          deliveredAt: payload.deliveredAt,
+          seenAt: payload.seenAt,
+          readAt: payload.readAt,
+          pending: false,
+          failed: false,
+        }
+      );
     };
 
     const handleTyping = (payload = {}) => {
@@ -476,9 +625,9 @@ const Chat = () => {
     socket.on("disconnect", handleDisconnect);
     socket.io.on("reconnect", handleReconnect);
     socket.on("receive_message", handleReceiveMessage);
+    socket.on("message:delivery", handleDeliveryUpdate);
     socket.on("typing", handleTyping);
     socket.on("receive_group_message", handleGroupMessage);
-    socket.on("group:message", handleGroupMessage);
     socket.on("group:created", handleGroupCreated);
     socket.on("group:member-joined", handleGroupMembership);
     socket.on("group:member-left", handleGroupMembership);
@@ -496,14 +645,22 @@ const Chat = () => {
       socket.off("disconnect", handleDisconnect);
       socket.io.off("reconnect", handleReconnect);
       socket.off("receive_message", handleReceiveMessage);
+      socket.off("message:delivery", handleDeliveryUpdate);
       socket.off("typing", handleTyping);
       socket.off("receive_group_message", handleGroupMessage);
-      socket.off("group:message", handleGroupMessage);
       socket.off("group:created", handleGroupCreated);
       socket.off("group:member-joined", handleGroupMembership);
       socket.off("group:member-left", handleGroupMembership);
       socket.off("global:stats", handleStats);
       clearTimeout(typingTimerRef.current);
+      if (userIdRef.current && userRef.current?._id) {
+        socket.emit("typing", {
+          senderId: userRef.current._id,
+          receiverId: userIdRef.current,
+          chatId: getChatId(userRef.current._id, userIdRef.current),
+          typing: false,
+        });
+      }
       leaveGroupRoom(socket);
     };
   }, [token, user?._id]);
@@ -541,12 +698,18 @@ const Chat = () => {
 
     const text = message.trim();
 
-    if (!text || !userId || !user?._id) {
+    await sendDirectText(text);
+  };
+
+  const sendDirectText = async (text, retryMessage = null) => {
+    const cleanText = String(text || "").trim();
+
+    if (!cleanText || !userId || !user?._id) {
       return;
     }
 
     const chatId = getChatId(user._id, userId);
-    const pendingId = `pending-${Date.now()}`;
+    const pendingId = retryMessage?.clientId || `pending-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const optimisticMessage = {
       _id: pendingId,
       clientId: pendingId,
@@ -556,16 +719,27 @@ const Chat = () => {
       sender: user._id,
       recipient: userId,
       receiver: userId,
-      message: text,
-      text,
-      createdAt: new Date().toISOString(),
+      message: cleanText,
+      text: cleanText,
+      createdAt: retryMessage?.createdAt || new Date().toISOString(),
       pending: true,
+      failed: false,
+      deliveryStatus: "sending",
     };
 
     setSending(true);
     setStatus("");
     setError("");
-    setMessage("");
+    if (!retryMessage) {
+      setMessage("");
+    }
+    clearTimeout(typingTimerRef.current);
+    connectSocket(token)?.emit("typing", {
+      senderId: user._id,
+      receiverId: userId,
+      chatId,
+      typing: false,
+    });
     appendDirectMessage(optimisticMessage);
 
     try {
@@ -578,11 +752,13 @@ const Chat = () => {
             senderId: user._id,
             receiverId: userId,
             chatId,
-            message: text,
+            clientId: pendingId,
+            message: cleanText,
           },
           (response) => {
             if (!response?.success) {
               setError(response?.message || "Message failed.");
+              updateDirectMessageStatus({ clientId: pendingId }, { pending: false, failed: true, deliveryStatus: "failed" });
               return;
             }
 
@@ -590,25 +766,34 @@ const Chat = () => {
           }
         );
       } else {
-        const { data } = await messageApi.sendDirect(userId, { message: text, chatId });
+        const { data } = await messageApi.sendDirect(userId, { message: cleanText, chatId, clientId: pendingId });
         appendDirectMessage(data.chatMessage || data.inboxMessage);
       }
     } catch (requestError) {
+      updateDirectMessageStatus({ clientId: pendingId }, { pending: false, failed: true, deliveryStatus: "failed" });
       setError(requestMessage(requestError, "Message failed."));
     } finally {
       setSending(false);
     }
   };
 
+  const retryDirectMessage = (item) => {
+    sendDirectText(item.message || item.text, item);
+  };
+
   const handleGroupSend = async (event) => {
     event.preventDefault();
 
-    if (!groupMessage.trim() || !selectedGroup) {
+    await sendGroupText(groupMessage);
+  };
+
+  const sendGroupText = async (value, retryMessage = null) => {
+    if (!String(value || "").trim() || !selectedGroup) {
       return;
     }
 
-    const text = groupMessage.trim();
-    const pendingId = `pending-group-${Date.now()}`;
+    const text = String(value || "").trim();
+    const pendingId = retryMessage?.clientId || `pending-group-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     appendGroupMessage({
       _id: pendingId,
       clientId: pendingId,
@@ -617,10 +802,14 @@ const Chat = () => {
       sender: user,
       senderId: user?._id,
       message: text,
-      createdAt: new Date().toISOString(),
+      createdAt: retryMessage?.createdAt || new Date().toISOString(),
       pending: true,
+      failed: false,
+      deliveryStatus: "sending",
     });
-    setGroupMessage("");
+    if (!retryMessage) {
+      setGroupMessage("");
+    }
     setSending(true);
     setStatus("");
     setError("");
@@ -629,25 +818,31 @@ const Chat = () => {
       const socket = connectSocket(token);
 
       if (socket?.connected) {
-        socket.emit("send_group_message", { groupId: selectedGroup, senderId: user?._id, message: text }, (response) => {
+        socket.emit("send_group_message", { groupId: selectedGroup, senderId: user?._id, clientId: pendingId, message: text }, (response) => {
           if (response?.success && response.data) {
             appendGroupMessage(response.data);
           } else if (response && !response.success) {
+            updateGroupMessageStatus({ clientId: pendingId }, { pending: false, failed: true, deliveryStatus: "failed" });
             setError(response.message || "Group message failed.");
             loadGroupMessages(selectedGroup, { silent: true });
           }
         });
       } else {
-        const { data } = await groupChatApi.send(selectedGroup, { message: text });
+        const { data } = await groupChatApi.send(selectedGroup, { message: text, clientId: pendingId });
         if (data?.groupMessage) {
           appendGroupMessage(data.groupMessage);
         }
       }
     } catch (requestError) {
+      updateGroupMessageStatus({ clientId: pendingId }, { pending: false, failed: true, deliveryStatus: "failed" });
       setError(requestMessage(requestError, "Group message failed."));
     } finally {
       setSending(false);
     }
+  };
+
+  const retryGroupMessage = (item) => {
+    sendGroupText(item.message, item);
   };
 
   const handleCreateGroup = async (event) => {
@@ -725,7 +920,7 @@ const Chat = () => {
             </p>
           )}
           {activeTab === "groups" && selectedGroupInfo && (
-            <p className="mt-2 text-sm text-slate-600">{selectedGroupInfo.onlineUsersCount || 0} online</p>
+            <p className="mt-2 text-sm text-slate-600">{memberCountLabel(selectedGroupInfo)}</p>
           )}
         </div>
         <Link to="/inbox" className="btn-secondary">
@@ -767,11 +962,7 @@ const Chat = () => {
           {userId ? (
             <>
               <div className="flex items-center gap-3 border-b border-slate-100 p-4">
-                <img
-                  src={mediaUrl(otherUser?.profilePicture || otherUser?.profileImage || otherUser?.images?.[0] || otherUser?.gallery?.[0])}
-                  alt=""
-                  className="h-12 w-12 rounded-lg object-cover"
-                />
+                <Avatar profile={otherUser} size="h-12 w-12" className="rounded-lg" />
                 <div className="min-w-0">
                   <p className="truncate font-bold text-navy">{otherUser?.name || "Conversation"}</p>
                   <p className="truncate text-xs capitalize text-slate-500">
@@ -780,20 +971,27 @@ const Chat = () => {
                 </div>
               </div>
 
-              <div className="max-h-[520px] min-h-80 space-y-4 overflow-y-auto p-4">
+              <div className="h-[calc(100dvh-22rem)] min-h-80 space-y-3 overflow-y-auto scroll-smooth p-3 sm:h-[520px] sm:p-4">
                 {loading ? (
                   <div className="h-40 animate-pulse rounded-lg bg-slate-200" />
                 ) : messages.length ? (
                   messages.map((item) => {
                     const isMine = messageSenderId(item) === user?._id;
+                    const senderProfile = isMine ? user : otherUser;
+                    const state = messageStatus(item);
                     return (
-                      <div key={item._id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
-                        <div className={`max-w-[82%] rounded-lg p-3 ${isMine ? "bg-brand text-navy" : "bg-surface text-slate-700"}`}>
-                          <p className="whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
-                          <p className="mt-2 truncate text-[11px] opacity-70">
-                            {item.pending ? "Sending..." : formatTime(item.createdAt)}
+                      <div key={messageKey(item)} className={`flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
+                        {!isMine && <Avatar profile={senderProfile} />}
+                        <div className={`max-w-[78%] ${isMine ? "items-end" : "items-start"} flex flex-col`}>
+                          <div className={`rounded-2xl px-3 py-2 ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}>
+                            <p className="whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
+                          </div>
+                          <p className="mt-1 flex items-center gap-2 truncate px-1 text-[11px] font-semibold text-slate-400">
+                            <span>{formatTime(item.createdAt)}</span>
+                            {isMine && <DeliveryState status={state} failed={item.failed} onRetry={() => retryDirectMessage(item)} />}
                           </p>
                         </div>
+                        {isMine && <Avatar profile={senderProfile} />}
                       </div>
                     );
                   })
@@ -804,9 +1002,9 @@ const Chat = () => {
                 <div ref={bottomRef} />
               </div>
 
-              <form className="flex flex-col gap-3 border-t border-slate-100 p-4 sm:flex-row" onSubmit={handleSend}>
+              <form className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleSend}>
                 <input
-                  className="field flex-1"
+                  className="field min-h-10 flex-1 rounded-full px-4 py-2"
                   value={message}
                   onChange={(event) => {
                     const nextValue = event.target.value;
@@ -834,8 +1032,8 @@ const Chat = () => {
                   }}
                   placeholder="Write a message"
                 />
-                <button type="submit" className="btn-primary" disabled={sending || !message.trim()}>
-                  {sending ? "Sending..." : "Send"}
+                <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || !message.trim()} aria-label="Send message">
+                  {sending ? <Clock3 className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                 </button>
               </form>
             </>
@@ -892,8 +1090,11 @@ const Chat = () => {
                     }`}
                     onClick={() => setSelectedGroup(group._id)}
                   >
-                    <span className="min-w-0 truncate font-black">{group.groupName}</span>
-                    <span className="shrink-0 text-xs font-bold">{group.onlineUsersCount || 0} online</span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-black">{group.groupName}</span>
+                      <span className="mt-0.5 block truncate text-xs font-bold opacity-70">{memberCountLabel(group)}</span>
+                    </span>
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${Number(group.onlineUsersCount || 0) ? "bg-green-500" : "bg-slate-300"}`} />
                   </button>
                 ))
               ) : (
@@ -907,11 +1108,21 @@ const Chat = () => {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-black text-navy">{selectedGroupInfo?.groupName || selectedGroupInfo?.name || "Group messages"}</p>
+                  {selectedGroupInfo && <p className="mt-1 text-xs font-bold text-slate-500">{memberCountLabel(selectedGroupInfo)}</p>}
                   {selectedGroupInfo?.members?.length ? (
-                    <p className="mt-1 inline-flex max-w-full items-center gap-1 truncate text-xs font-semibold text-slate-500">
+                    <div className="mt-2 flex max-w-full flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500">
                       <Users className="h-3.5 w-3.5 shrink-0" />
-                      {selectedGroupInfo.members.map((member) => member.name || "Member").join(", ")}
-                    </p>
+                      {selectedGroupInfo.members.slice(0, 6).map((member) => (
+                        <Link
+                          key={member._id || member}
+                          to={idOf(member) === user?._id ? "/dashboard" : `/chat/${idOf(member)}`}
+                          className="max-w-28 truncate rounded-full bg-surface px-2 py-1 font-bold text-slate-600 hover:text-navy"
+                        >
+                          {member.name || "Member"}
+                        </Link>
+                      ))}
+                      {selectedGroupInfo.members.length > 6 && <span className="px-1">+{selectedGroupInfo.members.length - 6}</span>}
+                    </div>
                   ) : null}
                   {selectedGroupInfo?.activeUsers?.length ? (
                     <p className="mt-1 truncate text-xs font-bold text-green-700">
@@ -927,7 +1138,7 @@ const Chat = () => {
                 )}
               </div>
             </div>
-            <div className="max-h-[520px] min-h-80 space-y-4 overflow-y-auto p-4">
+            <div className="h-[calc(100dvh-22rem)] min-h-80 space-y-3 overflow-y-auto scroll-smooth p-3 sm:h-[520px] sm:p-4">
               {loading ? (
                 <div className="h-40 animate-pulse rounded-lg bg-slate-200" />
               ) : groupMessages.length ? (
@@ -942,12 +1153,29 @@ const Chat = () => {
                   }
 
                   return (
-                    <div key={item._id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[82%] rounded-lg p-3 ${isMine ? "bg-brand text-navy" : "bg-surface text-slate-700"}`}>
-                        <p className="truncate text-xs font-black opacity-70">{item.sender?.name || "User"}</p>
-                        <p className="mt-1 whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
-                        <p className="mt-2 truncate text-[11px] opacity-70">{formatTime(item.createdAt)}</p>
+                    <div key={groupMessageKey(item)} className={`flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
+                      {!isMine && (
+                        <button type="button" onClick={() => item.sender?._id && navigate(`/chat/${item.sender._id}`)} aria-label="Open direct chat">
+                          <Avatar profile={item.sender} />
+                        </button>
+                      )}
+                      <div className={`max-w-[78%] ${isMine ? "items-end" : "items-start"} flex flex-col`}>
+                        <div className={`rounded-2xl px-3 py-2 ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}>
+                          <button
+                            type="button"
+                            className="block max-w-full truncate text-xs font-black opacity-70"
+                            onClick={() => item.sender?._id && navigate(idOf(item.sender) === user?._id ? "/dashboard" : `/chat/${idOf(item.sender)}`)}
+                          >
+                            {item.sender?.name || "User"}
+                          </button>
+                          <p className="mt-1 whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
+                        </div>
+                        <p className="mt-1 flex items-center gap-2 truncate px-1 text-[11px] font-semibold text-slate-400">
+                          <span>{formatTime(item.createdAt)}</span>
+                          {isMine && <DeliveryState status={messageStatus(item)} failed={item.failed} onRetry={() => retryGroupMessage(item)} />}
+                        </p>
                       </div>
+                      {isMine && <Avatar profile={user} />}
                     </div>
                   );
                 })
@@ -956,17 +1184,16 @@ const Chat = () => {
               )}
               <div ref={groupBottomRef} />
             </div>
-            <form className="flex flex-col gap-3 border-t border-slate-100 p-4 sm:flex-row" onSubmit={handleGroupSend}>
+            <form className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
               <input
-                className="field flex-1"
+                className="field min-h-10 flex-1 rounded-full px-4 py-2"
                 value={groupMessage}
                 onChange={(event) => setGroupMessage(event.target.value)}
                 placeholder="Write a group message"
                 disabled={!selectedGroup}
               />
-              <button type="submit" className="btn-primary gap-2" disabled={sending || !groupMessage.trim() || !selectedGroup}>
-                <Send className="h-4 w-4" />
-                Send
+              <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || !groupMessage.trim() || !selectedGroup} aria-label="Send group message">
+                {sending ? <Clock3 className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </button>
             </form>
           </div>

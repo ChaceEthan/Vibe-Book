@@ -53,14 +53,85 @@ const idOf = (value) => {
   return value?._id?.toString?.() || value?.toString?.() || "";
 };
 
+const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
+
+const unreadCountFor = (userId) =>
+  Message.countDocuments({
+    $or: [{ recipient: userId }, { receiver: userId }],
+    isDraft: false,
+    readAt: { $exists: false },
+    hiddenFor: { $ne: userId },
+  });
+
+const emitUnreadCount = async (userId) => {
+  const io = getIo();
+  const targetId = idOf(userId);
+
+  if (!io || !targetId) {
+    return;
+  }
+
+  const unreadCount = await unreadCountFor(targetId);
+  io.to(targetId).emit("unread:update", { unreadCount });
+};
+
+const markMessagesSeen = async (messages = [], viewerId) => {
+  const viewer = idOf(viewerId);
+  const unseenMessages = messages.filter((message) => {
+    const recipientId = idOf(message.recipient || message.receiver);
+    return recipientId === viewer && !message.readAt;
+  });
+
+  if (!unseenMessages.length) {
+    return;
+  }
+
+  const seenAt = new Date();
+  const ids = unseenMessages.map((message) => message._id);
+
+  await Message.updateMany(
+    { _id: { $in: ids } },
+    {
+      $set: {
+        readAt: seenAt,
+        seenAt,
+        deliveryStatus: "seen",
+      },
+    }
+  );
+
+  const io = getIo();
+  unseenMessages.forEach((message) => {
+    io?.to(idOf(message.sender)).emit("message:delivery", {
+      messageId: message._id,
+      chatId: message.chatId || chatIdFor(message.sender, viewer),
+      status: "seen",
+      seenAt,
+      readAt: seenAt,
+    });
+
+    message.readAt = seenAt;
+    message.seenAt = seenAt;
+    message.deliveryStatus = "seen";
+  });
+
+  await emitUnreadCount(viewer);
+};
+
 const serializeRealtimeMessage = (message) => ({
   _id: message._id,
   chatId: message.chatId,
+  clientId: message.clientId,
   senderId: message.senderId || idOf(message.sender),
   receiverId: message.receiverId || idOf(message.recipient || message.receiver),
   message: message.message,
   text: message.text || message.message,
   createdAt: message.createdAt,
+  deliveredAt: message.deliveredAt,
+  readAt: message.readAt,
+  seenAt: message.seenAt,
+  deliveryStatus: message.deliveryStatus || (message.readAt ? "seen" : message.deliveredAt ? "delivered" : "sent"),
+  status: message.deliveryStatus || (message.readAt ? "seen" : message.deliveredAt ? "delivered" : "sent"),
   sender: message.sender,
   recipient: message.recipient,
   receiver: message.receiver || message.recipient,
@@ -116,12 +187,7 @@ const getInbox = async (req, res, next) => {
 
 const getUnreadCount = async (req, res, next) => {
   try {
-    const unreadCount = await Message.countDocuments({
-      $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
-      isDraft: false,
-      readAt: { $exists: false },
-      hiddenFor: { $ne: req.user._id },
-    });
+    const unreadCount = await unreadCountFor(req.user._id);
 
     return res.json({ unreadCount });
   } catch (error) {
@@ -145,16 +211,6 @@ const getConversation = async (req, res, next) => {
       return null;
     }
 
-    await Message.updateMany(
-      {
-        sender: otherUser._id,
-        $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
-        isDraft: false,
-        readAt: { $exists: false },
-      },
-      { readAt: new Date() }
-    );
-
     const messages = await populateMessage(
       Message.find({
         isDraft: false,
@@ -167,6 +223,8 @@ const getConversation = async (req, res, next) => {
         ],
       }).sort({ createdAt: 1 })
     );
+
+    await markMessagesSeen(messages, req.user._id);
 
     return res.json({
       messages,
@@ -210,7 +268,10 @@ const sendDirectMessage = async (req, res, next) => {
       return null;
     }
 
+    const recipientOnline = isUserOnline(recipient._id);
     const message = await Message.create({
+      chatId: req.body.chatId || chatIdFor(req.user._id, recipient._id),
+      clientId: trimText(req.body.clientId),
       sender: req.user._id,
       recipient: recipient._id,
       receiver: recipient._id,
@@ -218,13 +279,25 @@ const sendDirectMessage = async (req, res, next) => {
       message: text,
       text,
       type: "reply",
+      deliveryStatus: recipientOnline ? "delivered" : "sent",
+      deliveredAt: recipientOnline ? new Date() : undefined,
     });
 
     const populatedMessage = await populateMessage(Message.findById(message._id));
     const realtimeMessage = serializeRealtimeMessage(populatedMessage);
-    getIo()?.to(recipient._id.toString()).emit("direct:message", populatedMessage);
-    getIo()?.to(recipient._id.toString()).emit("receive_message", realtimeMessage);
-    getIo()?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
+    const io = getIo();
+
+    io?.to(recipient._id.toString()).emit("direct:message", populatedMessage);
+    io?.to(recipient._id.toString()).emit("receive_message", realtimeMessage);
+    io?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
+    io?.to(req.user._id.toString()).emit("message:delivery", {
+      messageId: populatedMessage._id,
+      clientId: populatedMessage.clientId,
+      chatId: populatedMessage.chatId,
+      status: populatedMessage.deliveryStatus,
+      deliveredAt: populatedMessage.deliveredAt,
+    });
+    await emitUnreadCount(recipient._id);
 
     return res.status(201).json({
       message: "Message sent",
@@ -272,8 +345,19 @@ const getMessageById = async (req, res, next) => {
     const recipientId = idOf(message.recipient || message.receiver);
 
     if (recipientId === req.user._id.toString() && !message.readAt) {
-      message.readAt = new Date();
+      const seenAt = new Date();
+      message.readAt = seenAt;
+      message.seenAt = seenAt;
+      message.deliveryStatus = "seen";
       await message.save();
+      getIo()?.to(idOf(message.sender)).emit("message:delivery", {
+        messageId: message._id,
+        chatId: message.chatId,
+        status: "seen",
+        seenAt,
+        readAt: seenAt,
+      });
+      await emitUnreadCount(req.user._id);
     }
 
     return res.json({ inboxMessage: message });
@@ -307,8 +391,11 @@ const replyToMessage = async (req, res, next) => {
       original.sender.toString() === req.user._id.toString()
         ? original.recipient
         : original.sender;
+    const recipientOnline = isUserOnline(recipient);
 
     const reply = await Message.create({
+      chatId: chatIdFor(req.user._id, recipient),
+      clientId: trimText(req.body.clientId),
       sender: req.user._id,
       recipient,
       receiver: recipient,
@@ -317,9 +404,17 @@ const replyToMessage = async (req, res, next) => {
       message: text,
       text,
       type: "reply",
+      deliveryStatus: recipientOnline ? "delivered" : "sent",
+      deliveredAt: recipientOnline ? new Date() : undefined,
     });
 
     const populatedReply = await populateMessage(Message.findById(reply._id));
+    const realtimeMessage = serializeRealtimeMessage(populatedReply);
+    const io = getIo();
+
+    io?.to(idOf(recipient)).emit("receive_message", realtimeMessage);
+    io?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
+    await emitUnreadCount(recipient);
 
     return res.status(201).json({ inboxMessage: populatedReply });
   } catch (error) {
@@ -333,19 +428,33 @@ const markMessageRead = async (req, res, next) => {
       return null;
     }
 
+    const seenAt = new Date();
     const message = await Message.findOneAndUpdate(
       {
         _id: req.params.id,
         $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
         hiddenFor: { $ne: req.user._id },
       },
-      { readAt: new Date() },
+      {
+        readAt: seenAt,
+        seenAt,
+        deliveryStatus: "seen",
+      },
       { returnDocument: "after" }
     );
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
     }
+
+    getIo()?.to(idOf(message.sender)).emit("message:delivery", {
+      messageId: message._id,
+      chatId: message.chatId,
+      status: "seen",
+      seenAt,
+      readAt: seenAt,
+    });
+    await emitUnreadCount(req.user._id);
 
     return res.json({ inboxMessage: message });
   } catch (error) {
@@ -365,13 +474,15 @@ const markMessageUnread = async (req, res, next) => {
         $or: [{ recipient: req.user._id }, { receiver: req.user._id }],
         hiddenFor: { $ne: req.user._id },
       },
-      { $unset: { readAt: "" } },
+      { $unset: { readAt: "", seenAt: "" }, $set: { deliveryStatus: "delivered" } },
       { returnDocument: "after" }
     );
 
     if (!message) {
       return res.status(404).json({ message: "Message not found" });
     }
+
+    await emitUnreadCount(req.user._id);
 
     return res.json({ inboxMessage: message });
   } catch (error) {
