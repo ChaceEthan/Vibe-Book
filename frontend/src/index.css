@@ -9,6 +9,12 @@
 
   body {
     @apply bg-surface text-slate-900 antialiased;
+    overflow-x: hidden;
+  }
+
+  #root {
+    min-height: 100%;
+    overflow-x: hidden;
   }
 
   button,

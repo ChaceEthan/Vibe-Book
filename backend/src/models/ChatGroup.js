@@ -29,6 +29,28 @@ const chatGroupSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    pendingInvites: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 240,
+      default: "",
+    },
+    avatar: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    visibility: {
+      type: String,
+      enum: ["public", "private"],
+      default: "public",
+    },
     isActive: {
       type: Boolean,
       default: true,
@@ -63,6 +85,7 @@ chatGroupSchema.methods.syncGroupAliases = function () {
   }
 
   this.members = Array.from(new Set(this.members.map(idOf).filter(Boolean)));
+  this.pendingInvites = Array.from(new Set((this.pendingInvites || []).map(idOf).filter(Boolean)));
 };
 
 chatGroupSchema.pre("validate", function () {

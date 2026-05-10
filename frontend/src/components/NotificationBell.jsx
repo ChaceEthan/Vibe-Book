@@ -11,7 +11,7 @@ const iconForType = (type) => {
   if (type === "follow") return UserPlus;
   if (type === "like") return Heart;
   if (type === "comment") return MessageSquare;
-  if (type === "message" || type === "group_message" || type === "mention") return MessageCircle;
+  if (type === "message" || type === "group_message" || type === "group_invite" || type === "mention") return MessageCircle;
   return Bell;
 };
 
@@ -38,11 +38,11 @@ const notificationTargetFor = (notification = {}, currentUser = {}) => {
   const actorId = idOf(actor) || idOf(notification.actorId) || idOf(data.actorId) || idOf(data.senderId) || idOf(data.userId);
   const postId = idOf(notification.postId) || idOf(data.postId) || idOf(data.feedItemId) || idOf(data.post?._id);
   const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(currentUser?._id);
-  const groupId = idOf(data.groupId) || idOf(data.group?._id);
+  const groupId = idOf(notification.groupId) || idOf(data.groupId) || idOf(data.group?._id);
 
   if (notification.type === "follow" && actorId) return `/profile/${actorId}`;
   if (notification.type === "message" && actorId) return `/chat/${actorId}`;
-  if (notification.type === "group_message") return groupId ? `/groups?group=${groupId}` : "/groups";
+  if (notification.type === "group_message" || notification.type === "group_invite") return groupId ? `/groups?group=${groupId}` : "/groups";
   if (["like", "comment", "mention"].includes(notification.type)) {
     const profileId = postOwnerId || actorId;
     if (profileId) return `/profile/${profileId}${postId ? `?post=${postId}` : ""}`;

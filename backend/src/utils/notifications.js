@@ -74,6 +74,7 @@ const createNotification = async ({
       { path: "actorId", select: "name username profilePicture profileImage isVerified verified premiumBadge" },
       { path: "postId", select: "mediaUrl caption userId" },
       { path: "messageId", select: "message" },
+      { path: "groupId", select: "groupName name avatar description" },
     ]);
     await emitNotification(notification);
     return notification;

@@ -1,8 +1,10 @@
 const express = require("express");
 
 const {
+  addGroupMember,
   createGroup,
   getGroupMessages,
+  inviteToGroup,
   joinGroup,
   leaveGroup,
   listMembers,
@@ -30,6 +32,9 @@ router.get("/", listGroups);
 router.post("/create", createGroup);
 router.post("/message", sendMessageFromBody);
 router.post("/join/:groupId", joinGroup);
+router.post("/:groupId/join", joinGroup);
+router.post("/:groupId/invite", inviteToGroup);
+router.post("/:groupId/add-member", addGroupMember);
 router.post("/leave/:groupId", leaveGroup);
 router.get("/:groupId/members", listMembers);
 router.get("/:groupId", getGroupMessages);

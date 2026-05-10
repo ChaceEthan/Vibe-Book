@@ -585,7 +585,7 @@ const Settings = () => {
           <SettingRow icon={LogOut} label="Session management" detail="End this session or sign out" actionLabel="Open" onClick={() => scrollToSettingsBlock("session-controls")} />
           <SettingRow icon={ShieldCheck} label="2FA placeholder" detail="Extra login protection is coming soon" value="Coming soon" />
           <SettingRow icon={HelpCircle} label="Report problem" actionLabel="Start" onClick={() => notifySuccess("Problem report shortcut opened.")} />
-          <SettingRow icon={BookOpen} label="Community guidelines" actionLabel="Read" onClick={() => notifySuccess("Community guidelines will open here.")} />
+          <SettingRow icon={BookOpen} label="Community guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
           <SettingRow icon={ShieldAlert} label="Security alerts" checked={localPrefs.securityAlerts} onToggle={(checked) => saveLocalPreference("securityAlerts", checked, "Security alerts saved.")} />
         </SettingsSection>
 
@@ -598,11 +598,11 @@ const Settings = () => {
         </SettingsSection>
 
         <SettingsSection title="Support" icon={HelpCircle}>
-          <SettingRow icon={HelpCircle} label="Help Center" actionLabel="Open" onClick={() => notifySuccess("Help Center shortcut opened.")} />
-          <SettingRow icon={Info} label="About VibeBook" value="VibeBook" />
-          <SettingRow icon={FileText} label="Terms" actionLabel="View" onClick={() => notifySuccess("Terms shortcut opened.")} />
-          <SettingRow icon={FileText} label="Privacy policy" actionLabel="View" onClick={() => notifySuccess("Privacy policy shortcut opened.")} />
-          <SettingRow icon={Mail} label="Contact support" actionLabel="Email" onClick={() => { window.location.href = "mailto:support@vibebook.app"; }} />
+          <SettingRow icon={HelpCircle} label="Help Center" actionLabel="Open" onClick={() => navigate("/contact")} />
+          <SettingRow icon={Info} label="About VibeBook" actionLabel="View" onClick={() => navigate("/about")} />
+          <SettingRow icon={FileText} label="Terms" actionLabel="View" onClick={() => navigate("/terms")} />
+          <SettingRow icon={FileText} label="Privacy policy" actionLabel="View" onClick={() => navigate("/privacy-policy")} />
+          <SettingRow icon={Mail} label="Contact support" actionLabel="Email" onClick={() => { window.location.href = "mailto:gebmelody@gmail.com"; }} />
         </SettingsSection>
       </div>
 

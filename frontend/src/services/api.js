@@ -258,6 +258,9 @@ export const groupChatApi = {
   getMessages: (groupId) => API.get(`/groups/${groupId}`),
   send: (groupId, payload) => API.post("/groups/message", { ...payload, groupId }),
   join: (groupId) => API.post(`/groups/join/${groupId}`),
+  joinById: (groupId) => API.post(`/groups/${groupId}/join`),
+  invite: (groupId, payload = {}) => API.post(`/groups/${groupId}/invite`, payload),
+  addMember: (groupId, payload = {}) => API.post(`/groups/${groupId}/add-member`, payload),
   leave: (groupId) => API.post(`/groups/leave/${groupId}`),
   members: (groupId) => API.get(`/groups/${groupId}/members`),
 };

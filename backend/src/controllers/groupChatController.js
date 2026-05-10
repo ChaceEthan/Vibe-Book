@@ -8,7 +8,7 @@ const { getIo, isUserOnline } = require("../socket");
 const { sanitizeChatMessage, validateChatMessage } = require("../utils/chatModeration");
 const { createNotification } = require("../utils/notifications");
 
-const memberSelect = "name role profileImage profilePicture images gallery";
+const memberSelect = "name username role profileImage profilePicture images gallery";
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 const isProduction = process.env.NODE_ENV === "production";
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
@@ -89,17 +89,27 @@ const ensureMember = (group, userId) => {
   return members.some((member) => normalizeId(member) === targetId);
 };
 
-const serializeGroup = (group) => {
+const serializeGroup = (group, viewerId = "") => {
   const members = Array.isArray(group.members) ? group.members : [];
+  const pendingInvites = Array.isArray(group.pendingInvites) ? group.pendingInvites : [];
   const activeUsers = members.filter((member) => isUserOnline(member?._id || member));
+  const viewer = normalizeId(viewerId);
 
   return {
     _id: group._id,
     groupName: group.groupName || group.name,
     name: group.name || group.groupName,
+    description: group.description || "",
+    avatar: group.avatar || "",
+    visibility: group.visibility || "public",
     createdBy: group.createdBy,
     adminId: group.adminId || group.createdBy,
     members,
+    memberCount: members.length,
+    pendingInvites,
+    pendingInviteCount: pendingInvites.length,
+    isMember: viewer ? ensureMember(group, viewer) : undefined,
+    hasPendingInvite: viewer ? pendingInvites.some((member) => normalizeId(member) === viewer) : undefined,
     activeUsers,
     onlineUsersCount: activeUsers.length,
     createdAt: group.createdAt,
@@ -124,13 +134,14 @@ const serializeGroupMessage = (message) => ({
 const listGroups = async (req, res) => {
   try {
     const groups = await ChatGroup.find({
-      members: req.user._id,
       isActive: true,
+      $or: [{ members: req.user._id }, { pendingInvites: req.user._id }, { visibility: "public" }],
     })
       .populate("members", memberSelect)
+      .populate("pendingInvites", memberSelect)
       .sort({ updatedAt: -1 });
 
-    return res.json({ groups: groups.map(serializeGroup) });
+    return res.json({ groups: groups.map((group) => serializeGroup(group, req.user._id)) });
   } catch (error) {
     return sendGroupError(res, "group:list", error, "Unable to load groups");
   }
@@ -141,6 +152,7 @@ const createGroup = async (req, res) => {
     const body = req.body || {};
     const rawName = body.groupName || body.name || "";
     const groupName = sanitizeChatMessage(rawName).slice(0, 80);
+    const description = sanitizeChatMessage(body.description || "").slice(0, 240);
     const requestedMembers = normalizeMembers(body.members);
     const creator = await User.findById(req.user._id).select("followers following");
     const memberIds = uniqueIds([
@@ -171,13 +183,15 @@ const createGroup = async (req, res) => {
       createdBy: req.user._id,
       adminId: req.user._id,
       members: activeMemberIds,
+      description,
+      visibility: body.visibility === "private" ? "private" : "public",
       isActive: true,
     });
 
     await saveDocument(group, "group:create");
     await group.populate("members", memberSelect);
 
-    const serializedGroup = serializeGroup(group);
+    const serializedGroup = serializeGroup(group, req.user._id);
     const io = getIo();
 
     if (io) {
@@ -211,7 +225,7 @@ const listMembers = async (req, res) => {
       return res.status(403).json({ success: false, message: "You are not a member of this group" });
     }
 
-    return res.json({ group: serializeGroup(group), members: group.members || [] });
+    return res.json({ group: serializeGroup(group, req.user._id), members: group.members || [] });
   } catch (error) {
     return sendGroupError(res, "group:members", error, "Unable to load group members");
   }
@@ -233,9 +247,15 @@ const joinGroup = async (req, res) => {
     }
 
     const wasMember = ensureMember(group, req.user._id);
+    const wasInvited = (group.pendingInvites || []).some((memberId) => normalizeId(memberId) === normalizeId(req.user._id));
+
+    if (!wasMember && group.visibility === "private" && !wasInvited) {
+      return res.status(403).json({ success: false, message: "This group is invite-only" });
+    }
 
     if (!wasMember) {
       group.members = uniqueIds([...(group.members || []), req.user._id]);
+      group.pendingInvites = uniqueIds([...(group.pendingInvites || [])]).filter((memberId) => memberId !== normalizeId(req.user._id));
       group.updatedAt = new Date();
       await saveDocument(group, "group:join");
     }
@@ -251,19 +271,152 @@ const joinGroup = async (req, res) => {
 
     await Promise.all([group.populate("members", memberSelect), groupMessage?.populate("sender", memberSelect)]);
 
-    if (groupMessage) {
+    const serializedGroup = serializeGroup(group, req.user._id);
+    const messagePayload = groupMessage ? serializeGroupMessage(groupMessage) : null;
+
+    if (messagePayload) {
       group.members.forEach((memberId) => {
         getIo()?.to((memberId?._id || memberId).toString()).emit("group:member-joined", {
           groupId: group._id,
           userId: req.user._id,
-          message: serializeGroupMessage(groupMessage),
+          group: serializedGroup,
+          message: messagePayload,
         });
       });
     }
 
-    return res.json({ group: serializeGroup(group), groupMessage, message: "Joined group" });
+    return res.json({ success: true, group: serializedGroup, groupMessage: messagePayload, message: "Joined group" });
   } catch (error) {
     return sendGroupError(res, "group:join", error, "Unable to join group");
+  }
+};
+
+const inviteToGroup = async (req, res) => {
+  try {
+    if (!isValidGroupId(req.params.groupId)) {
+      return res.status(400).json({ success: false, message: "Valid groupId is required" });
+    }
+
+    const group = await ChatGroup.findOne({ _id: req.params.groupId, isActive: true });
+
+    if (!group) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    if (!ensureMember(group, req.user._id)) {
+      return res.status(403).json({ success: false, message: "Join the group before inviting friends" });
+    }
+
+    const requestedIds = uniqueIds([...normalizeMembers(req.body?.members), req.body?.userId, req.body?.memberId]).filter((id) => id !== normalizeId(req.user._id));
+    const users = await User.find({ _id: { $in: requestedIds }, isBlocked: false }).select("_id name username");
+    const existingMembers = new Set((group.members || []).map(normalizeId));
+    const inviteIds = users.map((member) => normalizeId(member._id)).filter((id) => id && !existingMembers.has(id));
+
+    group.pendingInvites = uniqueIds([...(group.pendingInvites || []), ...inviteIds]);
+    group.updatedAt = new Date();
+    await saveDocument(group, "group:invite");
+    await Promise.all([group.populate("members", memberSelect), group.populate("pendingInvites", memberSelect)]);
+
+    const serializedGroup = serializeGroup(group, req.user._id);
+    const io = getIo();
+
+    users
+      .filter((member) => inviteIds.includes(normalizeId(member._id)))
+      .forEach((member) => {
+        const inviteeGroup = serializeGroup(group, member._id);
+        const payload = {
+          groupId: group._id,
+          group: inviteeGroup,
+          invitedBy: req.user._id,
+        };
+        io?.to(normalizeId(member._id)).emit("group:invite", payload);
+        queueNotification({
+          userId: member._id,
+          type: "group_invite",
+          title: "Group invite",
+          message: `${req.user.name || "Someone"} invited you to ${group.groupName || group.name || "a group"}`,
+          actorId: req.user._id,
+          groupId: group._id,
+          data: { groupId: group._id?.toString?.() || "" },
+          dedupeKey: `group-invite:${group._id}:${member._id}`,
+        });
+      });
+
+    return res.json({ success: true, group: serializedGroup, invitedCount: inviteIds.length, message: inviteIds.length ? "Invite sent" : "No new invites sent" });
+  } catch (error) {
+    return sendGroupError(res, "group:invite", error, "Unable to invite members");
+  }
+};
+
+const addGroupMember = async (req, res) => {
+  try {
+    if (!isValidGroupId(req.params.groupId)) {
+      return res.status(400).json({ success: false, message: "Valid groupId is required" });
+    }
+
+    const group = await ChatGroup.findOne({ _id: req.params.groupId, isActive: true });
+
+    if (!group) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    if (!ensureMember(group, req.user._id)) {
+      return res.status(403).json({ success: false, message: "Join the group before adding members" });
+    }
+
+    const requestedIds = uniqueIds([...normalizeMembers(req.body?.members), req.body?.userId, req.body?.memberId]).filter((id) => id !== normalizeId(req.user._id));
+    const users = await User.find({ _id: { $in: requestedIds }, isBlocked: false }).select("_id name username");
+    const existingMembers = new Set((group.members || []).map(normalizeId));
+    const memberIds = users.map((member) => normalizeId(member._id)).filter((id) => id && !existingMembers.has(id));
+
+    if (!memberIds.length) {
+      await group.populate("members", memberSelect);
+      return res.json({ success: true, group: serializeGroup(group, req.user._id), addedCount: 0, message: "No new members added" });
+    }
+
+    group.members = uniqueIds([...(group.members || []), ...memberIds]);
+    group.pendingInvites = uniqueIds([...(group.pendingInvites || [])]).filter((memberId) => !memberIds.includes(memberId));
+    group.updatedAt = new Date();
+    await saveDocument(group, "group:add-member");
+
+    const groupMessage = await GroupMessage.create({
+      group: group._id,
+      sender: req.user._id,
+      message: `${req.user.name || "A member"} added ${memberIds.length} member${memberIds.length === 1 ? "" : "s"}`,
+      type: "system",
+    });
+
+    await Promise.all([group.populate("members", memberSelect), group.populate("pendingInvites", memberSelect), groupMessage.populate("sender", memberSelect)]);
+    const serializedGroup = serializeGroup(group, req.user._id);
+    const messagePayload = serializeGroupMessage(groupMessage);
+
+    group.members.forEach((memberId) => {
+      getIo()?.to((memberId?._id || memberId).toString()).emit("group:member-joined", {
+        groupId: group._id,
+        group: serializedGroup,
+        userId: req.user._id,
+        message: messagePayload,
+      });
+    });
+
+    users
+      .filter((member) => memberIds.includes(normalizeId(member._id)))
+      .forEach((member) => {
+        queueNotification({
+          userId: member._id,
+          type: "group_message",
+          title: "Added to group",
+          message: `${req.user.name || "Someone"} added you to ${group.groupName || group.name || "a group"}`,
+          actorId: req.user._id,
+          groupId: group._id,
+          data: { groupId: group._id?.toString?.() || "" },
+          dedupeKey: `group-add:${group._id}:${member._id}`,
+        });
+      });
+
+    return res.json({ success: true, group: serializedGroup, groupMessage: messagePayload, addedCount: memberIds.length, message: "Members added" });
+  } catch (error) {
+    return sendGroupError(res, "group:add-member", error, "Unable to add members");
   }
 };
 
@@ -320,7 +473,7 @@ const leaveGroup = async (req, res) => {
       });
     });
 
-    return res.json({ group: serializeGroup(group), groupMessage, message: "Left group" });
+    return res.json({ group: serializeGroup(group, req.user._id), groupMessage, message: "Left group" });
   } catch (error) {
     return sendGroupError(res, "group:leave", error, "Unable to leave group");
   }
@@ -350,7 +503,7 @@ const getGroupMessages = async (req, res) => {
       .sort({ createdAt: 1 })
       .limit(300);
 
-    return res.json({ group: serializeGroup(group), messages: messages.map(serializeGroupMessage) });
+    return res.json({ group: serializeGroup(group, req.user._id), messages: messages.map(serializeGroupMessage) });
   } catch (error) {
     return sendGroupError(res, "group:messages", error, "Unable to load group messages");
   }
@@ -432,7 +585,9 @@ const sendGroupMessage = async (req, res) => {
 
 module.exports = {
   createGroup,
+  addGroupMember,
   getGroupMessages,
+  inviteToGroup,
   joinGroup,
   leaveGroup,
   listMembers,

@@ -33,6 +33,7 @@ const getNotifications = async (req, res, next) => {
         .populate("actorId", "name username profilePicture profileImage isVerified verified premiumBadge")
         .populate("postId", "mediaUrl caption userId")
         .populate("messageId", "message")
+        .populate("groupId", "groupName name avatar description")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),

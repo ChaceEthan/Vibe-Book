@@ -13,6 +13,7 @@ import Drafts from "./pages/Drafts.jsx";
 import Explore from "./pages/Explore.jsx";
 import Home from "./pages/Home.jsx";
 import Inbox from "./pages/Inbox.jsx";
+import LegalPage from "./pages/LegalPage.jsx";
 import Login from "./pages/Login.jsx";
 import NotificationCenter from "./pages/NotificationCenter.jsx";
 import Profile from "./pages/Profile.jsx";
@@ -63,6 +64,13 @@ const App = () => {
           />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/privacy-policy" element={<LegalPage page="privacy-policy" />} />
+          <Route path="/terms" element={<LegalPage page="terms" />} />
+          <Route path="/terms-of-service" element={<LegalPage page="terms" />} />
+          <Route path="/community-guidelines" element={<LegalPage page="community-guidelines" />} />
+          <Route path="/about" element={<LegalPage page="about" />} />
+          <Route path="/contact" element={<LegalPage page="contact" />} />
+          <Route path="/creator-monetization-policy" element={<LegalPage page="creator-monetization-policy" />} />
           <Route
             path="/notifications"
             element={

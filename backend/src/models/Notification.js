@@ -14,6 +14,7 @@ const notificationSchema = new mongoose.Schema(
       enum: [
         "message",
         "group_message",
+        "group_invite",
         "mention",
         "follow",
         "like",

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { AlertCircle, Check, CheckCheck, Clock3, Plus, Send, UserMinus, Users } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock3, Pin, Plus, Search, Send, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -169,8 +169,14 @@ const Chat = () => {
   const [groupMessages, setGroupMessages] = useState([]);
   const [groupMessage, setGroupMessage] = useState("");
   const [groupName, setGroupName] = useState("");
+  const [groupDescription, setGroupDescription] = useState("");
   const [memberOptions, setMemberOptions] = useState([]);
   const [selectedMembers, setSelectedMembers] = useState([]);
+  const [memberModalOpen, setMemberModalOpen] = useState(false);
+  const [memberModalMode, setMemberModalMode] = useState("invite");
+  const [groupMemberSearch, setGroupMemberSearch] = useState("");
+  const [groupMemberSelection, setGroupMemberSelection] = useState([]);
+  const [groupActionLoading, setGroupActionLoading] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -333,10 +339,15 @@ const Chat = () => {
     try {
       const { data } = await groupChatApi.list();
       const nextGroups = Array.isArray(data?.groups) ? data.groups : [];
+      const requestedGroup = new URLSearchParams(window.location.search).get("group") || "";
       setGroups(nextGroups);
       setSelectedGroup((current) => {
         if (current && nextGroups.some((item) => item._id === current)) {
           return current;
+        }
+
+        if (requestedGroup && nextGroups.some((item) => item._id === requestedGroup)) {
+          return requestedGroup;
         }
 
         return nextGroups[0]?._id || "";
@@ -370,10 +381,18 @@ const Chat = () => {
     }
   };
 
-  const loadGroupMessages = async (groupId, { silent = false } = {}) => {
+  const loadGroupMessages = async (groupId, { silent = false, force = false } = {}) => {
     if (!groupId) {
       setGroupMessages([]);
       setLoading(false);
+      return;
+    }
+
+    const selected = groups.find((item) => item._id === groupId);
+    if (!force && selected?.isMember === false) {
+      setGroupMessages([]);
+      setLoading(false);
+      setError("");
       return;
     }
 
@@ -593,6 +612,10 @@ const Chat = () => {
         appendGroupMessage(messagePayload);
       }
 
+      if (payload.group?._id) {
+        setGroups((current) => current.map((item) => (item._id === payload.group._id ? payload.group : item)));
+      }
+
       scheduleGroupsRefresh();
     };
 
@@ -788,7 +811,7 @@ const Chat = () => {
   };
 
   const sendGroupText = async (value, retryMessage = null) => {
-    if (!String(value || "").trim() || !selectedGroup) {
+    if (!String(value || "").trim() || !selectedGroup || !selectedGroupIsMember) {
       return;
     }
 
@@ -859,9 +882,11 @@ const Chat = () => {
     try {
       const { data } = await groupChatApi.create({
         groupName: groupName.trim(),
+        description: groupDescription.trim(),
         members: selectedMembers,
       });
       setGroupName("");
+      setGroupDescription("");
       setSelectedMembers([]);
       setSelectedGroup(data.group?._id || "");
       setStatus("Group created.");
@@ -890,6 +915,81 @@ const Chat = () => {
     }
   };
 
+  const handleJoinGroup = async (groupId = selectedGroup) => {
+    if (!groupId) {
+      return;
+    }
+
+    const group = groups.find((item) => item._id === groupId);
+
+    if (group && !window.confirm(`Join ${group.groupName || group.name || "this group"}?`)) {
+      return;
+    }
+
+    setGroupActionLoading(`join:${groupId}`);
+    setStatus("");
+    setError("");
+
+    try {
+      const { data } = await groupChatApi.joinById(groupId);
+      if (data?.group) {
+        setGroups((current) => current.map((item) => (item._id === data.group._id ? data.group : item)));
+        setSelectedGroup(data.group._id);
+      }
+      if (data?.groupMessage) {
+        appendGroupMessage(data.groupMessage);
+      }
+      setStatus("Joined group.");
+      await loadGroupMessages(groupId, { force: true });
+      await loadGroups({ silent: true });
+    } catch (requestError) {
+      setError(requestMessage(requestError, "Unable to join group."));
+    } finally {
+      setGroupActionLoading("");
+    }
+  };
+
+  const openMemberModal = (mode = "invite") => {
+    setMemberModalMode(mode);
+    setGroupMemberSearch("");
+    setGroupMemberSelection([]);
+    setMemberModalOpen(true);
+    loadMembers();
+  };
+
+  const handleGroupMemberSubmit = async () => {
+    if (!selectedGroup || !groupMemberSelection.length) {
+      return;
+    }
+
+    const mode = memberModalMode === "add" ? "add" : "invite";
+    setGroupActionLoading(mode);
+    setStatus("");
+    setError("");
+
+    try {
+      const request = mode === "add" ? groupChatApi.addMember : groupChatApi.invite;
+      const { data } = await request(selectedGroup, { members: groupMemberSelection });
+
+      if (data?.group) {
+        setGroups((current) => current.map((item) => (item._id === data.group._id ? data.group : item)));
+      }
+
+      if (data?.groupMessage) {
+        appendGroupMessage(data.groupMessage);
+      }
+
+      setStatus(data?.message || (mode === "add" ? "Members added." : "Invite sent."));
+      setMemberModalOpen(false);
+      setGroupMemberSelection([]);
+      await loadGroups({ silent: true });
+    } catch (requestError) {
+      setError(requestMessage(requestError, mode === "add" ? "Unable to add members." : "Unable to invite friends."));
+    } finally {
+      setGroupActionLoading("");
+    }
+  };
+
   const handlePayAccess = async () => {
     setStatus("");
     setError("");
@@ -904,6 +1004,20 @@ const Chat = () => {
   };
 
   const selectedGroupInfo = groups.find((item) => item._id === selectedGroup);
+  const selectedGroupIsMember = selectedGroupInfo ? selectedGroupInfo.isMember !== false : false;
+  const selectedGroupMembers = new Set((selectedGroupInfo?.members || []).map(idOf));
+  const selectedGroupPendingInvites = new Set((selectedGroupInfo?.pendingInvites || []).map(idOf));
+  const memberSearch = groupMemberSearch.trim().toLowerCase();
+  const filteredMemberOptions = memberOptions
+    .filter((member) => !selectedGroupMembers.has(member._id))
+    .filter((member) => memberModalMode === "add" || !selectedGroupPendingInvites.has(member._id))
+    .filter((member) => {
+      if (!memberSearch) {
+        return true;
+      }
+
+      return [member.name, member.username, member.email].some((value) => String(value || "").toLowerCase().includes(memberSearch));
+    });
 
   return (
     <section className="container-page py-10">
@@ -1058,6 +1172,16 @@ const Chat = () => {
                 <span className="label">Group name</span>
                 <input className="field" value={groupName} onChange={(event) => setGroupName(event.target.value)} />
               </label>
+              <label className="mt-3 block space-y-2">
+                <span className="label">Description</span>
+                <textarea
+                  className="field min-h-20 resize-none"
+                  value={groupDescription}
+                  onChange={(event) => setGroupDescription(event.target.value)}
+                  maxLength={240}
+                  placeholder="What is this community about?"
+                />
+              </label>
               <div className="mt-4 max-h-56 space-y-2 overflow-y-auto">
                 {memberOptions.map((member) => (
                   <label key={member._id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-surface p-3 text-sm font-semibold text-slate-700">
@@ -1082,20 +1206,35 @@ const Chat = () => {
             <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-soft">
               {groups.length ? (
                 groups.map((group) => (
-                  <button
+                  <div
                     key={group._id}
-                    type="button"
-                    className={`mb-2 flex w-full items-center justify-between gap-3 rounded-lg p-3 text-left ${
+                    className={`mb-2 rounded-lg p-2 ${
                       selectedGroup === group._id ? "bg-brand text-navy" : "bg-surface text-slate-700"
                     }`}
-                    onClick={() => setSelectedGroup(group._id)}
                   >
-                    <span className="min-w-0">
-                      <span className="block truncate font-black">{group.groupName}</span>
-                      <span className="mt-0.5 block truncate text-xs font-bold opacity-70">{memberCountLabel(group)}</span>
-                    </span>
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${Number(group.onlineUsersCount || 0) ? "bg-green-500" : "bg-slate-300"}`} />
-                  </button>
+                    <button type="button" className="flex w-full items-center gap-3 text-left" onClick={() => setSelectedGroup(group._id)}>
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-navy text-xs font-black text-white">
+                        {group.avatar ? <img src={mediaUrl(group.avatar)} alt="" className="h-full w-full rounded-lg object-cover" /> : initialsFor(group.groupName)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-black">{group.groupName}</span>
+                        {group.description && <span className="block truncate text-xs font-semibold opacity-70">{group.description}</span>}
+                        <span className="mt-0.5 block truncate text-xs font-bold opacity-70">{memberCountLabel(group)}</span>
+                      </span>
+                      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${Number(group.onlineUsersCount || 0) ? "bg-green-500" : "bg-slate-300"}`} />
+                    </button>
+                    {group.isMember === false && (
+                      <button
+                        type="button"
+                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-navy/10 bg-white px-3 py-2 text-xs font-black text-navy shadow-sm disabled:opacity-60"
+                        onClick={() => handleJoinGroup(group._id)}
+                        disabled={groupActionLoading === `join:${group._id}`}
+                      >
+                        <UserPlus className="h-3.5 w-3.5" />
+                        {group.hasPendingInvite ? "Accept Invite" : "Join Group"}
+                      </button>
+                    )}
+                  </div>
                 ))
               ) : (
                 <p className="p-3 text-sm text-slate-600">No groups yet.</p>
@@ -1105,41 +1244,94 @@ const Chat = () => {
 
           <div className="rounded-lg border border-slate-200 bg-white shadow-soft">
             <div className="border-b border-slate-100 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-black text-navy">{selectedGroupInfo?.groupName || selectedGroupInfo?.name || "Group messages"}</p>
-                  {selectedGroupInfo && <p className="mt-1 text-xs font-bold text-slate-500">{memberCountLabel(selectedGroupInfo)}</p>}
-                  {selectedGroupInfo?.members?.length ? (
-                    <div className="mt-2 flex max-w-full flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500">
-                      <Users className="h-3.5 w-3.5 shrink-0" />
-                      {selectedGroupInfo.members.slice(0, 6).map((member) => (
-                        <Link
-                          key={member._id || member}
-                          to={idOf(member) === user?._id ? "/dashboard" : `/chat/${idOf(member)}`}
-                          className="max-w-28 truncate rounded-full bg-surface px-2 py-1 font-bold text-slate-600 hover:text-navy"
-                        >
-                          {member.name || "Member"}
-                        </Link>
-                      ))}
-                      {selectedGroupInfo.members.length > 6 && <span className="px-1">+{selectedGroupInfo.members.length - 6}</span>}
-                    </div>
-                  ) : null}
-                  {selectedGroupInfo?.activeUsers?.length ? (
-                    <p className="mt-1 truncate text-xs font-bold text-green-700">
-                      Active now: {selectedGroupInfo.activeUsers.map((member) => member.name || "Member").join(", ")}
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex min-w-0 flex-1 gap-3">
+                  <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-black text-white">
+                    {selectedGroupInfo?.avatar ? (
+                      <img src={mediaUrl(selectedGroupInfo.avatar)} alt="" className="h-full w-full rounded-lg object-cover" />
+                    ) : (
+                      initialsFor(selectedGroupInfo?.groupName || "Group")
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-black text-navy">{selectedGroupInfo?.groupName || selectedGroupInfo?.name || "Group messages"}</p>
+                    {selectedGroupInfo && <p className="mt-1 text-xs font-bold text-slate-500">{memberCountLabel(selectedGroupInfo)}</p>}
+                    {selectedGroupInfo?.description && <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-500">{selectedGroupInfo.description}</p>}
+                    <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-surface px-2 py-1 text-[11px] font-black text-slate-500">
+                      <Pin className="h-3 w-3" />
+                      Pinned messages coming soon
                     </p>
-                  ) : null}
+                  </div>
                 </div>
-                {selectedGroup && (
-                  <button type="button" className="btn-secondary gap-2 text-red-700" onClick={handleLeaveGroup}>
-                    <UserMinus className="h-4 w-4" />
-                    Leave
-                  </button>
-                )}
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  {selectedGroup && !selectedGroupIsMember && (
+                    <button
+                      type="button"
+                      className="btn-primary gap-2"
+                      onClick={() => handleJoinGroup(selectedGroup)}
+                      disabled={groupActionLoading === `join:${selectedGroup}`}
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      Join
+                    </button>
+                  )}
+                  {selectedGroup && selectedGroupIsMember && (
+                    <>
+                      <button type="button" className="btn-secondary gap-2" onClick={() => openMemberModal("invite")}>
+                        <UserPlus className="h-4 w-4" />
+                        Invite
+                      </button>
+                      <button type="button" className="btn-secondary gap-2" onClick={() => openMemberModal("add")}>
+                        <UserCheck className="h-4 w-4" />
+                        Add
+                      </button>
+                      <button type="button" className="btn-secondary gap-2 text-red-700" onClick={handleLeaveGroup}>
+                        <UserMinus className="h-4 w-4" />
+                        Leave
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
+              {selectedGroupInfo?.members?.length ? (
+                <div className="mt-3 flex max-w-full flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500">
+                  <Users className="h-3.5 w-3.5 shrink-0" />
+                  {selectedGroupInfo.members.slice(0, 8).map((member) => (
+                    <Link
+                      key={member._id || member}
+                      to={idOf(member) === user?._id ? "/dashboard" : `/chat/${idOf(member)}`}
+                      className="max-w-28 truncate rounded-full bg-surface px-2 py-1 font-bold text-slate-600 hover:text-navy"
+                    >
+                      {member.name || "Member"}
+                    </Link>
+                  ))}
+                  {selectedGroupInfo.members.length > 8 && <span className="px-1">+{selectedGroupInfo.members.length - 8}</span>}
+                </div>
+              ) : null}
+              {selectedGroupInfo?.activeUsers?.length ? (
+                <p className="mt-2 truncate text-xs font-bold text-green-700">
+                  Active now: {selectedGroupInfo.activeUsers.map((member) => member.name || "Member").join(", ")}
+                </p>
+              ) : null}
             </div>
             <div className="h-[calc(100dvh-22rem)] min-h-80 space-y-3 overflow-y-auto scroll-smooth p-3 sm:h-[520px] sm:p-4">
-              {loading ? (
+              {!selectedGroup ? (
+                <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg bg-surface p-6 text-center">
+                  <Users className="h-8 w-8 text-brand" />
+                  <p className="mt-3 text-lg font-black text-navy">Choose a group</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">Join a community or create one to start chatting.</p>
+                </div>
+              ) : !selectedGroupIsMember ? (
+                <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg bg-surface p-6 text-center">
+                  <UserPlus className="h-8 w-8 text-brand" />
+                  <p className="mt-3 text-lg font-black text-navy">Join to view messages</p>
+                  <p className="mt-1 max-w-sm text-sm font-semibold text-slate-500">Members can read previous messages, invite friends, and chat in real time.</p>
+                  <button type="button" className="btn-primary mt-4 gap-2" onClick={() => handleJoinGroup(selectedGroup)} disabled={groupActionLoading === `join:${selectedGroup}`}>
+                    <UserPlus className="h-4 w-4" />
+                    {selectedGroupInfo?.hasPendingInvite ? "Accept Invite" : "Join Group"}
+                  </button>
+                </div>
+              ) : loading ? (
                 <div className="h-40 animate-pulse rounded-lg bg-slate-200" />
               ) : groupMessages.length ? (
                 groupMessages.map((item) => {
@@ -1180,7 +1372,15 @@ const Chat = () => {
                   );
                 })
               ) : (
-                <p className="text-sm text-slate-600">No group messages yet.</p>
+                <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg bg-surface p-6 text-center">
+                  <Users className="h-8 w-8 text-brand" />
+                  <p className="mt-3 text-lg font-black text-navy">No messages yet</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-500">Invite friends to start chatting.</p>
+                  <button type="button" className="btn-secondary mt-4 gap-2" onClick={() => openMemberModal("invite")}>
+                    <UserPlus className="h-4 w-4" />
+                    Invite Friends
+                  </button>
+                </div>
               )}
               <div ref={groupBottomRef} />
             </div>
@@ -1189,13 +1389,78 @@ const Chat = () => {
                 className="field min-h-10 flex-1 rounded-full px-4 py-2"
                 value={groupMessage}
                 onChange={(event) => setGroupMessage(event.target.value)}
-                placeholder="Write a group message"
-                disabled={!selectedGroup}
+                placeholder={selectedGroupIsMember ? "Write a group message" : "Join the group to chat"}
+                disabled={!selectedGroup || !selectedGroupIsMember}
               />
-              <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || !groupMessage.trim() || !selectedGroup} aria-label="Send group message">
+              <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || !groupMessage.trim() || !selectedGroup || !selectedGroupIsMember} aria-label="Send group message">
                 {sending ? <Clock3 className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+      {memberModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true">
+          <div className="max-h-[86dvh] w-full overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-lg sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">{memberModalMode === "add" ? "Add members" : "Invite friends"}</p>
+                <h2 className="text-lg font-black text-navy">{selectedGroupInfo?.groupName || "Group"}</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={() => setMemberModalOpen(false)} aria-label="Close member modal">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-4">
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  className="field pl-9"
+                  value={groupMemberSearch}
+                  onChange={(event) => setGroupMemberSearch(event.target.value)}
+                  placeholder="Search users"
+                />
+              </label>
+
+              <div className="max-h-[44dvh] space-y-2 overflow-y-auto pr-1">
+                {filteredMemberOptions.length ? (
+                  filteredMemberOptions.map((member) => {
+                    const checked = groupMemberSelection.includes(member._id);
+                    return (
+                      <label key={member._id} className={`flex items-center gap-3 rounded-lg border p-3 ${checked ? "border-brand bg-brand/10" : "border-slate-200 bg-surface"}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(event) =>
+                            setGroupMemberSelection((current) =>
+                              event.target.checked ? [...current, member._id] : current.filter((id) => id !== member._id)
+                            )
+                          }
+                        />
+                        <Avatar profile={member} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-black text-navy">{member.name || member.username || "VibeBook user"}</span>
+                          {member.username && <span className="block truncate text-xs font-semibold text-slate-500">@{member.username}</span>}
+                        </span>
+                      </label>
+                    );
+                  })
+                ) : (
+                  <p className="rounded-lg bg-surface p-4 text-center text-sm font-semibold text-slate-500">No available users found.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setMemberModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary flex-1 gap-2" onClick={handleGroupMemberSubmit} disabled={!groupMemberSelection.length || Boolean(groupActionLoading)}>
+                {groupActionLoading ? <Clock3 className="h-4 w-4" /> : memberModalMode === "add" ? <UserCheck className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
+                {memberModalMode === "add" ? "Add" : "Invite"}
+              </button>
+            </div>
           </div>
         </div>
       )}
