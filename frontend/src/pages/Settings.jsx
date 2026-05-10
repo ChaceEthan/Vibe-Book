@@ -29,6 +29,7 @@ import {
   UserRound,
   Users,
   Volume2,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -37,7 +38,7 @@ import { GENDER_OPTIONS, PROFILE_CATEGORIES } from "../constants/profile";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
-import { mediaUrl, userApi } from "../services/api";
+import { authApi, mediaUrl, userApi } from "../services/api";
 
 const PHONE_COUNTRIES = [
   { country: "Rwanda", code: "+250", label: "RW" },
@@ -128,6 +129,37 @@ const SOUND_OPTIONS = [
   { value: "sound", label: "Sound on" },
   { value: "muted", label: "Muted" },
 ];
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const emptyPasswordFlow = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: "",
+  step: 1,
+};
+
+const emptyEmailFlow = {
+  currentPassword: "",
+  newEmail: "",
+  code: "",
+  expectedCode: "",
+  step: 1,
+};
+
+const passwordStrengthFor = (value = "") => {
+  let score = 0;
+  if (value.length >= 8) score += 1;
+  if (/[A-Z]/.test(value)) score += 1;
+  if (/[0-9]/.test(value)) score += 1;
+  if (/[^A-Za-z0-9]/.test(value)) score += 1;
+  return score;
+};
+
+const securityDate = (value) => {
+  if (!value) return "Not available";
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+};
 
 const readLocalPrefs = () => {
   if (typeof window === "undefined") return DEFAULT_LOCAL_PREFS;
@@ -238,7 +270,6 @@ const Settings = () => {
   const { addToast } = useToast();
   const navigate = useNavigate();
   const [profileForm, setProfileForm] = useState(() => initialProfileForm(user || {}));
-  const [password, setPassword] = useState("");
   const [phoneForm, setPhoneForm] = useState({
     country: user?.country || "Rwanda",
     countryCode: user?.countryCode || "+250",
@@ -256,6 +287,10 @@ const Settings = () => {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState("");
+  const [authModal, setAuthModal] = useState("");
+  const [passwordFlow, setPasswordFlow] = useState(emptyPasswordFlow);
+  const [emailFlow, setEmailFlow] = useState(emptyEmailFlow);
+  const [authFlowError, setAuthFlowError] = useState("");
 
   const profileImage = mediaUrl(user?.profilePicture || user?.profileImage || "");
   const activeCountry = useMemo(
@@ -385,18 +420,145 @@ const Settings = () => {
     }
   };
 
-  const savePassword = async (event) => {
+  const closeAuthModal = () => {
+    setAuthModal("");
+    setAuthFlowError("");
+    setSaving("");
+    setPasswordFlow(emptyPasswordFlow);
+    setEmailFlow(emptyEmailFlow);
+  };
+
+  const openPasswordModal = () => {
+    setAuthModal("password");
+    setAuthFlowError("");
+    setPasswordFlow(emptyPasswordFlow);
+  };
+
+  const openEmailModal = () => {
+    setAuthModal("email");
+    setAuthFlowError("");
+    setEmailFlow(emptyEmailFlow);
+  };
+
+  const openSessionsModal = () => {
+    setAuthModal("sessions");
+    setAuthFlowError("");
+  };
+
+  const verifyCurrentPassword = async (currentPassword) => {
+    const identifier = user?.email || user?.phone || user?.phoneNumber || user?.username;
+
+    if (!identifier) {
+      throw new Error("No login identifier is available for this account.");
+    }
+
+    await authApi.login({ identifier, password: currentPassword });
+  };
+
+  const handlePasswordFlow = async (event) => {
     event.preventDefault();
-    setSaving("password");
-    setStatus("");
-    setError("");
+    setAuthFlowError("");
 
     try {
-      await updateProfile({ password });
-      setPassword("");
-      notifySuccess("Password changed.");
+      if (passwordFlow.step === 1) {
+        if (!passwordFlow.currentPassword) {
+          setAuthFlowError("Enter your current password.");
+          return;
+        }
+
+        setSaving("password-current");
+        await verifyCurrentPassword(passwordFlow.currentPassword);
+        setPasswordFlow((current) => ({ ...current, step: 2 }));
+        return;
+      }
+
+      if (passwordFlow.step === 2) {
+        if (passwordFlow.newPassword.length < 8 || passwordStrengthFor(passwordFlow.newPassword) < 2) {
+          setAuthFlowError("Use at least 8 characters with a mix of letters, numbers, or symbols.");
+          return;
+        }
+
+        setPasswordFlow((current) => ({ ...current, step: 3 }));
+        return;
+      }
+
+      if (passwordFlow.step === 3) {
+        if (passwordFlow.newPassword !== passwordFlow.confirmPassword) {
+          setAuthFlowError("Passwords do not match.");
+          return;
+        }
+
+        setSaving("password");
+        await updateProfile({ password: passwordFlow.newPassword });
+        await refreshProfile();
+        setPasswordFlow((current) => ({ ...current, currentPassword: "", newPassword: "", confirmPassword: "", step: 4 }));
+        notifySuccess("Password changed.");
+      }
     } catch (requestError) {
-      notifyError(requestError.response?.data?.message || "Unable to change password.");
+      setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to verify password.");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const handleEmailFlow = async (event) => {
+    event.preventDefault();
+    setAuthFlowError("");
+
+    try {
+      if (emailFlow.step === 1) {
+        if (!emailFlow.currentPassword) {
+          setAuthFlowError("Enter your current password.");
+          return;
+        }
+
+        setSaving("email-current");
+        await verifyCurrentPassword(emailFlow.currentPassword);
+        setEmailFlow((current) => ({ ...current, step: 2 }));
+        return;
+      }
+
+      if (emailFlow.step === 2) {
+        const nextEmail = emailFlow.newEmail.trim().toLowerCase();
+
+        if (!EMAIL_PATTERN.test(nextEmail)) {
+          setAuthFlowError("Enter a valid email address.");
+          return;
+        }
+
+        if (nextEmail === String(user?.email || "").toLowerCase()) {
+          setAuthFlowError("This email is already on your account.");
+          return;
+        }
+
+        setSaving("email-check");
+        const { data } = await authApi.checkAvailability({ field: "email", value: nextEmail });
+        if (!data.available) {
+          setAuthFlowError(data.message || "Email already exists.");
+          return;
+        }
+
+        const code = String(Math.floor(100000 + Math.random() * 900000));
+        setEmailFlow((current) => ({ ...current, newEmail: nextEmail, expectedCode: code, step: 3 }));
+        notifySuccess(`Verification code sent. Code: ${code}`);
+        return;
+      }
+
+      if (emailFlow.step === 3) {
+        if (emailFlow.code.trim() !== emailFlow.expectedCode) {
+          setAuthFlowError("Verification code is incorrect.");
+          return;
+        }
+
+        setEmailFlow((current) => ({ ...current, step: 4 }));
+        setSaving("email");
+        await updateProfile({ email: emailFlow.newEmail.trim().toLowerCase() });
+        await refreshProfile();
+        setEmailFlow((current) => ({ ...current, currentPassword: "", code: "", expectedCode: "", step: 5 }));
+        notifySuccess("Email updated.");
+      }
+    } catch (requestError) {
+      setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to update email.");
     } finally {
       setSaving("");
     }
@@ -485,6 +647,9 @@ const Settings = () => {
   const phoneDisplay = [user?.countryCode, user?.phoneNumber || user?.phone].filter(Boolean).join(" ") || "Not added";
   const accountStatus = user?.isSuspended || user?.accountStatus === "suspended" ? "Limited" : "Active";
   const verificationStatus = user?.isVerified || user?.verified ? "Verified" : "Not verified";
+  const passwordStrength = passwordStrengthFor(passwordFlow.newPassword);
+  const passwordStrengthLabel = ["Weak", "Weak", "Fair", "Good", "Strong"][passwordStrength] || "Weak";
+  const sessionBrowser = typeof navigator !== "undefined" ? navigator.userAgent.split(" ").slice(-2).join(" ") : "Current browser";
   const notificationRows = [
     ["notifyLikes", "Likes", Heart],
     ["notifyComments", "Comments", MessageSquare],
@@ -509,8 +674,8 @@ const Settings = () => {
         <SettingsSection title="Account" icon={UserRound}>
           <SettingRow icon={UserRound} label="Manage account" detail="Profile editor, creator identity, and public details" actionLabel="Open" onClick={() => scrollToSettingsBlock("account-editor")} />
           <SettingRow icon={UserRound} label="Username" detail="Lowercase and unique" value={`@${user?.username || profileForm.username || "creator"}`} />
-          <SettingRow icon={KeyRound} label="Password" detail="Change your login password" actionLabel="Edit" onClick={() => scrollToSettingsBlock("password-editor")} />
-          <SettingRow icon={Mail} label="Email" detail="Used for login and account recovery" value={user?.email || "Not added"} />
+          <SettingRow icon={KeyRound} label="Password" detail="Change your login password securely" actionLabel="Change" onClick={openPasswordModal} />
+          <SettingRow icon={Mail} label="Email" detail={user?.email ? "Used for login and recovery" : "Add an email for recovery"} actionLabel={user?.email || "Change"} onClick={openEmailModal} />
           <SettingRow icon={Phone} label="Phone number" detail={user?.phoneVerified ? "Verified" : "Verification available"} actionLabel={phoneDisplay} onClick={() => scrollToSettingsBlock("phone-editor")} />
           <SettingRow icon={CheckCircle2} label="Birthday" detail="Used for age-appropriate experiences" value={profileForm.birthday || "Not added"} />
           <SettingRow icon={ShieldCheck} label="Account status" detail="Current account standing" value={accountStatus} />
@@ -594,8 +759,8 @@ const Settings = () => {
         </SettingsSection>
 
         <SettingsSection title="Safety" icon={ShieldAlert}>
-          <SettingRow icon={Smartphone} label="Login devices" detail="Current device is signed in" actionLabel="View" onClick={() => notifySuccess("Current device is active.")} />
-          <SettingRow icon={LogOut} label="Session management" detail="End this session or sign out" actionLabel="Open" onClick={() => scrollToSettingsBlock("session-controls")} />
+          <SettingRow icon={Smartphone} label="Login devices" detail="Current device is signed in" actionLabel="View" onClick={openSessionsModal} />
+          <SettingRow icon={LogOut} label="Session management" detail="Review or end this session" actionLabel="Open" onClick={openSessionsModal} />
           <SettingRow icon={ShieldCheck} label="2FA placeholder" detail="Extra login protection is coming soon" value="Coming soon" />
           <SettingRow icon={HelpCircle} label="Report problem" actionLabel="Start" onClick={() => notifySuccess("Problem report shortcut opened.")} />
           <SettingRow icon={BookOpen} label="Community guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
@@ -799,16 +964,28 @@ const Settings = () => {
             </select>
           </div>
 
-          <form id="password-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={savePassword}>
+          <div id="password-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center gap-3">
               <KeyRound className="h-5 w-5 text-brand" />
-              <h2 className="text-lg font-black text-navy">Change Password</h2>
+              <h2 className="text-lg font-black text-navy">Account security</h2>
             </div>
-            <input className="field" type="password" minLength="6" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="New password" required />
-            <button type="submit" className="btn-primary mt-4 w-full" disabled={saving === "password"}>
-              {saving === "password" ? "Saving..." : "Save Password"}
+            <div className="grid gap-3 text-sm font-semibold text-slate-600">
+              <div className="rounded-lg bg-surface p-3">
+                <p className="font-black text-navy">Password</p>
+                <p className="mt-1 text-xs">Last account update: {securityDate(user?.updatedAt || user?.createdAt)}</p>
+              </div>
+              <div className="rounded-lg bg-surface p-3">
+                <p className="font-black text-navy">Email</p>
+                <p className="mt-1 text-xs">{user?.email ? `${user.email} - active` : "No email added"}</p>
+              </div>
+            </div>
+            <button type="button" className="btn-primary mt-4 w-full" onClick={openPasswordModal}>
+              Change Password
             </button>
-          </form>
+            <button type="button" className="btn-secondary mt-3 w-full" onClick={openEmailModal}>
+              Change Email
+            </button>
+          </div>
 
           <div id="privacy-controls" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center gap-3">
@@ -920,6 +1097,215 @@ const Settings = () => {
           </div>
         </div>
       </div>
+
+      {authModal === "password" && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <form className="w-full max-w-md overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg" onSubmit={handlePasswordFlow}>
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Secure change</p>
+                <h2 className="text-lg font-black text-navy">Change Password</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close password flow">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-4">
+              <div className="grid grid-cols-4 gap-2">
+                {[1, 2, 3, 4].map((step) => (
+                  <span key={step} className={`h-1.5 rounded-full ${passwordFlow.step >= step ? "bg-brand" : "bg-slate-200"}`} />
+                ))}
+              </div>
+
+              {authFlowError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{authFlowError}</div>}
+
+              {passwordFlow.step === 1 && (
+                <label className="block space-y-2">
+                  <span className="label">Current password</span>
+                  <input className="field" type="password" value={passwordFlow.currentPassword} onChange={(event) => setPasswordFlow((current) => ({ ...current, currentPassword: event.target.value }))} autoComplete="current-password" required />
+                </label>
+              )}
+
+              {passwordFlow.step === 2 && (
+                <div className="space-y-3">
+                  <label className="block space-y-2">
+                    <span className="label">New password</span>
+                    <input className="field" type="password" minLength="8" value={passwordFlow.newPassword} onChange={(event) => setPasswordFlow((current) => ({ ...current, newPassword: event.target.value }))} autoComplete="new-password" required />
+                  </label>
+                  <div>
+                    <div className="flex items-center justify-between text-xs font-black text-slate-500">
+                      <span>Password strength</span>
+                      <span>{passwordStrengthLabel}</span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-4 gap-1">
+                      {[1, 2, 3, 4].map((score) => (
+                        <span key={score} className={`h-2 rounded-full ${passwordStrength >= score ? "bg-brand" : "bg-slate-200"}`} />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {passwordFlow.step === 3 && (
+                <label className="block space-y-2">
+                  <span className="label">Confirm new password</span>
+                  <input className="field" type="password" value={passwordFlow.confirmPassword} onChange={(event) => setPasswordFlow((current) => ({ ...current, confirmPassword: event.target.value }))} autoComplete="new-password" required />
+                </label>
+              )}
+
+              {passwordFlow.step === 4 && (
+                <div className="rounded-lg bg-green-50 p-5 text-center">
+                  <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" />
+                  <p className="mt-3 text-lg font-black text-navy">Password updated</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Your current session remains active.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              {passwordFlow.step > 1 && passwordFlow.step < 4 && (
+                <button type="button" className="btn-secondary flex-1" onClick={() => setPasswordFlow((current) => ({ ...current, step: Math.max(1, current.step - 1) }))}>
+                  Back
+                </button>
+              )}
+              {passwordFlow.step === 4 ? (
+                <button type="button" className="btn-primary flex-1" onClick={closeAuthModal}>
+                  Done
+                </button>
+              ) : (
+                <button type="submit" className="btn-primary flex-1" disabled={Boolean(saving)}>
+                  {saving ? "Checking..." : passwordFlow.step === 1 ? "Verify" : passwordFlow.step === 2 ? "Continue" : "Save Password"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
+
+      {authModal === "email" && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <form className="w-full max-w-md overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg" onSubmit={handleEmailFlow}>
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Account recovery</p>
+                <h2 className="text-lg font-black text-navy">Change Email</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close email flow">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-4">
+              <div className="grid grid-cols-5 gap-2">
+                {[1, 2, 3, 4, 5].map((step) => (
+                  <span key={step} className={`h-1.5 rounded-full ${emailFlow.step >= step ? "bg-brand" : "bg-slate-200"}`} />
+                ))}
+              </div>
+
+              {authFlowError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{authFlowError}</div>}
+
+              {emailFlow.step === 1 && (
+                <label className="block space-y-2">
+                  <span className="label">Current password</span>
+                  <input className="field" type="password" value={emailFlow.currentPassword} onChange={(event) => setEmailFlow((current) => ({ ...current, currentPassword: event.target.value }))} autoComplete="current-password" required />
+                </label>
+              )}
+
+              {emailFlow.step === 2 && (
+                <label className="block space-y-2">
+                  <span className="label">New email</span>
+                  <input className="field" type="email" value={emailFlow.newEmail} onChange={(event) => setEmailFlow((current) => ({ ...current, newEmail: event.target.value.trim().toLowerCase() }))} placeholder="you@example.com" autoComplete="email" required />
+                </label>
+              )}
+
+              {emailFlow.step === 3 && (
+                <label className="block space-y-2">
+                  <span className="label">Verification code</span>
+                  <input className="field text-center text-lg font-black tracking-[0.35em]" inputMode="numeric" value={emailFlow.code} onChange={(event) => setEmailFlow((current) => ({ ...current, code: event.target.value.replace(/[^\d]/g, "").slice(0, 6) }))} placeholder="000000" required />
+                  <span className="block text-xs font-semibold text-slate-500">Enter the 6-digit code sent for {emailFlow.newEmail}.</span>
+                </label>
+              )}
+
+              {emailFlow.step === 4 && (
+                <div className="rounded-lg bg-blue-50 p-5 text-center">
+                  <Mail className="mx-auto h-10 w-10 text-blue-600" />
+                  <p className="mt-3 text-lg font-black text-navy">Updating email</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Saving your new login email securely.</p>
+                </div>
+              )}
+
+              {emailFlow.step === 5 && (
+                <div className="rounded-lg bg-green-50 p-5 text-center">
+                  <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" />
+                  <p className="mt-3 text-lg font-black text-navy">Email updated</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Use the new email the next time you sign in.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              {emailFlow.step > 1 && emailFlow.step < 5 && emailFlow.step !== 4 && (
+                <button type="button" className="btn-secondary flex-1" onClick={() => setEmailFlow((current) => ({ ...current, step: Math.max(1, current.step - 1) }))}>
+                  Back
+                </button>
+              )}
+              {emailFlow.step === 5 ? (
+                <button type="button" className="btn-primary flex-1" onClick={closeAuthModal}>
+                  Done
+                </button>
+              ) : (
+                <button type="submit" className="btn-primary flex-1" disabled={Boolean(saving) || emailFlow.step === 4}>
+                  {saving ? (emailFlow.step === 4 ? "Updating..." : "Checking...") : emailFlow.step === 1 ? "Verify" : emailFlow.step === 2 ? "Send Code" : "Update Email"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
+
+      {authModal === "sessions" && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Security</p>
+                <h2 className="text-lg font-black text-navy">Login Sessions</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close sessions">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="space-y-3 p-4">
+              <div className="rounded-lg border border-slate-200 bg-surface p-4">
+                <p className="text-sm font-black text-navy">Current session</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">{sessionBrowser}</p>
+                <p className="mt-2 text-xs font-semibold text-green-700">Active now</p>
+              </div>
+              <div className="grid gap-2 text-sm font-semibold text-slate-600">
+                <div className="flex items-center justify-between rounded-lg bg-white p-3 shadow-sm">
+                  <span>Email</span>
+                  <span className="font-black text-navy">{user?.email ? "Added" : "Not added"}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg bg-white p-3 shadow-sm">
+                  <span>Phone</span>
+                  <span className="font-black text-navy">{user?.phoneVerified ? "Verified" : "Unverified"}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg bg-white p-3 shadow-sm">
+                  <span>Password updated</span>
+                  <span className="max-w-[10rem] truncate text-right text-xs font-black text-navy">{securityDate(user?.updatedAt || user?.createdAt)}</span>
+                </div>
+              </div>
+              <button type="button" className="btn-secondary w-full" onClick={openPasswordModal}>
+                Change Password
+              </button>
+              <button type="button" className="btn-primary w-full" onClick={handleLogout}>
+                Sign out this device
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };

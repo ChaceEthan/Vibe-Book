@@ -65,6 +65,25 @@ const escapeRegex = (value) => {
 };
 
 const normalizePhoneDigits = (value = "") => String(value || "").replace(/[^\d]/g, "");
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const normalizeEmail = (value = "") => String(value || "").trim().toLowerCase();
+
+const findUserByEmailInsensitive = (email, excludeId) => {
+  const normalized = normalizeEmail(email);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return User.findOne({
+    ...(excludeId ? { _id: { $ne: excludeId } } : {}),
+    $or: [
+      { email: normalized },
+      { emailNormalized: normalized },
+      { email: { $regex: `^${escapeRegex(normalized)}$`, $options: "i" } },
+    ],
+  });
+};
 
 const findUserByPhoneFields = (phoneFields = {}, excludeId) => {
   const phoneNumber = normalizePhoneDigits(phoneFields.phoneNumber || phoneFields.phone);
@@ -644,6 +663,23 @@ const updateProfile = async (req, res, next) => {
       if (req.user.username && req.user.username !== username) {
         updates.usernameHistory = Array.from(new Set([...(req.user.usernameHistory || []), req.user.username])).slice(-10);
       }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+      const email = normalizeEmail(req.body.email);
+
+      if (!email || !emailPattern.test(email)) {
+        return res.status(400).json({ message: "Invalid email address" });
+      }
+
+      const existingEmail = await findUserByEmailInsensitive(email, req.user._id);
+      if (existingEmail) {
+        return res.status(400).json({ message: "Email already exists" });
+      }
+
+      updates.email = email;
+      updates.emailNormalized = email;
+      updates.emailGeneratedFromPhone = false;
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "bio")) {

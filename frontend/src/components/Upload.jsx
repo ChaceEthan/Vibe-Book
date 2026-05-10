@@ -27,7 +27,6 @@ import {
   Volume2,
   VolumeX,
   Wand2,
-  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -920,26 +919,49 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     onClose?.();
   };
 
+  const scrollToUploadDetails = () => {
+    document.getElementById("upload-post-details")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("upload-post-details-desktop")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+
+  const scrollToUploadEditor = () => {
+    document.getElementById("upload-editor-tools")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+
   return (
     <div className="fixed inset-0 z-[80] flex items-end overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:items-center sm:justify-center sm:p-4">
       <div className="flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[94dvh] sm:max-w-6xl sm:rounded-2xl">
         {/* Header with step progress */}
         <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-6 sm:py-4">
           <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
-            <div className="min-w-0">
+            <button
+              type="button"
+              className="inline-flex h-10 shrink-0 items-center justify-center rounded-full px-3 text-sm font-black text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              onClick={handleClose}
+            >
+              Back
+            </button>
+            <div className="min-w-0 flex-1 text-center sm:text-left">
               <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Create Post</p>
               <h2 className="mt-1 truncate text-lg font-bold text-slate-900 sm:text-2xl">
                 {isProfile ? "Update profile picture" : "Create a VibeBook post"}
               </h2>
             </div>
-            <button
-              type="button"
-              className="flex-shrink-0 rounded-lg p-2 text-slate-500 transition duration-200 hover:bg-slate-100 hover:text-slate-900"
-              onClick={handleClose}
-              aria-label="Close upload"
-            >
-              <X className="h-6 w-6" />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              {file && !isProfile && (
+                <button type="button" className="hidden rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 sm:inline-flex" onClick={scrollToUploadEditor}>
+                  Edit
+                </button>
+              )}
+              <button
+                type="button"
+                className="rounded-full bg-blue-600 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                onClick={scrollToUploadDetails}
+                disabled={!file}
+              >
+                Next
+              </button>
+            </div>
           </div>
 
           {/* Step progress indicator */}
@@ -1206,8 +1228,150 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   )}
                 </div>
 
+                {!isProfile && (
+                  <div id="upload-post-details" className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:hidden">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase text-brand">Post details</p>
+                        <h3 className="text-base font-black text-navy">Caption and audience</h3>
+                      </div>
+                      <span className="text-xs font-bold text-slate-400">{caption.length}/2200</span>
+                    </div>
+
+                    <label className="mt-3 block space-y-2">
+                      <span className="label">Caption</span>
+                      <textarea
+                        className="field min-h-20 resize-none"
+                        value={caption}
+                        onChange={(event) => setCaption(event.target.value)}
+                        placeholder="Write a caption..."
+                        disabled={uploading}
+                        maxLength={2200}
+                      />
+                    </label>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <label className="block space-y-2">
+                        <span className="label">Hashtags</span>
+                        <div className="relative">
+                          <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            className="field pl-10"
+                            value={tags}
+                            onChange={(event) => setTags(event.target.value)}
+                            placeholder="vibebook"
+                            disabled={uploading}
+                          />
+                        </div>
+                      </label>
+
+                      <label className="block space-y-2">
+                        <span className="label">Mentions</span>
+                        <div className="relative">
+                          <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            className="field pl-10"
+                            value={mentions}
+                            onChange={(event) => setMentions(event.target.value)}
+                            placeholder="@creator"
+                            disabled={uploading}
+                          />
+                        </div>
+                      </label>
+                    </div>
+
+                    <label className="mt-3 block space-y-2">
+                      <span className="label">Location</span>
+                      <input
+                        className="field"
+                        value={location}
+                        onChange={(event) => setLocation(event.target.value)}
+                        placeholder="Kigali, Rwanda"
+                        disabled={uploading}
+                      />
+                    </label>
+
+                    <div className="mt-3">
+                      <span className="label font-bold">Audience</span>
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        {visibilityOptions.map((option) => {
+                          const Icon = option.icon;
+                          return (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-xs font-black transition-all duration-200 ${
+                                visibility === option.value
+                                  ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
+                                  : "border-slate-200 bg-white text-slate-700"
+                              }`}
+                              onClick={() => setVisibility(option.value)}
+                              disabled={uploading}
+                            >
+                              <Icon className="h-4 w-4" />
+                              <span className="truncate">{option.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center gap-3 rounded-xl bg-slate-50 p-3">
+                      <div className="flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-950">
+                        {previewSrc ? (
+                          isImage ? (
+                            <img src={previewSrc} alt="" className="h-full w-full object-contain" style={{ filter: editorFilter }} />
+                          ) : (
+                            <video src={previewSrc} className="h-full w-full object-contain" muted playsInline preload="metadata" style={{ filter: editorFilter }} />
+                          )
+                        ) : (
+                          <ImageIcon className="h-5 w-5 text-white/60" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-black text-navy">{file?.name || "No media selected"}</p>
+                        <p className="mt-1 text-xs font-semibold text-slate-500">Thumbnail preview</p>
+                      </div>
+                    </div>
+
+                    {error && file && !uploading && !success && (
+                      <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                        <p>{error}</p>
+                      </div>
+                    )}
+
+                    <div className="sticky bottom-0 -mx-3 mt-3 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
+                      <button
+                        type="button"
+                        className="w-full rounded-full bg-blue-600 px-6 py-3 text-base font-black text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
+                        onClick={handleUpload}
+                        disabled={uploading || !file || success || (type === "video" && duration > MAX_VIDEO_SECONDS)}
+                      >
+                        {uploading ? (
+                          <span className="inline-flex items-center justify-center gap-2">
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            <span>Uploading {progress}%</span>
+                          </span>
+                        ) : success ? (
+                          <span className="inline-flex items-center justify-center gap-2">
+                            <CheckCircle2 className="h-5 w-5" />
+                            Upload complete
+                          </span>
+                        ) : error ? (
+                          "Retry upload"
+                        ) : (
+                          <span className="inline-flex items-center justify-center gap-2">
+                            <UploadCloud className="h-5 w-5" />
+                            Post now
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {file && !isProfile && (
-                  <div className="min-w-0 rounded-t-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-lg sm:p-4">
+                  <div id="upload-editor-tools" className="min-w-0 rounded-t-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-lg sm:p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-black uppercase text-brand">Editor</p>
@@ -1478,7 +1642,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
               </div>
 
-              <div className="min-w-0 space-y-3">
+              <div id="upload-post-details-desktop" className="hidden min-w-0 space-y-3 xl:block">
                 {!isProfile && (
                   <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                     <div className="flex items-center justify-between gap-3">
