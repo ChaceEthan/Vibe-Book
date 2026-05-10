@@ -28,6 +28,7 @@ import {
   Trash2,
   UserRound,
   Users,
+  Volume2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -88,6 +89,7 @@ const DEFAULT_LOCAL_PREFS = {
   darkMode: false,
   dataSaver: false,
   autoplay: true,
+  soundPreference: "sound",
   commentPrivacy: "everyone",
   remixPrivacy: "everyone",
   mentionPrivacy: "everyone",
@@ -122,12 +124,18 @@ const ACCESSIBILITY_OPTIONS = [
   { value: "larger_text", label: "Larger text" },
 ];
 
+const SOUND_OPTIONS = [
+  { value: "sound", label: "Sound on" },
+  { value: "muted", label: "Muted" },
+];
+
 const readLocalPrefs = () => {
   if (typeof window === "undefined") return DEFAULT_LOCAL_PREFS;
 
   try {
     const parsed = JSON.parse(window.localStorage.getItem("vibebook:settings-preferences") || "{}");
-    return { ...DEFAULT_LOCAL_PREFS, ...parsed };
+    const feedAudio = window.localStorage.getItem("vibebook:feed-audio");
+    return { ...DEFAULT_LOCAL_PREFS, ...parsed, soundPreference: feedAudio === "muted" ? "muted" : parsed.soundPreference || DEFAULT_LOCAL_PREFS.soundPreference };
   } catch {
     return DEFAULT_LOCAL_PREFS;
   }
@@ -293,6 +301,9 @@ const Settings = () => {
     setLocalPrefs((current) => {
       const next = { ...current, [field]: value };
       saveLocalPrefs(next);
+      if (field === "soundPreference") {
+        window.localStorage.setItem("vibebook:feed-audio", value === "muted" ? "muted" : "sound");
+      }
       return next;
     });
     notifySuccess(message);
@@ -533,6 +544,7 @@ const Settings = () => {
           <SettingRow icon={Users} label="Who can duet/remix" selectValue={localPrefs.remixPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("remixPrivacy", value, "Remix privacy saved.")} />
           <SettingRow icon={Users} label="Who can mention" selectValue={localPrefs.mentionPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("mentionPrivacy", value, "Mention privacy saved.")} />
           <SettingRow icon={Ban} label="Blocked accounts" detail={Array.isArray(user?.blockedUsers) && user.blockedUsers.length ? `${user.blockedUsers.length} blocked` : "No blocked accounts"} actionLabel="Open" onClick={() => scrollToSettingsBlock("blocked-accounts")} />
+          <SettingRow icon={Ban} label="Muted users" detail="Quiet accounts and keywords without blocking" value="Coming soon" />
           <SettingRow icon={CheckCircle2} label="Activity status" detail="Show when you are active" checked={localPrefs.activityStatus} onToggle={(checked) => saveLocalPreference("activityStatus", checked, "Activity status saved.")} />
           <SettingRow
             icon={Globe2}
@@ -552,6 +564,7 @@ const Settings = () => {
           <SettingRow icon={Moon} label="Dark mode" detail="Remember this preference on this device" checked={localPrefs.darkMode} onToggle={(checked) => saveLocalPreference("darkMode", checked, "Display preference saved.")} />
           <SettingRow icon={Smartphone} label="Data saver" detail="Reduce mobile data usage where supported" checked={localPrefs.dataSaver} onToggle={(checked) => saveLocalPreference("dataSaver", checked, "Data saver saved.")} />
           <SettingRow icon={Bell} label="Autoplay" detail="Allow videos to start automatically" checked={localPrefs.autoplay} onToggle={(checked) => saveLocalPreference("autoplay", checked, "Autoplay preference saved.")} />
+          <SettingRow icon={Volume2} label="Sound preference" detail="Default feed playback audio" selectValue={localPrefs.soundPreference} options={SOUND_OPTIONS} onSelect={(value) => saveLocalPreference("soundPreference", value, "Sound preference saved.")} />
           <SettingRow icon={BarChart3} label="Video quality preference" selectValue={localPrefs.videoQuality} options={QUALITY_OPTIONS} onSelect={(value) => saveLocalPreference("videoQuality", value, "Video quality saved.")} />
           <SettingRow icon={Languages} label="Caption language" selectValue={localPrefs.captionLanguage} options={languageOptions} onSelect={(value) => saveLocalPreference("captionLanguage", value, "Caption language saved.")} />
           <SettingRow icon={CheckCircle2} label="Accessibility" selectValue={localPrefs.accessibility} options={ACCESSIBILITY_OPTIONS} onSelect={(value) => saveLocalPreference("accessibility", value, "Accessibility preference saved.")} />
@@ -586,6 +599,7 @@ const Settings = () => {
           <SettingRow icon={ShieldCheck} label="2FA placeholder" detail="Extra login protection is coming soon" value="Coming soon" />
           <SettingRow icon={HelpCircle} label="Report problem" actionLabel="Start" onClick={() => notifySuccess("Problem report shortcut opened.")} />
           <SettingRow icon={BookOpen} label="Community guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
+          <SettingRow icon={FileText} label="Download preferences" detail="Export account and content data when available" value="Coming soon" />
           <SettingRow icon={ShieldAlert} label="Security alerts" checked={localPrefs.securityAlerts} onToggle={(checked) => saveLocalPreference("securityAlerts", checked, "Security alerts saved.")} />
         </SettingsSection>
 
@@ -603,6 +617,13 @@ const Settings = () => {
           <SettingRow icon={FileText} label="Terms" actionLabel="View" onClick={() => navigate("/terms")} />
           <SettingRow icon={FileText} label="Privacy policy" actionLabel="View" onClick={() => navigate("/privacy-policy")} />
           <SettingRow icon={Mail} label="Contact support" actionLabel="Email" onClick={() => { window.location.href = "mailto:gebmelody@gmail.com"; }} />
+        </SettingsSection>
+
+        <SettingsSection title="Legal" icon={FileText}>
+          <SettingRow icon={FileText} label="Privacy Policy" actionLabel="View" onClick={() => navigate("/privacy-policy")} />
+          <SettingRow icon={FileText} label="Terms of Service" actionLabel="View" onClick={() => navigate("/terms")} />
+          <SettingRow icon={BookOpen} label="Community Guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
+          <SettingRow icon={BarChart3} label="Creator Monetization" actionLabel="Read" onClick={() => navigate("/creator-monetization-policy")} />
         </SettingsSection>
       </div>
 

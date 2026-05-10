@@ -321,7 +321,7 @@ const CommentsSheet = ({
   return (
     <div className="fixed inset-0 z-[75] flex items-end justify-center bg-slate-950/45 px-0 backdrop-blur-sm sm:items-center sm:px-4" onClick={onClose}>
       <section
-        className="comment-sheet-in flex max-h-[78dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white text-slate-900 shadow-2xl sm:max-h-[82dvh] sm:rounded-lg"
+        className="comment-sheet-in flex max-h-[86dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white text-slate-900 shadow-2xl sm:max-h-[82dvh] sm:rounded-lg"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
@@ -896,8 +896,8 @@ const Home = () => {
 
   if (loading) {
     return (
-      <section className="home-feed-viewport bg-slate-950 p-2">
-        <div className="mx-auto h-full max-w-[min(100vw,48rem)] animate-pulse rounded-lg bg-slate-800" />
+      <section className="home-feed-viewport bg-slate-950">
+        <div className="h-full w-full animate-pulse bg-slate-800" />
       </section>
     );
   }
@@ -944,7 +944,7 @@ const Home = () => {
 
       <div
         ref={scrollerRef}
-        className="home-feed-scroll home-feed-viewport mx-auto max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto bg-slate-950"
+        className="home-feed-scroll home-feed-viewport w-full snap-y snap-mandatory overflow-y-auto bg-slate-950"
         style={{ overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" }}
       >
         {visibleFeed.length ? (

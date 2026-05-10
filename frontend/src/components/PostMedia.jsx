@@ -387,6 +387,19 @@ const PostMedia = ({
         onPointerUp={handlePointerUp}
       >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.18),rgba(15,23,42,0.92)_58%,#020617_100%)]" />
+        {!minimal && (
+          <video
+            src={src}
+            className="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-30 blur-2xl"
+            muted
+            loop
+            playsInline
+            autoPlay={autoPlay && active}
+            preload="metadata"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+        )}
         <video
           ref={mediaRef}
           src={src}

@@ -1149,10 +1149,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             {status && !success && <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">{status}</div>}
           </aside>
 
-          <main className="min-w-0 max-w-full overflow-x-hidden p-3 sm:p-5">
-            <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(17rem,0.68fr)] xl:gap-5">
+          <main className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-5">
+            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.58fr)] xl:gap-5">
               <div className="min-w-0 space-y-4">
-                <div className="relative mx-auto flex h-[58dvh] min-h-[18rem] w-full max-w-sm items-center justify-center overflow-hidden rounded-lg bg-slate-950 sm:max-h-[34rem] sm:min-h-[30rem] sm:max-w-none xl:h-auto xl:min-h-[34rem]">
+                <div className="relative mx-auto flex h-[42dvh] min-h-[15rem] w-full max-w-sm items-center justify-center overflow-hidden rounded-lg bg-slate-950 sm:h-[58dvh] sm:max-h-[34rem] sm:min-h-[30rem] sm:max-w-none xl:h-auto xl:min-h-[34rem]">
                   {previewSrc ? (
                     <>
                       {isImage ? (
@@ -1207,16 +1207,16 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 </div>
 
                 {file && !isProfile && (
-                  <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-                    <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="min-w-0 rounded-t-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-lg sm:p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-black uppercase text-brand">Editor</p>
-                        <h3 className="text-lg font-black text-navy">Tune before posting</h3>
+                        <h3 className="text-base font-black text-navy sm:text-lg">Tune before posting</h3>
                       </div>
                       <Sparkles className="h-5 w-5 text-brand" />
                     </div>
 
-                    <div className="mb-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+                    <div className="mb-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
                       {editorToolTabs.map((tab) => {
                         const Icon = tab.icon;
                         return (
@@ -1478,13 +1478,21 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
               </div>
 
-              <div className="min-w-0 space-y-4">
+              <div className="min-w-0 space-y-3">
                 {!isProfile && (
-                  <>
-                    <label className="block space-y-2">
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase text-brand">Post details</p>
+                        <h3 className="text-base font-black text-navy">Caption and audience</h3>
+                      </div>
+                      <span className="text-xs font-bold text-slate-400">{caption.length}/2200</span>
+                    </div>
+
+                    <label className="mt-3 block space-y-2">
                       <span className="label">Caption</span>
                       <textarea
-                        className="field min-h-28 resize-y"
+                        className="field min-h-20 resize-none sm:min-h-24"
                         value={caption}
                         onChange={(event) => setCaption(event.target.value)}
                         placeholder="Write a caption..."
@@ -1493,35 +1501,37 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       />
                     </label>
 
-                    <label className="block space-y-2">
-                      <span className="label">Hashtags</span>
-                      <div className="relative">
-                        <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          className="field pl-10"
-                          value={tags}
-                          onChange={(event) => setTags(event.target.value)}
-                          placeholder="vibebook, comedy, kigali"
-                          disabled={uploading}
-                        />
-                      </div>
-                    </label>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <label className="block space-y-2">
+                        <span className="label">Hashtags</span>
+                        <div className="relative">
+                          <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            className="field pl-10"
+                            value={tags}
+                            onChange={(event) => setTags(event.target.value)}
+                            placeholder="vibebook, comedy"
+                            disabled={uploading}
+                          />
+                        </div>
+                      </label>
 
-                    <label className="block space-y-2">
-                      <span className="label">Mentions</span>
-                      <div className="relative">
-                        <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <input
-                          className="field pl-10"
-                          value={mentions}
-                          onChange={(event) => setMentions(event.target.value)}
-                          placeholder="@creator, @friend"
-                          disabled={uploading}
-                        />
-                      </div>
-                    </label>
+                      <label className="block space-y-2">
+                        <span className="label">Mentions</span>
+                        <div className="relative">
+                          <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <input
+                            className="field pl-10"
+                            value={mentions}
+                            onChange={(event) => setMentions(event.target.value)}
+                            placeholder="@creator"
+                            disabled={uploading}
+                          />
+                        </div>
+                      </label>
+                    </div>
 
-                    <label className="block space-y-2">
+                    <label className="mt-3 block space-y-2">
                       <span className="label">Location optional</span>
                       <input
                         className="field"
@@ -1532,42 +1542,39 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       />
                     </label>
 
-                    <div>
+                    <div className="mt-3">
                       <span className="label font-bold">Visibility</span>
-                      <div className="mt-3 grid gap-2">
+                      <div className="mt-2 grid grid-cols-3 gap-2">
                         {visibilityOptions.map((option) => {
                           const Icon = option.icon;
                           return (
                             <button
                               key={option.value}
                               type="button"
-                              className={`flex items-center justify-between rounded-lg border-2 px-4 py-3 text-sm font-bold transition-all duration-200 ${
+                              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-black transition-all duration-200 ${
                                 visibility === option.value
-                                  ? "border-blue-600 bg-blue-50 text-blue-900 shadow-md"
+                                  ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
                                   : "border-slate-200 bg-white text-slate-700 hover:border-blue-400"
                               }`}
                               onClick={() => setVisibility(option.value)}
                               disabled={uploading}
                             >
-                              <span className="inline-flex items-center gap-2">
-                                <Icon className="h-5 w-5" />
-                                {option.label}
-                              </span>
-                              <div className={`h-4 w-4 rounded-full border-2 ${visibility === option.value ? "border-blue-600 bg-blue-600" : "border-slate-300 bg-white"}`} />
+                              <Icon className="h-4 w-4" />
+                              <span className="truncate">{option.label}</span>
                             </button>
                           );
                         })}
                       </div>
                     </div>
 
-                    <div>
+                    <div className="mt-3">
                       <span className="label">Safe display</span>
                       <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg bg-surface p-1">
                         {["portrait", "landscape"].map((option) => (
                           <button
                             key={option}
                             type="button"
-                            className={`rounded-lg px-3 py-2 text-sm font-black capitalize ${
+                            className={`rounded-lg px-3 py-2 text-xs font-black capitalize ${
                               orientation === option ? "bg-white text-navy shadow-sm" : "text-slate-500"
                             }`}
                             onClick={() => setOrientation(option)}
@@ -1578,13 +1585,13 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         ))}
                       </div>
                     </div>
-                  </>
+                  </div>
                 )}
 
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <p className="text-xs font-black uppercase text-slate-500">Thumbnail preview</p>
-                  <div className="mt-3 flex items-center gap-3">
-                    <div className="flex h-20 w-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-950">
+                  <div className="mt-2 flex items-center gap-3">
+                    <div className="flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-950">
                       {previewSrc ? (
                         isImage ? (
                           <img src={previewSrc} alt="" className="h-full w-full object-contain" style={{ filter: editorFilter }} />
@@ -1601,6 +1608,15 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                     </div>
                   </div>
                 </div>
+
+                {error && file && !uploading && !success && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                    <p>{error}</p>
+                    <button type="button" className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-black text-red-700 shadow-sm" onClick={handleUpload}>
+                      Retry upload
+                    </button>
+                  </div>
+                )}
 
                 <div className="sticky bottom-0 -mx-3 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:p-0 sm:shadow-none">
                   <button
