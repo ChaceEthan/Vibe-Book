@@ -8,6 +8,7 @@ import { mediaUrl, notificationApi } from "../services/api";
 import { connectSocket } from "../services/socket";
 
 const iconForType = (type) => {
+  if (type === "account_verification") return BadgeCheck;
   if (type === "follow") return UserPlus;
   if (type === "like") return Heart;
   if (type === "comment") return MessageSquare;
@@ -40,6 +41,7 @@ const notificationTargetFor = (notification = {}, currentUser = {}) => {
   const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(currentUser?._id);
   const groupId = idOf(notification.groupId) || idOf(data.groupId) || idOf(data.group?._id);
 
+  if (notification.type === "account_verification") return "/settings";
   if (notification.type === "follow" && actorId) return `/profile/${actorId}`;
   if (notification.type === "message" && actorId) return `/chat/${actorId}`;
   if (notification.type === "group_message" || notification.type === "group_invite") return groupId ? `/groups?group=${groupId}` : "/groups";

@@ -145,6 +145,8 @@ const emptyEmailFlow = {
   newEmail: "",
   code: "",
   expectedCode: "",
+  cooldown: 0,
+  expiresAt: "",
   step: 1,
 };
 
@@ -273,7 +275,7 @@ const SettingsSection = ({ children, icon: Icon, title }) => (
 
 const Settings = () => {
   const { languages, language, setLanguage } = useLanguage();
-  const { logout, refreshProfile, sendPhoneCode, updateProfile, user, verifyPhoneCode } = useAuth();
+  const { logout, refreshProfile, sendEmailCode, sendPhoneCode, updateProfile, user, verifyEmailCode, verifyPhoneCode } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const [profileForm, setProfileForm] = useState(() => initialProfileForm(user || {}));
@@ -330,6 +332,17 @@ const Settings = () => {
     const timer = setInterval(() => setCooldown((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
   }, [cooldown]);
+
+  useEffect(() => {
+    if (authModal !== "email" || emailFlow.cooldown <= 0) {
+      return undefined;
+    }
+
+    const timer = setInterval(() => {
+      setEmailFlow((current) => ({ ...current, cooldown: Math.max(0, Number(current.cooldown || 0) - 1) }));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [authModal, emailFlow.cooldown]);
 
   useEffect(() => {
     if (authModal !== "username") {
@@ -514,7 +527,7 @@ const Settings = () => {
   const openEmailModal = () => {
     setAuthModal("email");
     setAuthFlowError("");
-    setEmailFlow(emptyEmailFlow);
+    setEmailFlow({ ...emptyEmailFlow, newEmail: String(user?.email || "").toLowerCase() });
   };
 
   const openSessionsModal = () => {
@@ -607,6 +620,33 @@ const Settings = () => {
     }
   };
 
+  const requestEmailCode = async (email) => {
+    const nextEmail = String(email || emailFlow.newEmail || user?.email || "").trim().toLowerCase();
+
+    if (!EMAIL_PATTERN.test(nextEmail)) {
+      setAuthFlowError("Enter a valid email address.");
+      return null;
+    }
+
+    setSaving("email-code");
+    try {
+      const data = await sendEmailCode({ email: nextEmail });
+      setEmailFlow((current) => ({
+        ...current,
+        newEmail: nextEmail,
+        code: "",
+        expectedCode: data.code || "",
+        expiresAt: data.expiresAt || "",
+        cooldown: Number(data.cooldownSeconds || 60),
+        step: 3,
+      }));
+      notifySuccess(data.code ? `Local verification code: ${data.code}` : "Verification code sent to your email.");
+      return data;
+    } finally {
+      setSaving("");
+    }
+  };
+
   const handleEmailFlow = async (event) => {
     event.preventDefault();
     setAuthFlowError("");
@@ -625,43 +665,38 @@ const Settings = () => {
       }
 
       if (emailFlow.step === 2) {
-        const nextEmail = emailFlow.newEmail.trim().toLowerCase();
+        const nextEmail = (emailFlow.newEmail || user?.email || "").trim().toLowerCase();
 
         if (!EMAIL_PATTERN.test(nextEmail)) {
           setAuthFlowError("Enter a valid email address.");
           return;
         }
 
-        if (nextEmail === String(user?.email || "").toLowerCase()) {
+        if (nextEmail === String(user?.email || "").toLowerCase() && user?.emailVerified) {
           setAuthFlowError("This email is already on your account.");
           return;
         }
 
         setSaving("email-check");
-        const { data } = await authApi.checkAvailability({ field: "email", value: nextEmail });
-        if (!data.available) {
-          setAuthFlowError(data.message || "Email already exists.");
-          return;
+        if (nextEmail !== String(user?.email || "").toLowerCase()) {
+          const { data } = await authApi.checkAvailability({ field: "email", value: nextEmail });
+          if (!data.available) {
+            setAuthFlowError(data.message || "Email already exists.");
+            return;
+          }
         }
 
-        const code = String(Math.floor(100000 + Math.random() * 900000));
-        setEmailFlow((current) => ({ ...current, newEmail: nextEmail, expectedCode: code, step: 3 }));
-        notifySuccess(`Verification code sent. Code: ${code}`);
+        await requestEmailCode(nextEmail);
         return;
       }
 
       if (emailFlow.step === 3) {
-        if (emailFlow.code.trim() !== emailFlow.expectedCode) {
-          setAuthFlowError("Verification code is incorrect.");
-          return;
-        }
-
         setEmailFlow((current) => ({ ...current, step: 4 }));
-        setSaving("email");
-        await updateProfile({ email: emailFlow.newEmail.trim().toLowerCase() });
+        setSaving("email-verify");
+        await verifyEmailCode({ code: emailFlow.code.trim() });
         await refreshProfile();
         setEmailFlow((current) => ({ ...current, currentPassword: "", code: "", expectedCode: "", step: 5 }));
-        notifySuccess("Email updated.");
+        notifySuccess("Email verified.");
       }
     } catch (requestError) {
       setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to update email.");
@@ -1590,8 +1625,8 @@ const Settings = () => {
           <form className="w-full max-w-md overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg" onSubmit={handleEmailFlow}>
             <div className="flex items-center justify-between border-b border-slate-100 p-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-wide text-brand">Account recovery</p>
-                <h2 className="text-lg font-black text-navy">Change Email</h2>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Secure email verification</p>
+                <h2 className="text-lg font-black text-navy">{user?.emailVerified ? "Change Email" : "Verify Email"}</h2>
               </div>
               <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close email flow">
                 <X className="h-4 w-4" />
@@ -1616,32 +1651,43 @@ const Settings = () => {
 
               {emailFlow.step === 2 && (
                 <label className="block space-y-2">
-                  <span className="label">New email</span>
+                  <span className="label">{user?.emailVerified ? "New email" : "Email address"}</span>
                   <input className="field" type="email" value={emailFlow.newEmail} onChange={(event) => setEmailFlow((current) => ({ ...current, newEmail: event.target.value.trim().toLowerCase() }))} placeholder="you@example.com" autoComplete="email" required />
+                  <span className="block text-xs font-semibold text-slate-500">We will send a 6-digit VibeBook code to this inbox.</span>
                 </label>
               )}
 
               {emailFlow.step === 3 && (
-                <label className="block space-y-2">
-                  <span className="label">Verification code</span>
-                  <input className="field text-center text-lg font-black tracking-[0.35em]" inputMode="numeric" value={emailFlow.code} onChange={(event) => setEmailFlow((current) => ({ ...current, code: event.target.value.replace(/[^\d]/g, "").slice(0, 6) }))} placeholder="000000" required />
-                  <span className="block text-xs font-semibold text-slate-500">Enter the 6-digit code sent for {emailFlow.newEmail}.</span>
-                </label>
+                <div className="space-y-3">
+                  <label className="block space-y-2">
+                    <span className="label">Verification code</span>
+                    <input className="field text-center text-lg font-black tracking-[0.35em]" inputMode="numeric" value={emailFlow.code} onChange={(event) => setEmailFlow((current) => ({ ...current, code: event.target.value.replace(/[^\d]/g, "").slice(0, 6) }))} placeholder="000000" required />
+                    <span className="block text-xs font-semibold text-slate-500">Enter the 6-digit code sent to {emailFlow.newEmail}. Codes expire after 10 minutes.</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-secondary w-full"
+                    onClick={() => requestEmailCode(emailFlow.newEmail).catch((requestError) => setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to resend code."))}
+                    disabled={emailFlow.cooldown > 0 || Boolean(saving)}
+                  >
+                    {emailFlow.cooldown > 0 ? `Resend in ${emailFlow.cooldown}s` : "Resend code"}
+                  </button>
+                </div>
               )}
 
               {emailFlow.step === 4 && (
                 <div className="rounded-lg bg-blue-50 p-5 text-center">
                   <Mail className="mx-auto h-10 w-10 text-blue-600" />
-                  <p className="mt-3 text-lg font-black text-navy">Updating email</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-600">Saving your new login email securely.</p>
+                  <p className="mt-3 text-lg font-black text-navy">Verifying email</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Checking your one-time code securely.</p>
                 </div>
               )}
 
               {emailFlow.step === 5 && (
                 <div className="rounded-lg bg-green-50 p-5 text-center">
                   <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" />
-                  <p className="mt-3 text-lg font-black text-navy">Email updated</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-600">Use the new email the next time you sign in.</p>
+                  <p className="mt-3 text-lg font-black text-navy">Email verified</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Your VibeBook email is now trusted for account recovery.</p>
                 </div>
               )}
             </div>
@@ -1658,7 +1704,7 @@ const Settings = () => {
                 </button>
               ) : (
                 <button type="submit" className="btn-primary flex-1" disabled={Boolean(saving) || emailFlow.step === 4}>
-                  {saving ? (emailFlow.step === 4 ? "Updating..." : "Checking...") : emailFlow.step === 1 ? "Verify" : emailFlow.step === 2 ? "Send Code" : "Update Email"}
+                  {saving ? (emailFlow.step === 4 ? "Verifying..." : "Checking...") : emailFlow.step === 1 ? "Verify Password" : emailFlow.step === 2 ? "Send Code" : "Verify Email"}
                 </button>
               )}
             </div>

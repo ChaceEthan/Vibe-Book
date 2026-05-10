@@ -5,6 +5,9 @@ const { buildAccessState, syncTrialState } = require("../utils/accessControl");
 const { applyAdminIsolation, isConfiguredAdminEmail } = require("../utils/adminIsolation");
 const generateToken = require("../utils/generateToken");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
+const { sendVerificationEmail } = require("../utils/emailService");
+const { sendPhoneVerificationSms } = require("../utils/smsService");
+const { createNotification } = require("../utils/notifications");
 const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
 const {
   normalizeEmail,
@@ -64,15 +67,19 @@ const generatedEmailForPhone = (phone = "") => {
   return digits ? `${digits}@phone.vibebook.local` : "";
 };
 
-const generateOtpCode = () => {
-  if (process.env.MOCK_PHONE_CODE) {
-    return String(process.env.MOCK_PHONE_CODE).replace(/[^\d]/g, "").slice(0, 6).padStart(6, "0");
+const generateOtpCode = (channel = "phone") => {
+  const mockKey = channel === "email" ? "MOCK_EMAIL_CODE" : "MOCK_PHONE_CODE";
+  if (process.env[mockKey]) {
+    return String(process.env[mockKey]).replace(/[^\d]/g, "").slice(0, 6).padStart(6, "0");
   }
 
   return String(Math.floor(100000 + Math.random() * 900000));
 };
 
-const shouldExposeOtp = () => process.env.NODE_ENV !== "production" || process.env.MOCK_PHONE_OTP === "true";
+const shouldExposeOtp = (channel = "phone") => {
+  const mockKey = channel === "email" ? "MOCK_EMAIL_OTP" : "MOCK_PHONE_OTP";
+  return process.env.NODE_ENV !== "production" || process.env[mockKey] === "true";
+};
 
 const usernameSuggestions = async (username) => {
   const base = username.replace(/[^a-z0-9_]/g, "").slice(0, 22) || "vibebook_user";
@@ -198,6 +205,7 @@ const userResponse = (user) => {
     name: user.name,
     username: user.username || user.name,
     email: user.emailGeneratedFromPhone ? "" : user.email,
+    emailVerified: Boolean(user.emailVerified),
     emailGeneratedFromPhone: Boolean(user.emailGeneratedFromPhone),
     role: user.role,
     accountRole: user.accountRole || (user.role === "admin" ? "admin" : "user"),
@@ -430,6 +438,7 @@ const register = async (req, res, next) => {
     userData.email = emailForStorage;
     userData.emailNormalized = email || undefined;
     userData.emailGeneratedFromPhone = !email;
+    userData.emailVerified = false;
     userData.username = username;
     userData.accountType = userData.accountType || "user";
     userData.phone = phoneFields.phone || userData.phone || "";
@@ -543,6 +552,154 @@ const login = async (req, res, next) => {
   }
 };
 
+const sendEmailCode = async (req, res, next) => {
+  try {
+    const requestedEmail = normalizeEmail(req.body.email || req.user.email);
+    const currentEmail = req.user.emailGeneratedFromPhone ? "" : normalizeEmail(req.user.email);
+    const targetEmail = requestedEmail || currentEmail;
+
+    if (!targetEmail || !isValidEmail(targetEmail)) {
+      return res.status(400).json({ message: "A valid email address is required" });
+    }
+
+    const emailChanged = currentEmail && targetEmail !== currentEmail;
+    if (emailChanged || !currentEmail) {
+      const existingEmail = await findUserByEmailInsensitive(targetEmail).select("_id").lean();
+      if (existingEmail && existingEmail._id.toString() !== req.user._id.toString()) {
+        return res.status(400).json({ message: "Email already exists" });
+      }
+    }
+
+    const lastSent = req.user.emailVerificationLastSentAt ? new Date(req.user.emailVerificationLastSentAt).getTime() : 0;
+    const remainingMs = otpCooldownMs - (Date.now() - lastSent);
+    if (remainingMs > 0) {
+      return res.status(429).json({
+        message: "Please wait before requesting another email code",
+        retryAfterSeconds: Math.ceil(remainingMs / 1000),
+      });
+    }
+
+    const code = generateOtpCode("email");
+    const hashedCode = await bcrypt.hash(code, 10);
+    const delivery = await sendVerificationEmail({
+      to: targetEmail,
+      code,
+      name: req.user.name || req.user.username || "creator",
+      expiresMinutes: Math.round(otpExpiryMs / 60000),
+    });
+
+    if (!delivery.sent && !shouldExposeOtp("email")) {
+      return res.status(503).json({
+        message: "Email verification is not configured. Add SMTP_EMAIL, SMTP_PASSWORD, and SMTP_FROM.",
+        reason: delivery.reason || "SMTP_NOT_CONFIGURED",
+      });
+    }
+
+    const updates = {
+      emailVerificationCode: hashedCode,
+      emailVerificationExpires: new Date(Date.now() + otpExpiryMs),
+      emailVerificationLastSentAt: new Date(),
+      emailVerificationAttempts: 0,
+      verificationCode: hashedCode,
+      verificationExpires: new Date(Date.now() + otpExpiryMs),
+      updatedAt: new Date(),
+      ...(targetEmail !== currentEmail
+        ? {
+            pendingEmail: targetEmail,
+            pendingEmailNormalized: targetEmail,
+            emailVerified: false,
+          }
+        : {}),
+    };
+
+    const user = await User.findByIdAndUpdate(req.user._id, updates, {
+      returnDocument: "after",
+      runValidators: true,
+    }).select("-password");
+
+    return res.json({
+      user: userResponse(user),
+      message: delivery.sent ? "Verification code sent to your email" : "Verification code prepared",
+      expiresAt: updates.emailVerificationExpires,
+      cooldownSeconds: Math.ceil(otpCooldownMs / 1000),
+      delivery: delivery.sent ? "email_sent" : "local_code",
+      ...(shouldExposeOtp("email") ? { code } : {}),
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const verifyEmailCode = async (req, res, next) => {
+  try {
+    const code = String(req.body.code || "").replace(/[^\d]/g, "");
+    if (code.length !== 6) {
+      return res.status(400).json({ message: "Enter the 6-digit verification code" });
+    }
+
+    const user = await User.findById(req.user._id).select("+emailVerificationCode +verificationCode");
+    if (!user || (!user.emailVerificationCode && !user.verificationCode) || !user.emailVerificationExpires) {
+      return res.status(400).json({ message: "Request an email verification code first" });
+    }
+
+    if (new Date(user.emailVerificationExpires).getTime() < Date.now()) {
+      return res.status(400).json({ message: "Verification code expired" });
+    }
+
+    if (Number(user.emailVerificationAttempts || 0) >= 5) {
+      return res.status(429).json({ message: "Too many verification attempts. Request a new code." });
+    }
+
+    const storedCode = user.emailVerificationCode || user.verificationCode;
+    const matches = await bcrypt.compare(code, storedCode);
+    if (!matches) {
+      user.emailVerificationAttempts = Number(user.emailVerificationAttempts || 0) + 1;
+      await user.save({ validateBeforeSave: false });
+      return res.status(400).json({ message: "Invalid verification code" });
+    }
+
+    const targetEmail = normalizeEmail(user.pendingEmail || user.email);
+    if (!targetEmail || !isValidEmail(targetEmail)) {
+      return res.status(400).json({ message: "A valid email address is required" });
+    }
+
+    const existingEmail = await findUserByEmailInsensitive(targetEmail).select("_id").lean();
+    if (existingEmail && existingEmail._id.toString() !== user._id.toString()) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
+
+    user.email = targetEmail;
+    user.emailNormalized = targetEmail;
+    user.emailGeneratedFromPhone = false;
+    user.pendingEmail = undefined;
+    user.pendingEmailNormalized = undefined;
+    user.emailVerified = true;
+    user.emailVerificationCode = undefined;
+    user.emailVerificationExpires = undefined;
+    user.emailVerificationAttempts = 0;
+    user.verificationCode = undefined;
+    user.verificationExpires = undefined;
+    user.updatedAt = new Date();
+    await user.save({ validateBeforeSave: false });
+
+    createNotification({
+      userId: user._id,
+      type: "account_verification",
+      title: "Email verified",
+      message: "Your VibeBook email has been verified successfully.",
+      data: { channel: "email" },
+      dedupeKey: `email-verified:${user._id}:${targetEmail}`,
+    }).catch(() => null);
+
+    return res.json({
+      user: userResponse(user),
+      message: "Email verified",
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const sendPhoneCode = async (req, res, next) => {
   try {
     const phoneFields = normalizePhonePayload({
@@ -571,8 +728,17 @@ const sendPhoneCode = async (req, res, next) => {
       });
     }
 
-    const code = generateOtpCode();
+    const code = generateOtpCode("phone");
     const hashedCode = await bcrypt.hash(code, 10);
+    const delivery = await sendPhoneVerificationSms({ to: nextPhone, code });
+
+    if (!delivery.sent && !shouldExposeOtp("phone")) {
+      return res.status(503).json({
+        message: "Phone verification provider is not configured.",
+        reason: delivery.reason || "SMS_PROVIDER_NOT_CONFIGURED",
+      });
+    }
+
     const phoneChanged = currentPhone && currentPhone !== nextPhone;
     const updates = {
       phone: nextPhone,
@@ -597,7 +763,8 @@ const sendPhoneCode = async (req, res, next) => {
       message: "Phone verification code sent",
       expiresAt: updates.phoneVerificationExpires,
       cooldownSeconds: Math.ceil(otpCooldownMs / 1000),
-      ...(shouldExposeOtp() ? { code } : {}),
+      delivery: delivery.sent ? `${delivery.provider || "sms"}_sent` : "local_code",
+      ...(shouldExposeOtp("phone") ? { code } : {}),
     });
   } catch (error) {
     return next(error);
@@ -638,6 +805,15 @@ const verifyPhoneCode = async (req, res, next) => {
     user.updatedAt = new Date();
     await user.save({ validateBeforeSave: false });
 
+    createNotification({
+      userId: user._id,
+      type: "account_verification",
+      title: "Phone verified",
+      message: "Your VibeBook phone number has been verified successfully.",
+      data: { channel: "phone" },
+      dedupeKey: `phone-verified:${user._id}:${user.phone || user.phoneNumber}`,
+    }).catch(() => null);
+
     return res.json({
       user: userResponse(user),
       message: "Phone verified",
@@ -651,6 +827,8 @@ module.exports = {
   checkAvailability,
   register,
   login,
+  sendEmailCode,
+  verifyEmailCode,
   sendPhoneCode,
   verifyPhoneCode,
 };

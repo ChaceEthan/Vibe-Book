@@ -67,6 +67,43 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  emailVerified: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  pendingEmail: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
+  pendingEmailNormalized: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
+  emailVerificationCode: {
+    type: String,
+    select: false,
+  },
+  emailVerificationExpires: {
+    type: Date,
+  },
+  emailVerificationLastSentAt: {
+    type: Date,
+  },
+  emailVerificationAttempts: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  verificationCode: {
+    type: String,
+    select: false,
+  },
+  verificationExpires: {
+    type: Date,
+  },
   password: {
     type: String,
     required: true,

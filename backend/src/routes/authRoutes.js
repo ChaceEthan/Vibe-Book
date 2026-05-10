@@ -1,7 +1,7 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 
-const { checkAvailability, login, register, sendPhoneCode, verifyPhoneCode } = require("../controllers/authController");
+const { checkAvailability, login, register, sendEmailCode, sendPhoneCode, verifyEmailCode, verifyPhoneCode } = require("../controllers/authController");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -12,6 +12,13 @@ const phoneOtpLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Too many phone verification requests. Please try again soon." },
 });
+const emailOtpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many email verification requests. Please try again soon." },
+});
 
 router.get("/", (req, res) => {
   return res.json({ message: "Auth API is ready" });
@@ -20,6 +27,8 @@ router.get("/", (req, res) => {
 router.get("/check", checkAvailability);
 router.post("/register", register);
 router.post("/login", login);
+router.post("/send-email-code", authMiddleware, emailOtpLimiter, sendEmailCode);
+router.post("/verify-email-code", authMiddleware, emailOtpLimiter, verifyEmailCode);
 router.post("/send-phone-code", authMiddleware, phoneOtpLimiter, sendPhoneCode);
 router.post("/verify-phone-code", authMiddleware, phoneOtpLimiter, verifyPhoneCode);
 

@@ -367,6 +367,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     name: user.name,
     username: user.username || user.name,
     email: (user.publicEmail || contactUnlocked) && !user.emailGeneratedFromPhone ? user.email || "" : "",
+    emailVerified: options.includePrivate ? Boolean(user.emailVerified) : undefined,
     emailGeneratedFromPhone: Boolean(user.emailGeneratedFromPhone),
     role: user.role,
     accountRole: options.includePrivate ? user.accountRole || (user.role === "admin" ? "admin" : "user") : undefined,
@@ -680,6 +681,14 @@ const updateProfile = async (req, res, next) => {
       updates.email = email;
       updates.emailNormalized = email;
       updates.emailGeneratedFromPhone = false;
+      if (email !== normalizeEmail(req.user.email)) {
+        updates.emailVerified = false;
+        updates.emailVerificationCode = undefined;
+        updates.emailVerificationExpires = undefined;
+        updates.emailVerificationAttempts = 0;
+        updates.verificationCode = undefined;
+        updates.verificationExpires = undefined;
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body, "bio")) {

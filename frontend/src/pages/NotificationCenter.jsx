@@ -16,9 +16,11 @@ const notificationTypes = [
   { value: "group_message", label: "Groups", icon: MessageCircle },
   { value: "group_invite", label: "Invites", icon: MessageCircle },
   { value: "mention", label: "Mentions", icon: MessageCircle },
+  { value: "account_verification", label: "Security", icon: BadgeCheck },
 ];
 
 const iconForType = (type) => {
+  if (type === "account_verification") return BadgeCheck;
   if (type === "follow") return UserPlus;
   if (type === "like") return Heart;
   if (type === "comment") return MessageSquare;
@@ -27,6 +29,7 @@ const iconForType = (type) => {
 };
 
 const colorForType = (type) => {
+  if (type === "account_verification") return "bg-green-100 text-green-600";
   if (type === "follow") return "bg-green-100 text-green-600";
   if (type === "like") return "bg-red-100 text-red-600";
   if (type === "comment") return "bg-blue-100 text-blue-600";
@@ -59,6 +62,7 @@ const notificationTargetFor = (notification = {}, currentUser = {}) => {
   const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(currentUser?._id);
   const groupId = idOf(notification.groupId) || idOf(data.groupId) || idOf(data.group?._id);
 
+  if (notification.type === "account_verification") return "/settings";
   if (notification.type === "follow" && actorId) return `/profile/${actorId}`;
   if (notification.type === "message" && actorId) return `/chat/${actorId}`;
   if (notification.type === "group_message" || notification.type === "group_invite") return groupId ? `/groups?group=${groupId}` : "/groups";

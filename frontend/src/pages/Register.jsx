@@ -65,7 +65,7 @@ const ValidationLine = ({ state }) => {
 };
 
 const Register = () => {
-  const { isAuthenticated, register, sendPhoneCode, verifyPhoneCode } = useAuth();
+  const { isAuthenticated, register, sendEmailCode, sendPhoneCode, verifyEmailCode, verifyPhoneCode } = useAuth();
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
@@ -73,6 +73,7 @@ const Register = () => {
   const [suggestions, setSuggestions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [availability, setAvailability] = useState(emptyAvailability);
+  const [emailVerification, setEmailVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "" });
   const [phoneVerification, setPhoneVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "" });
   const navigate = useNavigate();
 
@@ -106,6 +107,18 @@ const Register = () => {
     contactAvailability.status !== "checking" &&
     contactAvailability.status !== "taken" &&
     contactAvailability.status !== "invalid";
+
+  useEffect(() => {
+    if (!emailVerification.open || emailVerification.cooldown <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setEmailVerification((current) => ({ ...current, cooldown: Math.max(0, Number(current.cooldown || 0) - 1) }));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [emailVerification.open, emailVerification.cooldown]);
 
   useEffect(() => {
     if (!phoneVerification.open || phoneVerification.cooldown <= 0) {
@@ -260,7 +273,7 @@ const Register = () => {
     };
   }, [form.contactMethod, form.country, form.countryCode, form.phoneNumber]);
 
-  if (isAuthenticated && !phoneVerification.open) {
+  if (isAuthenticated && !phoneVerification.open && !emailVerification.open) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -340,6 +353,27 @@ const Register = () => {
     }
   };
 
+  const sendEmailVerificationCode = async () => {
+    setStatus("");
+    setError("");
+
+    try {
+      const data = await sendEmailCode({ email: form.email.trim().toLowerCase() });
+      setEmailVerification((current) => ({
+        ...current,
+        open: true,
+        cooldown: Number(data.cooldownSeconds || 60),
+        expiresAt: data.expiresAt || "",
+        localCode: data.code || "",
+      }));
+      setStatus(data.code ? `Local verification code: ${data.code}` : "Verification code sent to your email.");
+    } catch (requestError) {
+      const retryAfter = requestError.response?.data?.retryAfterSeconds;
+      setEmailVerification((current) => ({ ...current, open: true, cooldown: Number(retryAfter || current.cooldown || 0) }));
+      setError(requestError.response?.data?.message || "Unable to send email verification code.");
+    }
+  };
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     const message = validateForm();
@@ -355,6 +389,8 @@ const Register = () => {
 
     if (usesPhone) {
       setPhoneVerification((current) => ({ ...current, open: true }));
+    } else {
+      setEmailVerification((current) => ({ ...current, open: true }));
     }
 
     try {
@@ -374,10 +410,11 @@ const Register = () => {
       if (usesPhone) {
         await sendVerificationCode();
       } else {
-        navigate("/dashboard", { replace: true });
+        await sendEmailVerificationCode();
       }
     } catch (requestError) {
       setPhoneVerification((current) => ({ ...current, open: false }));
+      setEmailVerification((current) => ({ ...current, open: false }));
       setError(requestError.response?.data?.message || "Registration failed. Please review your details.");
       setSuggestions(requestError.response?.data?.suggestions || []);
     } finally {
@@ -396,6 +433,22 @@ const Register = () => {
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to verify phone.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleVerifyEmail = async (event) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+
+    try {
+      await verifyEmailCode({ code: emailVerification.code });
+      setEmailVerification((current) => ({ ...current, open: false }));
+      navigate("/dashboard", { replace: true });
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to verify email.");
     } finally {
       setSubmitting(false);
     }
@@ -563,6 +616,56 @@ const Register = () => {
           </Link>
         </p>
       </div>
+
+      {emailVerification.open && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/60 p-3 sm:items-center">
+          <form className="w-full max-w-md rounded-lg bg-white p-5 shadow-2xl" onSubmit={handleVerifyEmail}>
+            <div className="mb-4 flex items-center gap-3">
+              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand/15 text-navy">
+                <Mail className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-lg font-black text-navy">Verify your email</h2>
+                <p className="truncate text-sm text-slate-500">Code sent to {form.email.trim().toLowerCase()}</p>
+              </div>
+            </div>
+
+            {status && <div className="mb-3 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{status}</div>}
+            {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+
+            <label className="space-y-2">
+              <span className="label">6-digit code</span>
+              <input
+                className="field text-center text-2xl font-black tracking-[0.35em]"
+                inputMode="numeric"
+                maxLength={6}
+                value={emailVerification.code}
+                onChange={(event) => setEmailVerification((current) => ({ ...current, code: cleanPhone(event.target.value).slice(0, 6) }))}
+                required
+              />
+            </label>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button type="button" className="btn-secondary py-2.5" onClick={() => navigate("/dashboard", { replace: true })}>
+                Later
+              </button>
+              <button type="submit" className="btn-primary py-2.5" disabled={submitting}>
+                {submitting ? "Checking..." : "Verify"}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+              onClick={sendEmailVerificationCode}
+              disabled={emailVerification.cooldown > 0}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {emailVerification.cooldown > 0 ? `Resend in ${emailVerification.cooldown}s` : "Resend code"}
+            </button>
+          </form>
+        </div>
+      )}
 
       {phoneVerification.open && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/60 p-3 sm:items-center">

@@ -23,6 +23,7 @@ const notificationSchema = new mongoose.Schema(
         "creator_milestone",
         "payout",
         "monetization",
+        "account_verification",
       ],
       required: true,
       index: true,
