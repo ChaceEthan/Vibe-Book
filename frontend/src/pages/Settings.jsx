@@ -131,6 +131,7 @@ const SOUND_OPTIONS = [
 ];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USERNAME_PATTERN = /^[a-z0-9_][a-z0-9_-]{2,29}$/;
 
 const emptyPasswordFlow = {
   currentPassword: "",
@@ -145,6 +146,12 @@ const emptyEmailFlow = {
   code: "",
   expectedCode: "",
   step: 1,
+};
+
+const emptyUsernameFlow = {
+  value: "",
+  status: "idle",
+  message: "",
 };
 
 const passwordStrengthFor = (value = "") => {
@@ -290,6 +297,7 @@ const Settings = () => {
   const [authModal, setAuthModal] = useState("");
   const [passwordFlow, setPasswordFlow] = useState(emptyPasswordFlow);
   const [emailFlow, setEmailFlow] = useState(emptyEmailFlow);
+  const [usernameFlow, setUsernameFlow] = useState(() => ({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") }));
   const [authFlowError, setAuthFlowError] = useState("");
 
   const profileImage = mediaUrl(user?.profilePicture || user?.profileImage || "");
@@ -311,6 +319,7 @@ const Settings = () => {
       allowMessagesFrom: user?.allowMessagesFrom || "everyone",
       allowProfileDiscovery: user?.allowProfileDiscovery !== false,
     });
+    setUsernameFlow({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") });
   }, [user]);
 
   useEffect(() => {
@@ -321,6 +330,66 @@ const Settings = () => {
     const timer = setInterval(() => setCooldown((current) => Math.max(0, current - 1)), 1000);
     return () => clearInterval(timer);
   }, [cooldown]);
+
+  useEffect(() => {
+    if (authModal !== "username") {
+      return undefined;
+    }
+
+    const username = cleanUsername(usernameFlow.value);
+    const currentUsername = cleanUsername(user?.username || "");
+
+    if (!username) {
+      setUsernameFlow((current) => ({ ...current, status: "idle", message: "" }));
+      return undefined;
+    }
+
+    if (!USERNAME_PATTERN.test(username)) {
+      setUsernameFlow((current) => ({
+        ...current,
+        value: username,
+        status: "invalid",
+        message: "Use 3-30 lowercase letters, numbers, hyphens, or underscores.",
+      }));
+      return undefined;
+    }
+
+    if (username === currentUsername) {
+      setUsernameFlow((current) => ({ ...current, value: username, status: "current", message: "This is your current username." }));
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setUsernameFlow((current) => ({ ...current, value: username, status: "checking", message: "Checking availability..." }));
+
+      try {
+        const { data } = await authApi.checkAvailability({ field: "username", value: username }, { signal: controller.signal });
+        setUsernameFlow((current) => ({
+          ...current,
+          value: username,
+          status: data.available ? "available" : "taken",
+          message: data.message || (data.available ? "Username is available." : "Username is already taken."),
+        }));
+      } catch (requestError) {
+        if (requestError.name === "CanceledError" || requestError.code === "ERR_CANCELED") {
+          return;
+        }
+
+        setUsernameFlow((current) => ({
+          ...current,
+          value: username,
+          status: "invalid",
+          message: requestError.response?.data?.message || "Unable to check username.",
+        }));
+      }
+    }, 350);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [authModal, user?.username, usernameFlow.value]);
 
   const notifySuccess = (message) => {
     setStatus(message);
@@ -342,10 +411,6 @@ const Settings = () => {
       return next;
     });
     notifySuccess(message);
-  };
-
-  const scrollToSettingsBlock = (blockId) => {
-    document.getElementById(blockId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const updateProfileField = (field, value) => {
@@ -426,6 +491,18 @@ const Settings = () => {
     setSaving("");
     setPasswordFlow(emptyPasswordFlow);
     setEmailFlow(emptyEmailFlow);
+    setUsernameFlow({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") });
+  };
+
+  const openManageAccountModal = () => {
+    setAuthModal("manage");
+    setAuthFlowError("");
+  };
+
+  const openUsernameModal = () => {
+    setAuthModal("username");
+    setAuthFlowError("");
+    setUsernameFlow({ ...emptyUsernameFlow, value: cleanUsername(user?.username || profileForm.username || "") });
   };
 
   const openPasswordModal = () => {
@@ -442,6 +519,11 @@ const Settings = () => {
 
   const openSessionsModal = () => {
     setAuthModal("sessions");
+    setAuthFlowError("");
+  };
+
+  const openPhoneModal = () => {
+    setAuthModal("phone");
     setAuthFlowError("");
   };
 
@@ -496,6 +578,30 @@ const Settings = () => {
       }
     } catch (requestError) {
       setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to verify password.");
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const handleUsernameSave = async (event) => {
+    event.preventDefault();
+    const username = cleanUsername(usernameFlow.value);
+
+    if (usernameFlow.status !== "available" || !USERNAME_PATTERN.test(username)) {
+      setAuthFlowError("Choose an available username first.");
+      return;
+    }
+
+    setSaving("username");
+    setAuthFlowError("");
+
+    try {
+      await updateProfile({ username, name: user?.name || profileForm.name || username });
+      await refreshProfile();
+      notifySuccess("Username updated.");
+      closeAuthModal();
+    } catch (requestError) {
+      setAuthFlowError(requestError.response?.data?.message || "Unable to update username.");
     } finally {
       setSaving("");
     }
@@ -647,6 +753,9 @@ const Settings = () => {
   const phoneDisplay = [user?.countryCode, user?.phoneNumber || user?.phone].filter(Boolean).join(" ") || "Not added";
   const accountStatus = user?.isSuspended || user?.accountStatus === "suspended" ? "Limited" : "Active";
   const verificationStatus = user?.isVerified || user?.verified ? "Verified" : "Not verified";
+  const emailVerificationLabel = user?.emailVerified ? "Verified" : user?.email ? "Unverified" : "Missing";
+  const phoneVerificationLabel = user?.phoneVerified ? "Verified" : phoneDisplay !== "Not added" ? "Unverified" : "Missing";
+  const usernameCanSave = usernameFlow.status === "available" && USERNAME_PATTERN.test(cleanUsername(usernameFlow.value));
   const passwordStrength = passwordStrengthFor(passwordFlow.newPassword);
   const passwordStrengthLabel = ["Weak", "Weak", "Fair", "Good", "Strong"][passwordStrength] || "Weak";
   const sessionBrowser = typeof navigator !== "undefined" ? navigator.userAgent.split(" ").slice(-2).join(" ") : "Current browser";
@@ -672,12 +781,10 @@ const Settings = () => {
 
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
         <SettingsSection title="Account" icon={UserRound}>
-          <SettingRow icon={UserRound} label="Manage account" detail="Profile editor, creator identity, and public details" actionLabel="Open" onClick={() => scrollToSettingsBlock("account-editor")} />
-          <SettingRow icon={UserRound} label="Username" detail="Lowercase and unique" value={`@${user?.username || profileForm.username || "creator"}`} />
-          <SettingRow icon={KeyRound} label="Password" detail="Change your login password securely" actionLabel="Change" onClick={openPasswordModal} />
-          <SettingRow icon={Mail} label="Email" detail={user?.email ? "Used for login and recovery" : "Add an email for recovery"} actionLabel={user?.email || "Change"} onClick={openEmailModal} />
-          <SettingRow icon={Phone} label="Phone number" detail={user?.phoneVerified ? "Verified" : "Verification available"} actionLabel={phoneDisplay} onClick={() => scrollToSettingsBlock("phone-editor")} />
-          <SettingRow icon={CheckCircle2} label="Birthday" detail="Used for age-appropriate experiences" value={profileForm.birthday || "Not added"} />
+          <SettingRow icon={UserRound} label="Manage account" detail="Username, password, email, phone, verification, and public identity" actionLabel="Open" onClick={openManageAccountModal} />
+          <SettingRow icon={UserRound} label="Username" detail="Lowercase and unique" actionLabel={`@${user?.username || profileForm.username || "creator"}`} onClick={openUsernameModal} />
+          <SettingRow icon={Mail} label="Email verified" detail={user?.email || "No email added"} value={emailVerificationLabel} />
+          <SettingRow icon={Phone} label="Phone verified" detail={phoneDisplay} value={phoneVerificationLabel} />
           <SettingRow icon={ShieldCheck} label="Account status" detail="Current account standing" value={accountStatus} />
           <SettingRow icon={BadgeCheck} label="Verification status" detail="Creator identity signal" value={verificationStatus} />
         </SettingsSection>
@@ -708,7 +815,7 @@ const Settings = () => {
           />
           <SettingRow icon={Users} label="Who can duet/remix" selectValue={localPrefs.remixPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("remixPrivacy", value, "Remix privacy saved.")} />
           <SettingRow icon={Users} label="Who can mention" selectValue={localPrefs.mentionPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("mentionPrivacy", value, "Mention privacy saved.")} />
-          <SettingRow icon={Ban} label="Blocked accounts" detail={Array.isArray(user?.blockedUsers) && user.blockedUsers.length ? `${user.blockedUsers.length} blocked` : "No blocked accounts"} actionLabel="Open" onClick={() => scrollToSettingsBlock("blocked-accounts")} />
+          <SettingRow icon={Ban} label="Blocked accounts" detail={Array.isArray(user?.blockedUsers) && user.blockedUsers.length ? `${user.blockedUsers.length} blocked` : "No blocked accounts"} value={Array.isArray(user?.blockedUsers) && user.blockedUsers.length ? `${user.blockedUsers.length}` : "None"} />
           <SettingRow icon={Ban} label="Muted users" detail="Quiet accounts and keywords without blocking" value="Coming soon" />
           <SettingRow icon={CheckCircle2} label="Activity status" detail="Show when you are active" checked={localPrefs.activityStatus} onToggle={(checked) => saveLocalPreference("activityStatus", checked, "Activity status saved.")} />
           <SettingRow
@@ -792,7 +899,7 @@ const Settings = () => {
         </SettingsSection>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="hidden">
         <form id="account-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={saveProfile}>
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-4">
@@ -1097,6 +1204,294 @@ const Settings = () => {
           </div>
         </div>
       </div>
+
+      {authModal === "manage" && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <form className="flex max-h-[94dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg" onSubmit={saveProfile}>
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Auth & Account Security</p>
+                <h2 className="text-lg font-black text-navy">Manage Account</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close manage account">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+              <section className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 bg-slate-50 px-4 py-3">
+                  <h3 className="text-sm font-black uppercase tracking-wide text-navy">Account sign-in</h3>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Update the credentials people use to find or access this account.</p>
+                </div>
+                <SettingRow icon={UserRound} label="Username" detail={`@${user?.username || profileForm.username || "creator"}`} actionLabel="Edit" onClick={openUsernameModal} />
+                <SettingRow icon={KeyRound} label="Password" detail={`Last account update: ${securityDate(user?.updatedAt || user?.createdAt)}`} actionLabel="Change" onClick={openPasswordModal} />
+                <SettingRow icon={Mail} label="Email" detail={user?.email || "No email added"} actionLabel={emailVerificationLabel} onClick={openEmailModal} />
+                <SettingRow icon={Phone} label="Phone Number" detail={phoneDisplay} actionLabel={phoneVerificationLabel} onClick={openPhoneModal} />
+                <SettingRow icon={ShieldCheck} label="Verification Status" detail="Creator and identity review" value={verificationStatus} />
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-4">
+                    <img src={profileImage} alt="" className="h-20 w-20 shrink-0 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-black uppercase tracking-wide text-brand">Profile identity</p>
+                      <h3 className="truncate text-xl font-black text-navy">{profileForm.name || user?.name || "Profile"}</h3>
+                      <p className="mt-1 truncate text-sm font-semibold text-slate-500">@{user?.username || profileForm.username || "creator"}</p>
+                    </div>
+                  </div>
+                  <button type="button" className="btn-secondary gap-2 px-4 py-2.5" onClick={openProfileUpload}>
+                    <Camera className="h-4 w-4" />
+                    Profile image
+                  </button>
+                </div>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="label">Display name</span>
+                    <input className="field" value={profileForm.name} onChange={(event) => updateProfileField("name", event.target.value)} required />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="label">Birthday</span>
+                    <input className="field" type="date" value={profileForm.birthday} onChange={(event) => updateProfileField("birthday", event.target.value)} />
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="label">Gender</span>
+                    <select className="field" value={profileForm.gender} onChange={(event) => updateProfileField("gender", event.target.value)}>
+                      <option value="">Prefer not to say</option>
+                      {GENDER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-2">
+                    <span className="label">Website</span>
+                    <input className="field" value={profileForm.website} onChange={(event) => updateSocialField("website", event.target.value)} placeholder="https://..." />
+                  </label>
+
+                  <label className="space-y-2 md:col-span-2">
+                    <span className="label">Bio</span>
+                    <textarea
+                      className="field min-h-24 resize-y"
+                      value={profileForm.bio}
+                      onChange={(event) => updateProfileField("bio", event.target.value)}
+                      maxLength={200}
+                      placeholder="Tell people what you make or love watching."
+                    />
+                  </label>
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="mb-3">
+                  <h3 className="text-sm font-black uppercase tracking-wide text-navy">Public information</h3>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">Creator categories, links, and profile visuals shown on your public page.</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <span className="label">Categories</span>
+                    <div className="mt-2 flex max-h-40 flex-wrap gap-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      {PROFILE_CATEGORIES.map((category) => {
+                        const active = profileForm.categories.includes(category);
+                        return (
+                          <button
+                            key={category}
+                            type="button"
+                            className={`rounded-full px-3 py-1.5 text-xs font-black transition ${
+                              active ? "bg-brand text-navy shadow-sm" : "bg-white text-slate-600 hover:bg-slate-100"
+                            }`}
+                            onClick={() => toggleCategory(category)}
+                          >
+                            {category}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <label className="block space-y-2">
+                    <span className="label">Cover image URL</span>
+                    <div className="relative">
+                      <ImagePlus className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <input className="field pl-10" value={profileForm.coverImage} onChange={(event) => updateProfileField("coverImage", event.target.value)} placeholder="Cloudinary image URL" />
+                    </div>
+                  </label>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {["instagram", "tiktok", "youtube", "x"].map((field) => (
+                      <label key={field} className="space-y-2">
+                        <span className="label capitalize">{field === "x" ? "X" : field}</span>
+                        <input className="field" value={profileForm.socialLinks[field]} onChange={(event) => updateSocialField(field, event.target.value)} placeholder={`@${field}`} />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <div className="flex gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button type="button" className="btn-secondary flex-1" onClick={closeAuthModal}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary flex-1" disabled={saving === "profile"}>
+                {saving === "profile" ? "Saving..." : "Save Public Identity"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {authModal === "username" && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <form className="w-full max-w-md overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg" onSubmit={handleUsernameSave}>
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Public handle</p>
+                <h2 className="text-lg font-black text-navy">Edit Username</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close username editor">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-4">
+              {authFlowError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{authFlowError}</div>}
+
+              <div className="rounded-lg bg-surface p-4 text-center">
+                <p className="text-xs font-black uppercase tracking-wide text-slate-500">Your profile link</p>
+                <p className="mt-1 truncate text-xl font-black text-navy">@{cleanUsername(usernameFlow.value) || "username"}</p>
+              </div>
+
+              <label className="block space-y-2">
+                <span className="label">Username</span>
+                <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+                  <span className="flex items-center px-3 text-sm font-black text-slate-400">@</span>
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
+                    value={usernameFlow.value}
+                    onChange={(event) => setUsernameFlow((current) => ({ ...current, value: cleanUsername(event.target.value), message: "" }))}
+                    autoCapitalize="none"
+                    autoComplete="username"
+                    spellCheck="false"
+                    required
+                  />
+                </div>
+              </label>
+
+              <div
+                className={`rounded-lg border p-3 text-sm font-semibold ${
+                  usernameFlow.status === "available"
+                    ? "border-green-200 bg-green-50 text-green-700"
+                    : usernameFlow.status === "checking"
+                      ? "border-blue-200 bg-blue-50 text-blue-700"
+                      : usernameFlow.status === "current"
+                        ? "border-slate-200 bg-slate-50 text-slate-600"
+                        : usernameFlow.status === "invalid" || usernameFlow.status === "taken"
+                          ? "border-red-200 bg-red-50 text-red-700"
+                          : "border-slate-200 bg-slate-50 text-slate-500"
+                }`}
+              >
+                {usernameFlow.message || "Use 3-30 lowercase letters, numbers, underscores, or hyphens."}
+              </div>
+            </div>
+
+            <div className="flex gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button type="button" className="btn-secondary flex-1" onClick={closeAuthModal}>
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary flex-1" disabled={saving === "username" || !usernameCanSave}>
+                {saving === "username" ? "Saving..." : "Save Username"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {authModal === "phone" && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-md overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Phone verification</p>
+                <h2 className="text-lg font-black text-navy">Phone Number</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAuthModal} aria-label="Close phone verification">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-4">
+              <div className={`rounded-lg p-4 ${user?.phoneVerified ? "bg-green-50" : "bg-surface"}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-navy">{phoneDisplay}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">{user?.phoneVerified ? "Phone verification is active." : "Add a phone number and verify it with a code."}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ${user?.phoneVerified ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
+                    {phoneVerificationLabel}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid gap-3">
+                <label className="space-y-2">
+                  <span className="label">Country</span>
+                  <select className="field" value={phoneForm.country} onChange={(event) => setPhoneCountry(event.target.value)}>
+                    {PHONE_COUNTRIES.map((item) => (
+                      <option key={item.country} value={item.country}>
+                        {item.label} {item.country} {item.code}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="space-y-2">
+                  <span className="label">Phone number</span>
+                  <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+                    <span className="flex shrink-0 items-center px-3 text-sm font-black text-slate-600">{activeCountry.code}</span>
+                    <input
+                      className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
+                      inputMode="tel"
+                      value={phoneForm.phoneNumber}
+                      onChange={(event) => setPhoneForm((current) => ({ ...current, phoneNumber: cleanPhone(event.target.value) }))}
+                      placeholder="786161109"
+                    />
+                  </div>
+                </label>
+
+                <button type="button" className="btn-secondary w-full" onClick={requestPhoneCode} disabled={saving === "phone" || cooldown > 0}>
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : saving === "phone" ? "Sending..." : "Send OTP"}
+                </button>
+              </div>
+
+              <form className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" onSubmit={verifyPhone}>
+                <label className="block space-y-2">
+                  <span className="label">Verification code</span>
+                  <input
+                    className="field text-center text-lg font-black tracking-[0.35em]"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={phoneCode}
+                    onChange={(event) => setPhoneCode(cleanPhone(event.target.value).slice(0, 6))}
+                    placeholder="000000"
+                    required
+                  />
+                </label>
+                <button type="submit" className="btn-primary w-full" disabled={saving === "verify-phone"}>
+                  {saving === "verify-phone" ? "Verifying..." : "Verify Phone"}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {authModal === "password" && (
         <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
