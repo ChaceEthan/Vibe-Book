@@ -28,7 +28,7 @@ const postForm = async (url, body, headers = {}) => {
   return { sent: true };
 };
 
-const sendWithTwilio = async ({ to, code }) => {
+const sendWithTwilio = async ({ to, code, expiresMinutes = 10 }) => {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   const from = process.env.TWILIO_FROM;
@@ -43,13 +43,13 @@ const sendWithTwilio = async ({ to, code }) => {
     {
       From: from,
       To: to,
-      Body: `Your VibeBook verification code is: ${code}. It expires in 10 minutes.`,
+      Body: `Your VibeBook verification code is: ${code}. It expires in ${expiresMinutes} minutes.`,
     },
     { Authorization: `Basic ${auth}` }
   );
 };
 
-const sendWithVonage = async ({ to, code }) => {
+const sendWithVonage = async ({ to, code, expiresMinutes = 10 }) => {
   if (!process.env.VONAGE_API_KEY || !process.env.VONAGE_API_SECRET) {
     return { sent: false, reason: "VONAGE_NOT_CONFIGURED" };
   }
@@ -59,11 +59,11 @@ const sendWithVonage = async ({ to, code }) => {
     api_secret: process.env.VONAGE_API_SECRET,
     from: process.env.VONAGE_FROM || "VibeBook",
     to: String(to || "").replace(/[^\d]/g, ""),
-    text: `Your VibeBook verification code is: ${code}. It expires in 10 minutes.`,
+    text: `Your VibeBook verification code is: ${code}. It expires in ${expiresMinutes} minutes.`,
   });
 };
 
-const sendWithAfricasTalking = async ({ to, code }) => {
+const sendWithAfricasTalking = async ({ to, code, expiresMinutes = 10 }) => {
   if (!process.env.AFRICASTALKING_USERNAME || !process.env.AFRICASTALKING_API_KEY) {
     return { sent: false, reason: "AFRICASTALKING_NOT_CONFIGURED" };
   }
@@ -74,13 +74,13 @@ const sendWithAfricasTalking = async ({ to, code }) => {
       username: process.env.AFRICASTALKING_USERNAME,
       from: process.env.AFRICASTALKING_FROM || "",
       to,
-      message: `Your VibeBook verification code is: ${code}. It expires in 10 minutes.`,
+      message: `Your VibeBook verification code is: ${code}. It expires in ${expiresMinutes} minutes.`,
     },
     { apiKey: process.env.AFRICASTALKING_API_KEY }
   );
 };
 
-const sendPhoneVerificationSms = async ({ to, code }) => {
+const sendPhoneVerificationSms = async ({ to, code, expiresMinutes = 10 }) => {
   const provider = providerName();
 
   if (!to || !code) {
@@ -89,15 +89,15 @@ const sendPhoneVerificationSms = async ({ to, code }) => {
 
   try {
     if (provider === "twilio") {
-      return { provider, ...(await sendWithTwilio({ to, code })) };
+      return { provider, ...(await sendWithTwilio({ to, code, expiresMinutes })) };
     }
 
     if (provider === "vonage") {
-      return { provider, ...(await sendWithVonage({ to, code })) };
+      return { provider, ...(await sendWithVonage({ to, code, expiresMinutes })) };
     }
 
     if (provider === "africastalking" || provider === "africas_talking" || provider === "africa-talking") {
-      return { provider: "africastalking", ...(await sendWithAfricasTalking({ to, code })) };
+      return { provider: "africastalking", ...(await sendWithAfricasTalking({ to, code, expiresMinutes })) };
     }
 
     return { sent: false, provider: provider || "none", reason: "SMS_PROVIDER_NOT_CONFIGURED", to: maskPhone(to) };

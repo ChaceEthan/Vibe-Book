@@ -58,6 +58,17 @@ const statusClass = (status) => {
   return "text-slate-500";
 };
 
+const verificationErrorMessage = (requestError, fallback = "Verification is temporarily unavailable.") => {
+  const reason = requestError?.response?.data?.reason || "";
+  const message = requestError?.response?.data?.message || requestError?.message || "";
+
+  if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Phone verification coming soon.";
+  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is temporarily unavailable. Please contact support.";
+  if (reason === "SMTP_AUTH_FAILED") return "Email delivery is unavailable. Please contact support.";
+  if (message) return message;
+  return fallback;
+};
+
 const ValidationLine = ({ state }) => {
   if (!state?.message) return null;
 
@@ -74,7 +85,7 @@ const Register = () => {
   const [submitting, setSubmitting] = useState(false);
   const [availability, setAvailability] = useState(emptyAvailability);
   const [emailVerification, setEmailVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "" });
-  const [phoneVerification, setPhoneVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "" });
+  const [phoneVerification, setPhoneVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "", unavailable: false });
   const navigate = useNavigate();
 
   const selectedCountry = useMemo(
@@ -344,12 +355,18 @@ const Register = () => {
         cooldown: Number(data.cooldownSeconds || 60),
         expiresAt: data.expiresAt || "",
         localCode: data.code || "",
+        unavailable: false,
       }));
       setStatus(data.code ? `Local verification code: ${data.code}` : "Verification code sent.");
     } catch (requestError) {
       const retryAfter = requestError.response?.data?.retryAfterSeconds;
-      setPhoneVerification((current) => ({ ...current, open: true, cooldown: Number(retryAfter || current.cooldown || 0) }));
-      setError(requestError.response?.data?.message || "Unable to send verification code.");
+      setPhoneVerification((current) => ({
+        ...current,
+        open: true,
+        cooldown: Number(retryAfter || current.cooldown || 0),
+        unavailable: requestError.response?.data?.reason === "SMS_PROVIDER_NOT_CONFIGURED",
+      }));
+      setError(verificationErrorMessage(requestError, "Unable to send verification code."));
     }
   };
 
@@ -370,7 +387,7 @@ const Register = () => {
     } catch (requestError) {
       const retryAfter = requestError.response?.data?.retryAfterSeconds;
       setEmailVerification((current) => ({ ...current, open: true, cooldown: Number(retryAfter || current.cooldown || 0) }));
-      setError(requestError.response?.data?.message || "Unable to send email verification code.");
+      setError(verificationErrorMessage(requestError, "Unable to send email verification code."));
     }
   };
 
@@ -388,7 +405,7 @@ const Register = () => {
     setSubmitting(true);
 
     if (usesPhone) {
-      setPhoneVerification((current) => ({ ...current, open: true }));
+      setPhoneVerification((current) => ({ ...current, open: true, unavailable: false }));
     } else {
       setEmailVerification((current) => ({ ...current, open: true }));
     }
@@ -432,7 +449,7 @@ const Register = () => {
       setPhoneVerification((current) => ({ ...current, open: false }));
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to verify phone.");
+      setError(verificationErrorMessage(requestError, "Unable to verify phone."));
     } finally {
       setSubmitting(false);
     }
@@ -448,7 +465,7 @@ const Register = () => {
       setEmailVerification((current) => ({ ...current, open: false }));
       navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to verify email.");
+      setError(verificationErrorMessage(requestError, "Unable to verify email."));
     } finally {
       setSubmitting(false);
     }
@@ -641,6 +658,7 @@ const Register = () => {
                 maxLength={6}
                 value={emailVerification.code}
                 onChange={(event) => setEmailVerification((current) => ({ ...current, code: cleanPhone(event.target.value).slice(0, 6) }))}
+                autoFocus
                 required
               />
             </label>
@@ -685,23 +703,30 @@ const Register = () => {
             {status && <div className="mb-3 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{status}</div>}
             {error && <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
-            <label className="space-y-2">
-              <span className="label">6-digit code</span>
-              <input
-                className="field text-center text-2xl font-black tracking-[0.35em]"
-                inputMode="numeric"
-                maxLength={6}
-                value={phoneVerification.code}
-                onChange={(event) => setPhoneVerification((current) => ({ ...current, code: cleanPhone(event.target.value).slice(0, 6) }))}
-                required
-              />
-            </label>
+            {phoneVerification.unavailable ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+                Phone verification is coming soon. You can continue to VibeBook and verify later from Settings & Privacy.
+              </div>
+            ) : (
+              <label className="space-y-2">
+                <span className="label">6-digit code</span>
+                <input
+                  className="field text-center text-2xl font-black tracking-[0.35em]"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={phoneVerification.code}
+                  onChange={(event) => setPhoneVerification((current) => ({ ...current, code: cleanPhone(event.target.value).slice(0, 6) }))}
+                  autoFocus
+                  required
+                />
+              </label>
+            )}
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button type="button" className="btn-secondary py-2.5" onClick={() => navigate("/dashboard", { replace: true })}>
                 Later
               </button>
-              <button type="submit" className="btn-primary py-2.5" disabled={submitting}>
+              <button type="submit" className="btn-primary py-2.5" disabled={phoneVerification.unavailable || submitting}>
                 {submitting ? "Checking..." : "Verify"}
               </button>
             </div>
@@ -710,7 +735,7 @@ const Register = () => {
               type="button"
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
               onClick={sendVerificationCode}
-              disabled={phoneVerification.cooldown > 0}
+              disabled={phoneVerification.unavailable || phoneVerification.cooldown > 0}
             >
               <CheckCircle2 className="h-4 w-4" />
               {phoneVerification.cooldown > 0 ? `Resend in ${phoneVerification.cooldown}s` : "Resend code"}

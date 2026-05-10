@@ -170,6 +170,17 @@ const securityDate = (value) => {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 };
 
+const verificationErrorMessage = (requestError, fallback = "Verification is temporarily unavailable.") => {
+  const reason = requestError?.response?.data?.reason || "";
+  const message = requestError?.response?.data?.message || requestError?.message || "";
+
+  if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Phone verification coming soon.";
+  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is temporarily unavailable. Please contact support.";
+  if (reason === "SMTP_AUTH_FAILED") return "Email delivery is unavailable. Please contact support.";
+  if (message) return message;
+  return fallback;
+};
+
 const readLocalPrefs = () => {
   if (typeof window === "undefined") return DEFAULT_LOCAL_PREFS;
 
@@ -301,6 +312,8 @@ const Settings = () => {
   const [emailFlow, setEmailFlow] = useState(emptyEmailFlow);
   const [usernameFlow, setUsernameFlow] = useState(() => ({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") }));
   const [authFlowError, setAuthFlowError] = useState("");
+  const [phoneUnavailable, setPhoneUnavailable] = useState(false);
+  const [phoneSuccess, setPhoneSuccess] = useState(false);
 
   const profileImage = mediaUrl(user?.profilePicture || user?.profileImage || "");
   const activeCountry = useMemo(
@@ -505,6 +518,8 @@ const Settings = () => {
     setPasswordFlow(emptyPasswordFlow);
     setEmailFlow(emptyEmailFlow);
     setUsernameFlow({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") });
+    setPhoneUnavailable(false);
+    setPhoneSuccess(false);
   };
 
   const openManageAccountModal = () => {
@@ -538,6 +553,8 @@ const Settings = () => {
   const openPhoneModal = () => {
     setAuthModal("phone");
     setAuthFlowError("");
+    setPhoneUnavailable(false);
+    setPhoneSuccess(Boolean(user?.phoneVerified));
   };
 
   const verifyCurrentPassword = async (currentPassword) => {
@@ -699,7 +716,7 @@ const Settings = () => {
         notifySuccess("Email verified.");
       }
     } catch (requestError) {
-      setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to update email.");
+      setAuthFlowError(verificationErrorMessage(requestError, "Unable to update email."));
     } finally {
       setSaving("");
     }
@@ -734,10 +751,15 @@ const Settings = () => {
     try {
       const data = await sendPhoneCode(phoneForm);
       setCooldown(Number(data.cooldownSeconds || 60));
+      setPhoneUnavailable(false);
+      setPhoneSuccess(false);
       notifySuccess(data.code ? `Local verification code: ${data.code}` : "Verification code sent.");
     } catch (requestError) {
       setCooldown(Number(requestError.response?.data?.retryAfterSeconds || 0));
-      notifyError(requestError.response?.data?.message || "Unable to send verification code.");
+      if (requestError.response?.data?.reason === "SMS_PROVIDER_NOT_CONFIGURED") {
+        setPhoneUnavailable(true);
+      }
+      notifyError(verificationErrorMessage(requestError, "Unable to send verification code."));
     } finally {
       setSaving("");
     }
@@ -752,9 +774,10 @@ const Settings = () => {
     try {
       await verifyPhoneCode({ code: phoneCode });
       setPhoneCode("");
+      setPhoneSuccess(true);
       notifySuccess("Phone verified.");
     } catch (requestError) {
-      notifyError(requestError.response?.data?.message || "Unable to verify phone.");
+      notifyError(verificationErrorMessage(requestError, "Unable to verify phone."));
     } finally {
       setSaving("");
     }
@@ -1470,11 +1493,21 @@ const Settings = () => {
             </div>
 
             <div className="space-y-4 p-4">
+              {phoneSuccess && (
+                <div className="rounded-lg bg-green-50 p-5 text-center">
+                  <CheckCircle2 className="mx-auto h-10 w-10 text-green-600" />
+                  <p className="mt-3 text-lg font-black text-navy">Phone verified</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-600">Your VibeBook phone number is now trusted.</p>
+                </div>
+              )}
+
               <div className={`rounded-lg p-4 ${user?.phoneVerified ? "bg-green-50" : "bg-surface"}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-black text-navy">{phoneDisplay}</p>
-                    <p className="mt-1 text-xs font-semibold text-slate-500">{user?.phoneVerified ? "Phone verification is active." : "Add a phone number and verify it with a code."}</p>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      {phoneUnavailable ? "Phone verification coming soon." : user?.phoneVerified ? "Phone verification is active." : "Add a phone number and verify it with a code."}
+                    </p>
                   </div>
                   <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ${user?.phoneVerified ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>
                     {phoneVerificationLabel}
@@ -1508,28 +1541,35 @@ const Settings = () => {
                   </div>
                 </label>
 
-                <button type="button" className="btn-secondary w-full" onClick={requestPhoneCode} disabled={saving === "phone" || cooldown > 0}>
+                <button type="button" className="btn-secondary w-full" onClick={requestPhoneCode} disabled={phoneUnavailable || saving === "phone" || cooldown > 0}>
                   {cooldown > 0 ? `Resend in ${cooldown}s` : saving === "phone" ? "Sending..." : "Send OTP"}
                 </button>
               </div>
 
-              <form className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" onSubmit={verifyPhone}>
-                <label className="block space-y-2">
-                  <span className="label">Verification code</span>
-                  <input
-                    className="field text-center text-lg font-black tracking-[0.35em]"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={phoneCode}
-                    onChange={(event) => setPhoneCode(cleanPhone(event.target.value).slice(0, 6))}
-                    placeholder="000000"
-                    required
-                  />
-                </label>
-                <button type="submit" className="btn-primary w-full" disabled={saving === "verify-phone"}>
-                  {saving === "verify-phone" ? "Verifying..." : "Verify Phone"}
-                </button>
-              </form>
+              {phoneUnavailable ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600">
+                  Phone OTP is prepared for Twilio, Vonage, and Africa's Talking. It will be enabled when a provider is configured.
+                </div>
+              ) : (
+                <form className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" onSubmit={verifyPhone}>
+                  <label className="block space-y-2">
+                    <span className="label">Verification code</span>
+                    <input
+                      className="field text-center text-lg font-black tracking-[0.35em]"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={phoneCode}
+                      onChange={(event) => setPhoneCode(cleanPhone(event.target.value).slice(0, 6))}
+                      placeholder="000000"
+                      autoFocus
+                      required
+                    />
+                  </label>
+                  <button type="submit" className="btn-primary w-full" disabled={saving === "verify-phone"}>
+                    {saving === "verify-phone" ? "Verifying..." : "Verify Phone"}
+                  </button>
+                </form>
+              )}
             </div>
           </div>
         </div>
@@ -1661,13 +1701,13 @@ const Settings = () => {
                 <div className="space-y-3">
                   <label className="block space-y-2">
                     <span className="label">Verification code</span>
-                    <input className="field text-center text-lg font-black tracking-[0.35em]" inputMode="numeric" value={emailFlow.code} onChange={(event) => setEmailFlow((current) => ({ ...current, code: event.target.value.replace(/[^\d]/g, "").slice(0, 6) }))} placeholder="000000" required />
+                    <input className="field text-center text-lg font-black tracking-[0.35em]" inputMode="numeric" value={emailFlow.code} onChange={(event) => setEmailFlow((current) => ({ ...current, code: event.target.value.replace(/[^\d]/g, "").slice(0, 6) }))} placeholder="000000" autoFocus required />
                     <span className="block text-xs font-semibold text-slate-500">Enter the 6-digit code sent to {emailFlow.newEmail}. Codes expire after 10 minutes.</span>
                   </label>
                   <button
                     type="button"
                     className="btn-secondary w-full"
-                    onClick={() => requestEmailCode(emailFlow.newEmail).catch((requestError) => setAuthFlowError(requestError.response?.data?.message || requestError.message || "Unable to resend code."))}
+                    onClick={() => requestEmailCode(emailFlow.newEmail).catch((requestError) => setAuthFlowError(verificationErrorMessage(requestError, "Unable to resend code.")))}
                     disabled={emailFlow.cooldown > 0 || Boolean(saving)}
                   >
                     {emailFlow.cooldown > 0 ? `Resend in ${emailFlow.cooldown}s` : "Resend code"}

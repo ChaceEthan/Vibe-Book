@@ -17,7 +17,8 @@ const {
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const usernamePattern = /^[a-z0-9_][a-z0-9_-]{2,29}$/;
 const otpCooldownMs = 60 * 1000;
-const otpExpiryMs = 10 * 60 * 1000;
+const otpExpiryMinutes = Math.min(Math.max(Number(process.env.OTP_EXPIRES_MINUTES) || 10, 1), 60);
+const otpExpiryMs = otpExpiryMinutes * 60 * 1000;
 const supportedPhoneCountries = [
   { country: "Rwanda", countryCode: "+250" },
   { country: "Uganda", countryCode: "+256" },
@@ -585,12 +586,12 @@ const sendEmailCode = async (req, res, next) => {
       to: targetEmail,
       code,
       name: req.user.name || req.user.username || "creator",
-      expiresMinutes: Math.round(otpExpiryMs / 60000),
+      expiresMinutes: otpExpiryMinutes,
     });
 
     if (!delivery.sent && !shouldExposeOtp("email")) {
       return res.status(503).json({
-        message: "Email verification is not configured. Add SMTP_EMAIL, SMTP_PASSWORD, and SMTP_FROM.",
+        message: delivery.message || "Email verification is temporarily unavailable. Please try again later.",
         reason: delivery.reason || "SMTP_NOT_CONFIGURED",
       });
     }
@@ -730,11 +731,11 @@ const sendPhoneCode = async (req, res, next) => {
 
     const code = generateOtpCode("phone");
     const hashedCode = await bcrypt.hash(code, 10);
-    const delivery = await sendPhoneVerificationSms({ to: nextPhone, code });
+    const delivery = await sendPhoneVerificationSms({ to: nextPhone, code, expiresMinutes: otpExpiryMinutes });
 
     if (!delivery.sent && !shouldExposeOtp("phone")) {
       return res.status(503).json({
-        message: "Phone verification provider is not configured.",
+        message: "Phone verification coming soon.",
         reason: delivery.reason || "SMS_PROVIDER_NOT_CONFIGURED",
       });
     }

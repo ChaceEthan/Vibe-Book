@@ -1,28 +1,51 @@
 // @ts-nocheck
 const nodemailer = require("nodemailer");
 
+const getSmtpConfig = () => {
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
+  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+  const host = process.env.SMTP_HOST || "smtp.gmail.com";
+  const isGmail = /gmail\.com$/i.test(host);
+  const port = Number(process.env.SMTP_PORT) || (isGmail ? 465 : 587);
+  const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === "true" : port === 465;
+  const from = process.env.SMTP_FROM || process.env.EMAIL_FROM || (user ? `VibeBook <${user}>` : "");
+
+  return {
+    configured: Boolean(user && pass && from),
+    from,
+    host,
+    pass,
+    port,
+    secure,
+    user,
+  };
+};
+
 const hasSmtpConfig = () => {
-  return Boolean((process.env.SMTP_HOST || process.env.SMTP_EMAIL) && (process.env.SMTP_USER || process.env.SMTP_EMAIL) && (process.env.SMTP_PASS || process.env.SMTP_PASSWORD));
+  return getSmtpConfig().configured;
 };
 
 const createTransporter = () => {
-  const host = process.env.SMTP_HOST || "smtp.gmail.com";
-  const port = Number(process.env.SMTP_PORT) || 587;
-  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
-  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+  const config = getSmtpConfig();
 
   return nodemailer.createTransport({
-    host,
-    port,
-    secure: process.env.SMTP_SECURE === "true" || port === 465,
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
     auth: {
-      user,
-      pass,
+      user: config.user,
+      pass: config.pass,
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    tls: {
+      servername: config.host,
     },
   });
 };
 
-const defaultFrom = () => process.env.SMTP_FROM || process.env.EMAIL_FROM || process.env.SMTP_USER || process.env.SMTP_EMAIL;
+const defaultFrom = () => getSmtpConfig().from;
 
 const escapeHtml = (value = "") =>
   String(value)
@@ -31,6 +54,31 @@ const escapeHtml = (value = "") =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+const classifySmtpError = (error = {}) => {
+  const code = String(error.code || "");
+  const response = String(error.response || error.message || "");
+  const responseCode = Number(error.responseCode || 0);
+
+  if (code === "EAUTH" || responseCode === 535 || /invalid login|authentication/i.test(response)) {
+    return {
+      reason: "SMTP_AUTH_FAILED",
+      message: "Email verification is temporarily unavailable. Please check the Gmail App Password configuration.",
+    };
+  }
+
+  if (code === "ECONNECTION" || code === "ETIMEDOUT" || /timeout|connect/i.test(response)) {
+    return {
+      reason: "SMTP_CONNECTION_FAILED",
+      message: "Email verification is temporarily unavailable. Please try again in a moment.",
+    };
+  }
+
+  return {
+    reason: "SMTP_SEND_FAILED",
+    message: "Email verification is temporarily unavailable. Please try again later.",
+  };
+};
 
 const sendContactNotification = async ({ to, contactedUser, fromUser, message }) => {
   if (!hasSmtpConfig()) {
@@ -86,13 +134,13 @@ const sendBookingNotification = async ({ to, talent, requester, booking, whatsap
   return { sent: true };
 };
 
-const verificationEmailHtml = ({ code, expiresMinutes = 10, name = "creator" }) => `
+const verificationEmailHtml = ({ appUrl = "", code, expiresMinutes = 10, name = "creator" }) => `
   <div style="margin:0;background:#f8fafc;padding:24px;font-family:Inter,Arial,sans-serif;color:#0f172a;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
       <tr>
         <td style="background:#020617;color:#ffffff;padding:28px 24px;">
           <div style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:14px;background:#38bdf8;color:#020617;font-weight:900;font-size:18px;">VB</div>
-          <h1 style="margin:18px 0 0;font-size:26px;line-height:1.2;">Verify your VibeBook email</h1>
+          <h1 style="margin:18px 0 0;font-size:26px;line-height:1.2;">VibeBook email verification</h1>
           <p style="margin:10px 0 0;color:#cbd5e1;font-size:14px;line-height:1.6;">Hi ${escapeHtml(name)}, use this one-time code to finish securing your account.</p>
         </td>
       </tr>
@@ -101,8 +149,10 @@ const verificationEmailHtml = ({ code, expiresMinutes = 10, name = "creator" }) 
           <p style="margin:0 0 12px;font-size:14px;color:#475569;">Your VibeBook verification code is:</p>
           <div style="letter-spacing:10px;font-size:34px;font-weight:900;text-align:center;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:14px;padding:18px 12px;color:#0f172a;">${code}</div>
           <p style="margin:18px 0 0;font-size:14px;line-height:1.7;color:#475569;">This code expires in ${expiresMinutes} minutes. If you did not request this code, you can safely ignore this email.</p>
+          ${appUrl ? `<p style="margin:22px 0 0;"><a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:800;">Open VibeBook</a></p>` : ""}
           <div style="margin-top:18px;border-top:1px solid #e2e8f0;padding-top:16px;font-size:12px;line-height:1.6;color:#64748b;">
             VibeBook will never ask for your password or payment details by email. Keep this code private.
+            <br />VibeBook, Kigali, Rwanda. Support: gebmelody@gmail.com
           </div>
         </td>
       </tr>
@@ -112,34 +162,46 @@ const verificationEmailHtml = ({ code, expiresMinutes = 10, name = "creator" }) 
 
 const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) => {
   if (!hasSmtpConfig()) {
-    return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
+    return {
+      sent: false,
+      reason: "SMTP_NOT_CONFIGURED",
+      message: "Email verification is temporarily unavailable. Please contact support.",
+    };
   }
 
   const transporter = createTransporter();
   const subject = "Your VibeBook verification code";
+  const appUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || "";
 
-  await transporter.sendMail({
-    from: defaultFrom(),
-    to,
-    subject,
-    text: [
-      `Hi ${name || "creator"},`,
-      "",
-      `Your VibeBook verification code is: ${code}`,
-      "",
-      `This code expires in ${expiresMinutes} minutes.`,
-      "If you did not request this code, you can safely ignore this email.",
-      "",
-      "VibeBook will never ask for your password or payment details by email.",
-    ].join("\n"),
-    html: verificationEmailHtml({ code, expiresMinutes, name }),
-  });
+  try {
+    await transporter.sendMail({
+      from: defaultFrom(),
+      to,
+      subject,
+      text: [
+        `Hi ${name || "creator"},`,
+        "",
+        `Your VibeBook verification code is: ${code}`,
+        "",
+        `This code expires in ${expiresMinutes} minutes.`,
+        "If you did not request this code, you can safely ignore this email.",
+        "",
+        "VibeBook will never ask for your password or payment details by email.",
+        "VibeBook, Kigali, Rwanda. Support: gebmelody@gmail.com",
+      ].join("\n"),
+      html: verificationEmailHtml({ appUrl, code, expiresMinutes, name }),
+    });
 
-  return { sent: true };
+    return { sent: true };
+  } catch (error) {
+    const classified = classifySmtpError(error);
+    return { sent: false, ...classified };
+  }
 };
 
 module.exports = {
   sendContactNotification,
   sendBookingNotification,
   sendVerificationEmail,
+  getSmtpConfig,
 };

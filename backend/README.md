@@ -67,6 +67,30 @@ npm run dev
 | `MONGO_URI` | Yes | MongoDB connection string |
 | `JWT_SECRET` | Yes | Secret key used to sign JWT tokens |
 | `PORT` | No | Server port. Defaults to `5000` when not provided |
+| `CLIENT_URL` | Recommended | Frontend URL used in verification emails |
+| `SMTP_EMAIL` | Email OTP | Gmail address used to send verification codes |
+| `SMTP_PASSWORD` | Email OTP | Gmail App Password. Do not use your regular Gmail password |
+| `SMTP_FROM` | Email OTP | Sender label, for example `VibeBook <your-address@gmail.com>` |
+| `OTP_EXPIRES_MINUTES` | No | OTP lifetime in minutes. Defaults to `10` |
+| `SMS_PROVIDER` | Phone OTP | Optional phone provider: `twilio`, `vonage`, or `africastalking` |
+
+### Gmail Email OTP
+
+VibeBook sends verification codes through Nodemailer. For Gmail, enable 2-Step Verification on the Gmail account, create an App Password, then set:
+
+```env
+SMTP_EMAIL=your-address@gmail.com
+SMTP_PASSWORD=your-google-app-password
+SMTP_FROM="VibeBook <your-address@gmail.com>"
+CLIENT_URL=https://your-frontend-domain.com
+OTP_EXPIRES_MINUTES=10
+```
+
+If Gmail credentials are missing or invalid, the API returns a clean temporary-unavailable message and does not crash the server.
+
+### Phone OTP
+
+Phone verification is provider-ready but disabled in production until `SMS_PROVIDER` and the selected provider credentials are configured. Supported provider keys are documented in `backend/.env.example`.
 
 ## API Endpoints Overview
 
