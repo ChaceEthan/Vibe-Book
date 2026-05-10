@@ -34,6 +34,7 @@ const API = axios.create({
   withCredentials: true,
   timeout: 25000,
 });
+const UPLOAD_TIMEOUT_MS = 180000;
 
 export const getApiErrorMessage = (error, fallback = "Request failed. Please try again.") => {
   const data = error?.response?.data;
@@ -144,17 +145,17 @@ export const uploadMedia = (formData, type, options = {}) => {
   const mediaType = type || formData.get?.("type") || "image";
 
   return API.post(`/upload/${mediaType === "video" ? "video" : "image"}`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: options.onUploadProgress,
     signal: options.signal,
+    timeout: options.timeout || UPLOAD_TIMEOUT_MS,
   });
 };
 
 export const uploadProfilePicture = (formData, options = {}) => {
   return API.post("/users/profile/image", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
     onUploadProgress: options.onUploadProgress,
     signal: options.signal,
+    timeout: options.timeout || UPLOAD_TIMEOUT_MS,
   });
 };
 

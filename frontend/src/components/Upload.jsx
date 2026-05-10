@@ -44,6 +44,105 @@ const MAX_VIDEO_SECONDS = 120;
 const uploadUrl = (value) => String(value || "").trim();
 const COMPRESSED_IMAGE_MAX_SIDE = 1600;
 const COMPRESSED_IMAGE_QUALITY = 0.82;
+const IMAGE_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
+const VIDEO_MIME_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
+const GENERIC_MIME_TYPES = new Set(["", "application/octet-stream", "binary/octet-stream"]);
+const VALID_VISIBILITIES = new Set(["public", "followers", "private"]);
+const VIDEO_FILE_ACCEPT = "video/mp4,video/quicktime,video/webm,video/*";
+const IMAGE_FILE_ACCEPT = "image/jpeg,image/png,image/webp,image/gif,image/*";
+const MIME_BY_EXTENSION = {
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  mov: "video/quicktime",
+  mp4: "video/mp4",
+  png: "image/png",
+  webm: "video/webm",
+  webp: "image/webp",
+};
+
+const extensionForMime = (mimeType = "") => {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/gif") return "gif";
+  if (mimeType === "video/webm") return "webm";
+  if (mimeType === "video/quicktime") return "mov";
+  if (mimeType === "video/mp4") return "mp4";
+  return mimeType.startsWith("image/") ? "jpg" : "mp4";
+};
+
+const extensionFromName = (name = "") => String(name).split(".").pop()?.toLowerCase() || "";
+
+const inferMimeType = (file, forcedType = "") => {
+  const declaredType = String(file?.type || "").toLowerCase();
+  if (declaredType && !GENERIC_MIME_TYPES.has(declaredType)) {
+    return declaredType;
+  }
+
+  const extensionType = MIME_BY_EXTENSION[extensionFromName(file?.name)];
+  if (extensionType) {
+    return extensionType;
+  }
+
+  if (forcedType === "profile" || forcedType === "image") return "image/jpeg";
+  if (forcedType === "video") return "video/mp4";
+  return "";
+};
+
+const normalizeUploadFile = (sourceFile, forcedType = "") => {
+  if (!sourceFile) {
+    return null;
+  }
+
+  const mimeType = inferMimeType(sourceFile, forcedType);
+  const declaredType = String(sourceFile.type || "").toLowerCase();
+  const needsMimePatch = !declaredType || GENERIC_MIME_TYPES.has(declaredType);
+
+  if (!needsMimePatch || !mimeType) {
+    return sourceFile;
+  }
+
+  const fallbackName = `vibebook-upload-${Date.now()}.${extensionForMime(mimeType)}`;
+  const fileName = sourceFile.name?.includes(".") ? sourceFile.name : fallbackName;
+
+  try {
+    return new File([sourceFile], fileName, {
+      type: mimeType,
+      lastModified: sourceFile.lastModified || Date.now(),
+    });
+  } catch {
+    return sourceFile;
+  }
+};
+
+const appendFile = (formData, field, sourceFile, fallbackType) => {
+  const fileName = sourceFile?.name?.trim?.() || `vibebook-upload-${Date.now()}.${extensionForMime(inferMimeType(sourceFile, fallbackType))}`;
+  formData.append(field, sourceFile, fileName);
+};
+
+const serializeTags = (value = "") =>
+  Array.from(
+    new Set(
+      String(value)
+        .split(/[,\s]+/)
+        .map((tag) => tag.trim().replace(/^#+/, "").toLowerCase())
+        .filter(Boolean)
+    )
+  )
+    .slice(0, 10)
+    .join(",");
+
+const serializeMentions = (value = "") =>
+  Array.from(
+    new Set(
+      String(value)
+        .split(/[,\s]+/)
+        .map((mention) => mention.trim().replace(/^@+/, "").toLowerCase())
+        .filter(Boolean)
+    )
+  )
+    .slice(0, 20)
+    .join(",");
 
 const canvasToBlob = (canvas, type, quality) =>
   new Promise((resolve) => {
@@ -102,7 +201,7 @@ const shouldRetryUpload = (error) => {
   return !status || status >= 500;
 };
 
-const withUploadRetry = async (operation, attempts = 2) => {
+const withUploadRetry = async (operation, attempts = 1) => {
   let lastError;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
@@ -194,6 +293,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const recordedChunksRef = useRef([]);
   const recordingCanceledRef = useRef(false);
   const abortControllerRef = useRef(null);
+  const uploadInFlightRef = useRef(false);
+  const closeTimerRef = useRef(null);
   const [type, setType] = useState("image");
   const [captureMode, setCaptureMode] = useState("gallery");
   const [file, setFile] = useState(null);
@@ -219,6 +320,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const [recording, setRecording] = useState(false);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [torchEnabled, setTorchEnabled] = useState(false);
+  const [cameraPreparing, setCameraPreparing] = useState(false);
+  const [activeEditorPanel, setActiveEditorPanel] = useState("filters");
 
   const isProfile = type === "profile";
   const isImage = type === "image" || isProfile;
@@ -230,6 +333,20 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const previewTransform = `rotate(${editor.rotation}deg) scale(${editor.effect === "zoom" ? 1.05 : 1})`;
   const selectedLabel = file ? `${file.name} - ${(file.size / (1024 * 1024)).toFixed(1)}MB` : "Choose a file or record in the app.";
   const trimMax = Math.max(1, Math.round(duration || MAX_VIDEO_SECONDS));
+  const editorToolTabs = useMemo(
+    () =>
+      [
+        { value: "filters", label: "Filters", icon: Wand2 },
+        { value: "effects", label: "Effects", icon: Sparkles },
+        ...(type === "video" ? [{ value: "trim", label: "Trim", icon: Scissors }] : []),
+        { value: "adjustments", label: "Adjust", icon: SlidersHorizontal },
+        { value: "crop", label: "Crop", icon: Crop },
+        { value: "speed", label: "Speed", icon: Gauge },
+        { value: "audio", label: "Audio", icon: Volume2 },
+      ],
+    [type]
+  );
+  const editorPanelClass = (panel) => (activeEditorPanel === panel ? "block" : "hidden lg:block");
 
   const helperCopy = useMemo(() => {
     if (isProfile) {
@@ -266,6 +383,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setRecording(false);
     setRecordSeconds(0);
     setTorchEnabled(false);
+    setCameraPreparing(false);
   };
 
   const resetSelectedMedia = () => {
@@ -278,6 +396,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setError("");
     setProgress(0);
     setEditor(defaultEditor);
+    setActiveEditorPanel("filters");
     setPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return "";
@@ -298,8 +417,13 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   };
 
   const resetAll = () => {
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     abortControllerRef.current?.abort?.();
     abortControllerRef.current = null;
+    uploadInFlightRef.current = false;
     stopCamera();
     setFile(null);
     setUploadedUrl("");
@@ -317,6 +441,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setProgress(0);
     setUploading(false);
     setEditor(defaultEditor);
+    setActiveEditorPanel("filters");
     setCaptureMode("gallery");
     setPreview((current) => {
       if (current) URL.revokeObjectURL(current);
@@ -331,6 +456,16 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       }
     };
   }, [preview]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort?.();
+      if (closeTimerRef.current) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+      mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    };
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -363,7 +498,13 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     }
 
     const interval = window.setInterval(() => {
-      setRecordSeconds((current) => current + 1);
+      setRecordSeconds((current) => {
+        const next = current + 1;
+        if (next >= MAX_VIDEO_SECONDS) {
+          window.setTimeout(() => stopRecording(), 0);
+        }
+        return next;
+      });
     }, 1000);
 
     return () => window.clearInterval(interval);
@@ -410,16 +551,25 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       return;
     }
 
-    const nextType = forcedType || (selectedFile.type.startsWith("video/") ? "video" : isProfile ? "profile" : "image");
+    const sourceMimeType = inferMimeType(selectedFile, forcedType);
+    const nextType = forcedType || (sourceMimeType.startsWith("video/") ? "video" : isProfile ? "profile" : "image");
     const nextIsImage = nextType === "image" || nextType === "profile";
+    const normalizedFile = normalizeUploadFile(selectedFile, nextType);
+    const mimeType = inferMimeType(normalizedFile, nextType);
 
-    if (nextIsImage && (!selectedFile.type.startsWith("image/") || selectedFile.size > MAX_IMAGE_SIZE)) {
+    if (!normalizedFile?.size) {
+      setError("Choose a valid media file.");
+      addToast("Choose a valid media file.", "error");
+      return;
+    }
+
+    if (nextIsImage && (!IMAGE_MIME_TYPES.has(mimeType) || normalizedFile.size > MAX_IMAGE_SIZE)) {
       setError("Choose an image under 5MB.");
       addToast("Choose an image under 5MB.", "error");
       return;
     }
 
-    if (!nextIsImage && (!selectedFile.type.startsWith("video/") || selectedFile.size > MAX_VIDEO_SIZE)) {
+    if (!nextIsImage && (!VIDEO_MIME_TYPES.has(mimeType) || normalizedFile.size > MAX_VIDEO_SIZE)) {
       setError("Choose a video under 50MB.");
       addToast("Choose a video under 50MB.", "error");
       return;
@@ -429,13 +579,14 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       setType(nextType);
     }
 
-    const nextPreview = URL.createObjectURL(selectedFile);
+    const nextPreview = URL.createObjectURL(normalizedFile);
     setPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return nextPreview;
     });
-    setFile(selectedFile);
+    setFile(normalizedFile);
     setEditor(defaultEditor);
+    setActiveEditorPanel("filters");
 
     if (nextIsImage) {
       const image = new Image();
@@ -465,13 +616,16 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
   const startCamera = async (preferredFacing = cameraFacing) => {
     setCameraError("");
+    setCameraPreparing(true);
     setCaptureMode("camera");
     setType("video");
     stopCamera();
+    setCameraPreparing(true);
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError("Camera recording is not available in this browser.");
       addToast("Camera recording is not available in this browser.", "error");
+      setCameraPreparing(false);
       return;
     }
 
@@ -501,6 +655,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     } catch {
       setCameraError("Camera permission was denied or no camera was found.");
       addToast("Camera permission was denied or no camera was found.", "error");
+    } finally {
+      setCameraPreparing(false);
     }
   };
 
@@ -592,12 +748,17 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const cancelUpload = () => {
     abortControllerRef.current?.abort?.();
     abortControllerRef.current = null;
+    uploadInFlightRef.current = false;
     setUploading(false);
     setStatus("Upload canceled.");
     setProgress(0);
   };
 
   const handleUpload = async () => {
+    if (uploadInFlightRef.current || uploading) {
+      return;
+    }
+
     if (!file) {
       setError("Choose a file first.");
       addToast("Choose a file first.", "error");
@@ -610,49 +771,68 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       return;
     }
 
+    uploadInFlightRef.current = true;
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setUploading(true);
     setError("");
-    setStatus(type === "video" ? "Processing video..." : "Uploading media...");
-    setProgress(0);
+    setStatus("Preparing upload...");
+    setProgress(4);
 
     try {
-      const uploadFile = isImage ? await compressImageFile(file) : file;
+      const uploadType = type === "video" ? "video" : isProfile ? "profile" : "image";
+      const normalizedFile = normalizeUploadFile(file, uploadType);
+      const uploadFile = uploadType === "image" || uploadType === "profile" ? await compressImageFile(normalizedFile) : normalizedFile;
+      const uploadMimeType = inferMimeType(uploadFile, uploadType);
+
+      if (!uploadFile?.size) {
+        throw new Error("Choose a valid media file.");
+      }
+
+      if (uploadType === "video" && !VIDEO_MIME_TYPES.has(uploadMimeType)) {
+        throw new Error("Use an MP4, MOV, or WEBM video.");
+      }
+
+      if ((uploadType === "image" || uploadType === "profile") && !IMAGE_MIME_TYPES.has(uploadMimeType)) {
+        throw new Error("Use a JPEG, PNG, WEBP, or GIF image.");
+      }
+
       const formData = new FormData();
 
       if (isProfile) {
-        formData.append("image", uploadFile);
+        appendFile(formData, "image", uploadFile, "profile");
       } else {
-        formData.append("media", uploadFile);
-        formData.append("type", type);
-        formData.append("orientation", orientation);
+        appendFile(formData, "media", uploadFile, uploadType);
+        formData.append("type", uploadType);
+        formData.append("orientation", orientation === "landscape" ? "landscape" : "portrait");
         formData.append("caption", caption.trim());
         formData.append("description", caption.trim());
-        formData.append("tags", tags);
-        formData.append("mentions", mentions);
-        formData.append("visibility", visibility);
+        formData.append("tags", serializeTags(tags));
+        formData.append("mentions", serializeMentions(mentions));
+        formData.append("visibility", VALID_VISIBILITIES.has(visibility) ? visibility : "public");
         formData.append("location", location.trim());
-        formData.append("editor", JSON.stringify({ ...editor, source: captureMode }));
+        formData.append("editor", JSON.stringify({ ...defaultEditor, ...editor, source: captureMode }));
         formData.append("muted", String(Boolean(editor.muted)));
-        formData.append("playbackSpeed", String(editor.speed));
-        if (duration) {
+        formData.append("playbackSpeed", String(Number(editor.speed || 1)));
+        if (uploadType === "video" && duration) {
           formData.append("duration", String(Math.round(duration)));
         }
       }
 
+      setStatus(uploadType === "video" ? "Uploading video..." : "Uploading media...");
+      setProgress((current) => Math.max(current, 8));
       const progressOptions = {
         signal: controller.signal,
         onUploadProgress: (event) => {
           if (event.total) {
-            setProgress(Math.min(99, Math.round((event.loaded * 100) / event.total)));
+            setProgress(Math.min(99, Math.max(8, Math.round((event.loaded * 100) / event.total))));
           }
         },
       };
 
       const data = isProfile
         ? await withUploadRetry(() => uploadProfilePicture(formData, progressOptions))
-        : await withUploadRetry(() => uploadMedia(formData, type, progressOptions));
+        : await withUploadRetry(() => uploadMedia(formData, uploadType, progressOptions));
 
       const nextUrl = uploadUrl(data.url) || uploadUrl(data.user?.profilePicture);
       const nextPath = nextUrl;
@@ -683,7 +863,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
       addToast(isProfile ? "Profile image updated" : "Upload successful", "success");
 
-      window.setTimeout(() => {
+      closeTimerRef.current = window.setTimeout(() => {
         onClose?.();
         navigate(isProfile ? "/settings" : "/", { replace: false });
       }, 900);
@@ -691,12 +871,13 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       const canceled = requestError?.code === "ERR_CANCELED" || requestError?.name === "CanceledError" || requestError?.name === "AbortError";
       const uploadMessage = canceled
         ? "Upload canceled."
-        : requestError.response?.data?.error || requestError.response?.data?.message || "Upload failed";
+        : requestError.response?.data?.error || requestError.response?.data?.message || requestError.message || "Upload failed";
       setStatus("");
       setError(uploadMessage);
       addToast(uploadMessage, canceled ? "info" : "error");
     } finally {
       abortControllerRef.current = null;
+      uploadInFlightRef.current = false;
       setUploading(false);
     }
   };
@@ -740,14 +921,14 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end bg-slate-950/80 p-2 backdrop-blur-md sm:items-center sm:justify-center sm:p-4">
-      <div className="flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div className="fixed inset-0 z-[80] flex items-end overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:items-center sm:justify-center sm:p-4">
+      <div className="flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[94dvh] sm:max-w-6xl sm:rounded-2xl">
         {/* Header with step progress */}
-        <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
-          <div className="flex items-center justify-between gap-4 mb-4">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-6 sm:py-4">
+          <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
             <div className="min-w-0">
               <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Create Post</p>
-              <h2 className="mt-1 text-xl sm:text-2xl font-bold text-slate-900">
+              <h2 className="mt-1 truncate text-lg font-bold text-slate-900 sm:text-2xl">
                 {isProfile ? "Update profile picture" : "Create a VibeBook post"}
               </h2>
             </div>
@@ -767,7 +948,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
               <div key={step} className="flex flex-1 items-center">
                 <div className="relative flex flex-1 items-center gap-2">
                   <div
-                    className={`flex h-8 w-8 items-center justify-center rounded-full font-semibold text-sm transition-all duration-200 ${
+                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-all duration-200 sm:h-8 sm:w-8 sm:text-sm ${
                       index < activeStep
                         ? "bg-green-500 text-white"
                         : index === activeStep
@@ -775,10 +956,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                           : "bg-slate-200 text-slate-600"
                     }`}
                   >
-                    {index < activeStep ? "✓" : index + 1}
+                    {index < activeStep ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
                   </div>
                   <span
-                    className={`hidden sm:block text-xs font-semibold ${
+                    className={`hidden text-xs font-semibold sm:block ${
                       index <= activeStep ? "text-slate-900" : "text-slate-400"
                     }`}
                   >
@@ -787,7 +968,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 </div>
                 {index < steps.length - 1 && (
                   <div
-                    className={`h-0.5 w-2 transition-all duration-200 ${
+                    className={`h-0.5 w-1.5 transition-all duration-200 sm:w-2 ${
                       index < activeStep ? "bg-green-500" : "bg-slate-300"
                     }`}
                   />
@@ -797,10 +978,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[0.86fr_1.14fr]">
-          <aside className="border-b border-slate-200 bg-slate-50 p-4 sm:p-6 lg:border-b-0 lg:border-r">
+        <div className="grid min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain lg:grid-cols-[0.82fr_1.18fr]">
+          <aside className="min-w-0 border-b border-slate-200 bg-slate-50 p-3 sm:p-6 lg:border-b-0 lg:border-r">
             {/* Media type selector */}
-            <div className="grid grid-cols-3 gap-2 rounded-xl bg-white p-2 shadow-sm">
+            <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-white p-1.5 shadow-sm sm:gap-2 sm:p-2">
               {[
                 { value: "profile", label: "Profile", icon: UserRound },
                 { value: "image", label: "Photo", icon: ImageIcon },
@@ -811,7 +992,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   <button
                     key={option.value}
                     type="button"
-                    className={`flex min-w-0 flex-col items-center justify-center gap-2 rounded-lg px-3 py-3 text-xs font-bold transition-all duration-200 ${
+                    className={`flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs font-bold transition-all duration-200 sm:gap-2 sm:px-3 sm:py-3 ${
                       type === option.value
                         ? "bg-blue-600 text-white shadow-lg scale-105"
                         : "bg-white text-slate-600 hover:bg-slate-100"
@@ -827,36 +1008,36 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             </div>
 
             {!isProfile ? (
-              <div className="mt-6 grid gap-3">
+              <div className="mt-4 grid gap-2.5 sm:mt-6 sm:gap-3">
                 <button
                   type="button"
-                  className="group relative flex items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50"
+                  className="group relative flex items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50 sm:p-4"
                   onClick={() => startCamera(cameraFacing)}
-                  disabled={uploading || recording}
+                  disabled={uploading || recording || cameraPreparing}
                 >
                   <div className="relative z-10 min-w-0">
-                    <span className="block text-sm font-bold text-slate-900">Record Video</span>
+                    <span className="block text-sm font-bold text-slate-900">{cameraPreparing ? "Preparing camera..." : "Record Video"}</span>
                     <span className="mt-1 block text-xs font-semibold text-slate-500">Use your phone camera inside VibeBook.</span>
                   </div>
-                  <Camera className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
+                  {cameraPreparing ? <Loader2 className="relative z-10 h-6 w-6 shrink-0 animate-spin text-blue-600" /> : <Camera className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />}
                 </button>
 
-                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
+                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md sm:p-4">
                   <div className="relative z-10 min-w-0">
                     <span className="block text-sm font-bold text-slate-900">Upload Video</span>
                     <span className="mt-1 block text-xs font-semibold text-slate-500">Select a video up to 2 minutes.</span>
                   </div>
                   <UploadCloud className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
-                  <input className="hidden" type="file" accept="video/*" onChange={(event) => handleSelect(event, "video")} disabled={uploading} />
+                  <input className="hidden" type="file" accept={VIDEO_FILE_ACCEPT} onChange={(event) => handleSelect(event, "video")} disabled={uploading} />
                 </label>
 
-                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
+                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md sm:p-4">
                   <div className="relative z-10 min-w-0">
                     <span className="block text-sm font-bold text-slate-900">Upload Photo</span>
                     <span className="mt-1 block text-xs font-semibold text-slate-500">Post an image with filters and effects.</span>
                   </div>
                   <ImageIcon className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
-                  <input className="hidden" type="file" accept="image/*" onChange={(event) => handleSelect(event, "image")} disabled={uploading} />
+                  <input className="hidden" type="file" accept={IMAGE_FILE_ACCEPT} onChange={(event) => handleSelect(event, "image")} disabled={uploading} />
                 </label>
               </div>
             ) : (
@@ -864,14 +1045,14 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 <UserRound className="h-9 w-9 text-slate-400" />
                 <span className="mt-3 text-sm font-black text-navy">Select profile picture</span>
                 <span className="mt-2 max-w-xs text-xs font-semibold leading-5 text-slate-500">{selectedLabel}</span>
-                <input className="hidden" type="file" accept="image/*" onChange={(event) => handleSelect(event, "profile")} disabled={uploading} />
+                <input className="hidden" type="file" accept={IMAGE_FILE_ACCEPT} onChange={(event) => handleSelect(event, "profile")} disabled={uploading} />
               </label>
             )}
 
             {cameraOpen && (
-              <div className="mt-6 overflow-hidden rounded-xl border-2 border-slate-200 bg-slate-950 shadow-lg">
-                <div className="relative aspect-[9/16] sm:aspect-[9/14]">
-                  <video ref={cameraVideoRef} className="h-full w-full object-cover" autoPlay muted playsInline />
+              <div className="mx-auto mt-4 w-full max-w-sm overflow-hidden rounded-xl border-2 border-slate-200 bg-slate-950 shadow-lg sm:mt-6">
+                <div className="relative aspect-[9/16] max-h-[58dvh]">
+                  <video ref={cameraVideoRef} className="h-full w-full object-contain" autoPlay muted playsInline />
                   
                   {/* Recording indicator */}
                   <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-slate-950/80 to-transparent p-4">
@@ -885,7 +1066,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   </div>
 
                   {/* Camera controls */}
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-4 bg-gradient-to-t from-slate-950/90 to-transparent p-6">
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-4 bg-gradient-to-t from-slate-950/90 to-transparent p-4 sm:p-6">
                     <button
                       type="button"
                       className="rounded-full bg-white/20 p-3 text-white backdrop-blur transition-all duration-200 hover:bg-white/30 hover:scale-110"
@@ -898,7 +1079,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
                     <button
                       type="button"
-                      className={`flex h-16 w-16 items-center justify-center rounded-full border-4 font-semibold shadow-lg transition-all duration-150 active:scale-95 ${
+                      className={`flex h-14 w-14 items-center justify-center rounded-full border-4 font-semibold shadow-lg transition-all duration-150 active:scale-95 sm:h-16 sm:w-16 ${
                         recording
                           ? "border-red-400 bg-red-500 text-white hover:bg-red-600"
                           : "border-white bg-white text-slate-900 hover:scale-105"
@@ -945,7 +1126,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   ref={cameraFileInputRef}
                   className="hidden"
                   type="file"
-                  accept="video/*"
+                  accept={VIDEO_FILE_ACCEPT}
                   capture="environment"
                   onChange={(event) => handleSelect(event, "video")}
                   disabled={uploading}
@@ -968,16 +1149,16 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             {status && !success && <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">{status}</div>}
           </aside>
 
-          <main className="min-w-0 p-4 sm:p-5">
-            <div className="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(17rem,0.68fr)]">
-              <div className="space-y-4">
-                <div className="relative flex min-h-[22rem] items-center justify-center overflow-hidden rounded-lg bg-slate-950 sm:min-h-[34rem]">
+          <main className="min-w-0 max-w-full overflow-x-hidden p-3 sm:p-5">
+            <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(17rem,0.68fr)] xl:gap-5">
+              <div className="min-w-0 space-y-4">
+                <div className="relative mx-auto flex h-[58dvh] min-h-[18rem] w-full max-w-sm items-center justify-center overflow-hidden rounded-lg bg-slate-950 sm:max-h-[34rem] sm:min-h-[30rem] sm:max-w-none xl:h-auto xl:min-h-[34rem]">
                   {previewSrc ? (
                     <>
                       {isImage ? (
                         <img src={previewSrc} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl" />
                       ) : null}
-                      <div className="relative z-10 flex h-full max-h-[72dvh] min-h-[22rem] w-full items-center justify-center p-2 sm:min-h-[34rem]">
+                      <div className="relative z-10 flex h-full max-h-full w-full items-center justify-center p-2">
                         {isImage ? (
                           <img
                             src={previewSrc}
@@ -1026,7 +1207,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 </div>
 
                 {file && !isProfile && (
-                  <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="min-w-0 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                     <div className="mb-4 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-black uppercase text-brand">Editor</p>
@@ -1035,8 +1216,28 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       <Sparkles className="h-5 w-5 text-brand" />
                     </div>
 
+                    <div className="mb-4 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+                      {editorToolTabs.map((tab) => {
+                        const Icon = tab.icon;
+                        return (
+                          <button
+                            key={tab.value}
+                            type="button"
+                            className={`inline-flex shrink-0 items-center gap-2 rounded-full px-3 py-2 text-xs font-black transition ${
+                              activeEditorPanel === tab.value ? "bg-blue-600 text-white shadow-md" : "bg-slate-100 text-slate-600"
+                            }`}
+                            onClick={() => setActiveEditorPanel(tab.value)}
+                            disabled={uploading}
+                          >
+                            <Icon className="h-4 w-4" />
+                            {tab.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
                     <div className="grid gap-4 lg:grid-cols-2">
-                      <div>
+                      <div className={editorPanelClass("filters")}>
                         <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-700">
                           <Wand2 className="h-4 w-4" />
                           Filters
@@ -1060,7 +1261,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         </div>
                       </div>
 
-                      <div>
+                      <div className={editorPanelClass("effects")}>
                         <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-700">
                           <Sparkles className="h-4 w-4" />
                           Effects
@@ -1087,7 +1288,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
                     <div className="mt-4 grid gap-4 lg:grid-cols-2">
                       {type === "video" && (
-                        <div className="rounded-lg bg-slate-50 p-3">
+                        <div className={`${editorPanelClass("trim")} rounded-lg bg-slate-50 p-3`}>
                           <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
                             <Scissors className="h-4 w-4" />
                             Trim and split
@@ -1131,7 +1332,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         </div>
                       )}
 
-                      <div className="rounded-lg bg-slate-50 p-3">
+                      <div className={`${editorPanelClass("adjustments")} rounded-lg bg-slate-50 p-3`}>
                         <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
                           <SlidersHorizontal className="h-4 w-4" />
                           Adjustments
@@ -1164,7 +1365,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                     </div>
 
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      <div className="rounded-lg bg-slate-50 p-3">
+                      <div className={`${editorPanelClass("crop")} rounded-lg bg-slate-50 p-3`}>
                         <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
                           <Crop className="h-4 w-4" />
                           Crop
@@ -1188,7 +1389,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         </div>
                       </div>
 
-                      <div className="rounded-lg bg-slate-50 p-3">
+                      <div className={`${editorPanelClass("speed")} rounded-lg bg-slate-50 p-3`}>
                         <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
                           <Gauge className="h-4 w-4" />
                           Speed
@@ -1208,7 +1409,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         </div>
                       </div>
 
-                      <div className="rounded-lg bg-slate-50 p-3">
+                      <div className={`${editorPanelClass("audio")} rounded-lg bg-slate-50 p-3`}>
                         <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
                           <RotateCw className="h-4 w-4" />
                           Transform
@@ -1277,7 +1478,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
               </div>
 
-              <div className="space-y-4">
+              <div className="min-w-0 space-y-4">
                 {!isProfile && (
                   <>
                     <label className="block space-y-2">
@@ -1401,31 +1602,33 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="w-full rounded-xl bg-blue-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed active:scale-95"
-                  onClick={handleUpload}
-                  disabled={uploading || !file || success || (type === "video" && duration > MAX_VIDEO_SECONDS)}
-                >
-                  {uploading ? (
-                    <span className="inline-flex items-center justify-center gap-2">
-                      <Loader2 className="h-5 w-5 animate-spin" />
-                      <span>Uploading {progress}%</span>
-                    </span>
-                  ) : success ? (
-                    <span className="inline-flex items-center justify-center gap-2">
-                      <CheckCircle2 className="h-5 w-5" />
-                      Upload complete
-                    </span>
-                  ) : isProfile ? (
-                    "Save profile image"
-                  ) : (
-                    <span className="inline-flex items-center justify-center gap-2">
-                      <UploadCloud className="h-5 w-5" />
-                      Post now
-                    </span>
-                  )}
-                </button>
+                <div className="sticky bottom-0 -mx-3 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:p-0 sm:shadow-none">
+                  <button
+                    type="button"
+                    className="w-full rounded-xl bg-blue-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 active:scale-95"
+                    onClick={handleUpload}
+                    disabled={uploading || !file || success || (type === "video" && duration > MAX_VIDEO_SECONDS)}
+                  >
+                    {uploading ? (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <span>Uploading {progress}%</span>
+                      </span>
+                    ) : success ? (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <CheckCircle2 className="h-5 w-5" />
+                        Upload complete
+                      </span>
+                    ) : isProfile ? (
+                      "Save profile image"
+                    ) : (
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <UploadCloud className="h-5 w-5" />
+                        Post now
+                      </span>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </main>

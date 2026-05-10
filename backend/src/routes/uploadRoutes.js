@@ -3,6 +3,7 @@ const express = require("express");
 
 const Feed = require("../models/Feed");
 const User = require("../models/User");
+const { serializeFeedItem, userSelect } = require("../controllers/feedController");
 const authMiddleware = require("../middleware/authMiddleware");
 const {
   maxImageSize,
@@ -154,7 +155,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       runValidators: true,
     }).select("-password");
 
-    await Feed.findOneAndUpdate(
+    const feedItem = await Feed.findOneAndUpdate(
       { userId: req.user._id, mediaUrl: url },
       {
         $set: {
@@ -203,12 +204,13 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
         },
       },
       { returnDocument: "after", upsert: true, runValidators: true }
-    );
+    ).populate("userId", userSelect);
 
     return res.status(201).json({
       success: true,
       url,
       public_id: publicId,
+      feedItem: feedItem ? serializeFeedItem(feedItem, req.user, false, { req }) : undefined,
     });
   } catch (error) {
     if (file) {
