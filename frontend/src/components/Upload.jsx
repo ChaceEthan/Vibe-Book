@@ -739,21 +739,67 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end bg-slate-950/70 p-2 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4">
-      <div className="flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 sm:px-5">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-brand">Create</p>
-            <h2 className="truncate text-xl font-black text-navy">{isProfile ? "Update profile image" : "Create a VibeBook post"}</h2>
+    <div className="fixed inset-0 z-[80] flex items-end bg-slate-950/80 p-2 backdrop-blur-md sm:items-center sm:justify-center sm:p-4">
+      <div className="flex max-h-[94dvh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        {/* Header with step progress */}
+        <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Create Post</p>
+              <h2 className="mt-1 text-xl sm:text-2xl font-bold text-slate-900">
+                {isProfile ? "Update profile picture" : "Create a VibeBook post"}
+              </h2>
+            </div>
+            <button
+              type="button"
+              className="flex-shrink-0 rounded-lg p-2 text-slate-500 transition duration-200 hover:bg-slate-100 hover:text-slate-900"
+              onClick={handleClose}
+              aria-label="Close upload"
+            >
+              <X className="h-6 w-6" />
+            </button>
           </div>
-          <button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" onClick={handleClose} aria-label="Close upload">
-            <X className="h-5 w-5" />
-          </button>
+
+          {/* Step progress indicator */}
+          <div className="flex items-center gap-2">
+            {steps.map((step, index) => (
+              <div key={step} className="flex flex-1 items-center">
+                <div className="relative flex flex-1 items-center gap-2">
+                  <div
+                    className={`flex h-8 w-8 items-center justify-center rounded-full font-semibold text-sm transition-all duration-200 ${
+                      index < activeStep
+                        ? "bg-green-500 text-white"
+                        : index === activeStep
+                          ? "bg-blue-600 text-white shadow-lg"
+                          : "bg-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {index < activeStep ? "✓" : index + 1}
+                  </div>
+                  <span
+                    className={`hidden sm:block text-xs font-semibold ${
+                      index <= activeStep ? "text-slate-900" : "text-slate-400"
+                    }`}
+                  >
+                    {step}
+                  </span>
+                </div>
+                {index < steps.length - 1 && (
+                  <div
+                    className={`h-0.5 w-2 transition-all duration-200 ${
+                      index < activeStep ? "bg-green-500" : "bg-slate-300"
+                    }`}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="grid min-h-0 flex-1 overflow-y-auto lg:grid-cols-[0.86fr_1.14fr]">
-          <aside className="border-b border-slate-200 bg-slate-50 p-4 sm:p-5 lg:border-b-0 lg:border-r">
-            <div className="grid grid-cols-3 gap-2 rounded-lg bg-white p-1 shadow-sm">
+          <aside className="border-b border-slate-200 bg-slate-50 p-4 sm:p-6 lg:border-b-0 lg:border-r">
+            {/* Media type selector */}
+            <div className="grid grid-cols-3 gap-2 rounded-xl bg-white p-2 shadow-sm">
               {[
                 { value: "profile", label: "Profile", icon: UserRound },
                 { value: "image", label: "Photo", icon: ImageIcon },
@@ -764,58 +810,51 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   <button
                     key={option.value}
                     type="button"
-                    className={`flex min-w-0 items-center justify-center gap-2 rounded-lg px-2 py-2 text-xs font-black transition sm:text-sm ${
-                      type === option.value ? "bg-brand text-navy shadow-sm" : "text-slate-500 hover:bg-slate-50"
+                    className={`flex min-w-0 flex-col items-center justify-center gap-2 rounded-lg px-3 py-3 text-xs font-bold transition-all duration-200 ${
+                      type === option.value
+                        ? "bg-blue-600 text-white shadow-lg scale-105"
+                        : "bg-white text-slate-600 hover:bg-slate-100"
                     }`}
                     onClick={() => switchType(option.value)}
                     disabled={uploading}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
+                    <Icon className="h-5 w-5" />
                     <span className="truncate">{option.label}</span>
                   </button>
                 );
               })}
             </div>
 
-            <div className="mt-5 grid grid-cols-5 gap-1">
-              {steps.map((step, index) => (
-                <div key={step} className="min-w-0">
-                  <div className={`h-1.5 rounded-full ${index <= activeStep ? "bg-brand" : "bg-slate-200"}`} />
-                  <p className={`mt-2 truncate text-[10px] font-black uppercase ${index === activeStep ? "text-navy" : "text-slate-400"}`}>{step}</p>
-                </div>
-              ))}
-            </div>
-
             {!isProfile ? (
-              <div className="mt-5 grid gap-3">
+              <div className="mt-6 grid gap-3">
                 <button
                   type="button"
-                  className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand hover:bg-brand/5"
+                  className="group relative flex items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50"
                   onClick={() => startCamera(cameraFacing)}
                   disabled={uploading || recording}
                 >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-black text-navy">Record Video</span>
+                  <div className="relative z-10 min-w-0">
+                    <span className="block text-sm font-bold text-slate-900">Record Video</span>
                     <span className="mt-1 block text-xs font-semibold text-slate-500">Use your phone camera inside VibeBook.</span>
-                  </span>
-                  <Camera className="h-5 w-5 shrink-0 text-brand" />
+                  </div>
+                  <Camera className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
                 </button>
 
-                <label className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand hover:bg-brand/5">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-black text-navy">Upload From Gallery</span>
+                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
+                  <div className="relative z-10 min-w-0">
+                    <span className="block text-sm font-bold text-slate-900">Upload Video</span>
                     <span className="mt-1 block text-xs font-semibold text-slate-500">Select a video up to 2 minutes.</span>
-                  </span>
-                  <UploadCloud className="h-5 w-5 shrink-0 text-brand" />
+                  </div>
+                  <UploadCloud className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
                   <input className="hidden" type="file" accept="video/*" onChange={(event) => handleSelect(event, "video")} disabled={uploading} />
                 </label>
 
-                <label className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-brand hover:bg-brand/5">
-                  <span className="min-w-0">
-                    <span className="block text-sm font-black text-navy">Upload Photos</span>
-                    <span className="mt-1 block text-xs font-semibold text-slate-500">Post an image with filters and details.</span>
-                  </span>
-                  <ImageIcon className="h-5 w-5 shrink-0 text-brand" />
+                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
+                  <div className="relative z-10 min-w-0">
+                    <span className="block text-sm font-bold text-slate-900">Upload Photo</span>
+                    <span className="mt-1 block text-xs font-semibold text-slate-500">Post an image with filters and effects.</span>
+                  </div>
+                  <ImageIcon className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
                   <input className="hidden" type="file" accept="image/*" onChange={(event) => handleSelect(event, "image")} disabled={uploading} />
                 </label>
               </div>
@@ -829,38 +868,70 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             )}
 
             {cameraOpen && (
-              <div className="mt-5 overflow-hidden rounded-lg border border-slate-200 bg-slate-950 shadow-sm">
-                <div className="relative aspect-[9/14]">
+              <div className="mt-6 overflow-hidden rounded-xl border-2 border-slate-200 bg-slate-950 shadow-lg">
+                <div className="relative aspect-[9/16] sm:aspect-[9/14]">
                   <video ref={cameraVideoRef} className="h-full w-full object-cover" autoPlay muted playsInline />
-                  <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-slate-950/75 to-transparent p-3 text-white">
-                    <span className="inline-flex items-center gap-2 text-xs font-black">
-                      <Circle className={`h-3 w-3 ${recording ? "fill-red-500 text-red-500" : "text-white/70"}`} />
+                  
+                  {/* Recording indicator */}
+                  <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-slate-950/80 to-transparent p-4">
+                    <div className="flex items-center gap-2 text-white text-sm font-bold">
+                      <div className={`h-3 w-3 rounded-full ${recording ? "animate-pulse bg-red-500" : "bg-white/70"}`} />
                       {recording ? `${recordSeconds}s` : "Ready"}
+                    </div>
+                    <span className="text-xs font-semibold text-white/90 bg-slate-950/60 px-2 py-1 rounded">
+                      {cameraFacing === "user" ? "Front" : "Back"}
                     </span>
-                    <span className="text-xs font-bold">{cameraFacing === "user" ? "Front" : "Back"}</span>
                   </div>
-                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-3 bg-gradient-to-t from-slate-950/80 to-transparent p-4">
-                    <button type="button" className="rounded-full bg-white/15 p-3 text-white backdrop-blur" onClick={switchCameraFacing} aria-label="Switch camera">
-                      <SwitchCamera className="h-5 w-5" />
-                    </button>
+
+                  {/* Camera controls */}
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-4 bg-gradient-to-t from-slate-950/90 to-transparent p-6">
                     <button
                       type="button"
-                      className={`flex h-14 w-14 items-center justify-center rounded-full border-4 ${
-                        recording ? "border-red-400 bg-red-500 text-white" : "border-white bg-white text-navy"
+                      className="rounded-full bg-white/20 p-3 text-white backdrop-blur transition-all duration-200 hover:bg-white/30 hover:scale-110"
+                      onClick={switchCameraFacing}
+                      aria-label="Switch camera"
+                      title="Switch camera"
+                    >
+                      <SwitchCamera className="h-6 w-6" />
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`flex h-16 w-16 items-center justify-center rounded-full border-4 font-semibold shadow-lg transition-all duration-150 active:scale-95 ${
+                        recording
+                          ? "border-red-400 bg-red-500 text-white hover:bg-red-600"
+                          : "border-white bg-white text-slate-900 hover:scale-105"
                       }`}
                       onClick={recording ? stopRecording : startRecording}
                       aria-label={recording ? "Stop recording" : "Start recording"}
+                      title={recording ? "Stop recording" : "Start recording"}
                     >
-                      {recording ? <Pause className="h-6 w-6 fill-white" /> : <Circle className="h-7 w-7 fill-red-500 text-red-500" />}
+                      {recording ? <Pause className="h-7 w-7 fill-white" /> : <Circle className="h-8 w-8 fill-red-500 text-red-500" />}
                     </button>
-                    <button type="button" className="rounded-full bg-white/15 p-3 text-white backdrop-blur" onClick={toggleTorch} aria-label="Toggle flash">
-                      <Zap className={`h-5 w-5 ${torchEnabled ? "fill-brand text-brand" : ""}`} />
+
+                    <button
+                      type="button"
+                      className={`rounded-full p-3 backdrop-blur transition-all duration-200 hover:scale-110 ${
+                        torchEnabled ? "bg-yellow-400/40 text-yellow-300" : "bg-white/20 text-white hover:bg-white/30"
+                      }`}
+                      onClick={toggleTorch}
+                      aria-label="Toggle flash"
+                      title="Toggle flash"
+                    >
+                      <Zap className="h-6 w-6" />
                     </button>
                   </div>
                 </div>
-                <button type="button" className="w-full px-3 py-2 text-xs font-black text-white/80" onClick={stopCamera}>
-                  Close camera
-                </button>
+                
+                <div className="bg-slate-900 px-4 py-3">
+                  <button
+                    type="button"
+                    className="w-full rounded-lg bg-slate-700 px-4 py-2 text-sm font-semibold text-white transition-colors duration-200 hover:bg-slate-600"
+                    onClick={stopCamera}
+                  >
+                    Close Camera
+                  </button>
+                </div>
               </div>
             )}
 
@@ -950,17 +1021,19 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
                     <div className="grid gap-4 lg:grid-cols-2">
                       <div>
-                        <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
+                        <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-700">
                           <Wand2 className="h-4 w-4" />
                           Filters
                         </div>
-                        <div className="flex gap-2 overflow-x-auto pb-1">
+                        <div className="flex gap-2 overflow-x-auto pb-2">
                           {filterPresets.map((filter) => (
                             <button
                               key={filter.value}
                               type="button"
-                              className={`shrink-0 rounded-lg border px-3 py-2 text-xs font-black transition ${
-                                editor.filter === filter.value ? "border-brand bg-brand/10 text-navy" : "border-slate-200 text-slate-500 hover:border-brand/60"
+                              className={`shrink-0 rounded-lg border-2 px-4 py-2 text-xs font-bold transition-all duration-200 ${
+                                editor.filter === filter.value
+                                  ? "border-blue-600 bg-blue-600 text-white shadow-lg"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-400"
                               }`}
                               onClick={() => updateEditor("filter", filter.value)}
                               disabled={uploading}
@@ -972,7 +1045,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       </div>
 
                       <div>
-                        <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-slate-500">
+                        <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-700">
                           <Sparkles className="h-4 w-4" />
                           Effects
                         </div>
@@ -981,8 +1054,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                             <button
                               key={effect.value}
                               type="button"
-                              className={`rounded-lg border px-2 py-2 text-xs font-black transition ${
-                                editor.effect === effect.value ? "border-brand bg-brand/10 text-navy" : "border-slate-200 text-slate-500 hover:border-brand/60"
+                              className={`rounded-lg border-2 px-3 py-2 text-xs font-bold transition-all duration-200 ${
+                                editor.effect === effect.value
+                                  ? "border-blue-600 bg-blue-600 text-white shadow-lg"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-400"
                               }`}
                               onClick={() => updateEditor("effect", effect.value)}
                               disabled={uploading}
@@ -1149,26 +1224,38 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
 
                 {uploading && (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-2 flex items-center justify-between text-xs font-black uppercase text-slate-500">
-                      <span>{progress >= 100 ? "Processing video..." : "Uploading..."}</span>
-                      <span>{progress}%</span>
+                  <div className="rounded-xl border-2 border-blue-200 bg-blue-50 p-5 shadow-md">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-4 rounded-full bg-blue-600 animate-pulse" />
+                        <span className="text-sm font-bold text-slate-900">
+                          {progress >= 100 ? "Processing media..." : "Uploading..."}
+                        </span>
+                      </div>
+                      <span className="text-sm font-bold text-blue-600">{progress}%</span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                      <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${progress}%` }} />
+                    <div className="h-3 overflow-hidden rounded-full bg-blue-200 shadow-inner">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-blue-600 rounded-full transition-all duration-300 ease-out shadow-lg"
+                        style={{ width: `${progress}%` }}
+                      />
                     </div>
-                    <button type="button" className="mt-3 text-xs font-black text-red-600" onClick={cancelUpload}>
+                    <button
+                      type="button"
+                      className="mt-3 text-xs font-bold text-red-600 transition-colors hover:text-red-700"
+                      onClick={cancelUpload}
+                    >
                       Cancel upload
                     </button>
                   </div>
                 )}
 
                 {success && (
-                  <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-green-700">
-                    <CheckCircle2 className="h-6 w-6 shrink-0 animate-bounce" />
+                  <div className="flex items-center gap-4 rounded-xl border-2 border-green-300 bg-green-50 p-5 shadow-lg">
+                    <CheckCircle2 className="h-8 w-8 shrink-0 text-green-600 animate-bounce" />
                     <div className="min-w-0">
-                      <p className="font-black">Upload complete</p>
-                      <p className="text-sm font-semibold">Refreshing the feed now.</p>
+                      <p className="font-bold text-green-900">Upload complete!</p>
+                      <p className="mt-1 text-sm font-semibold text-green-700">Your post will appear in your feed shortly.</p>
                     </div>
                   </div>
                 )}
@@ -1229,25 +1316,27 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                     </label>
 
                     <div>
-                      <span className="label">Visibility</span>
-                      <div className="mt-2 grid gap-2">
+                      <span className="label font-bold">Visibility</span>
+                      <div className="mt-3 grid gap-2">
                         {visibilityOptions.map((option) => {
                           const Icon = option.icon;
                           return (
                             <button
                               key={option.value}
                               type="button"
-                              className={`flex items-center justify-between rounded-lg border px-3 py-3 text-sm font-black transition ${
-                                visibility === option.value ? "border-brand bg-brand/10 text-navy" : "border-slate-200 bg-white text-slate-600 hover:border-brand/60"
+                              className={`flex items-center justify-between rounded-lg border-2 px-4 py-3 text-sm font-bold transition-all duration-200 ${
+                                visibility === option.value
+                                  ? "border-blue-600 bg-blue-50 text-blue-900 shadow-md"
+                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-400"
                               }`}
                               onClick={() => setVisibility(option.value)}
                               disabled={uploading}
                             >
                               <span className="inline-flex items-center gap-2">
-                                <Icon className="h-4 w-4" />
+                                <Icon className="h-5 w-5" />
                                 {option.label}
                               </span>
-                              <span className={`h-3 w-3 rounded-full ${visibility === option.value ? "bg-brand" : "bg-slate-200"}`} />
+                              <div className={`h-4 w-4 rounded-full border-2 ${visibility === option.value ? "border-blue-600 bg-blue-600" : "border-slate-300 bg-white"}`} />
                             </button>
                           );
                         })}
@@ -1298,21 +1387,27 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
                 <button
                   type="button"
-                  className="btn-primary w-full"
+                  className="w-full rounded-xl bg-blue-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed active:scale-95"
                   onClick={handleUpload}
                   disabled={uploading || !file || success || (type === "video" && duration > MAX_VIDEO_SECONDS)}
                 >
                   {uploading ? (
                     <span className="inline-flex items-center justify-center gap-2">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Uploading {progress}%
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span>Uploading {progress}%</span>
                     </span>
                   ) : success ? (
-                    "Upload complete"
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <CheckCircle2 className="h-5 w-5" />
+                      Upload complete
+                    </span>
                   ) : isProfile ? (
                     "Save profile image"
                   ) : (
-                    "Post now"
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <UploadCloud className="h-5 w-5" />
+                      Post now
+                    </span>
                   )}
                 </button>
               </div>

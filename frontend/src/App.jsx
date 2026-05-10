@@ -14,6 +14,7 @@ import Explore from "./pages/Explore.jsx";
 import Home from "./pages/Home.jsx";
 import Inbox from "./pages/Inbox.jsx";
 import Login from "./pages/Login.jsx";
+import NotificationCenter from "./pages/NotificationCenter.jsx";
 import Profile from "./pages/Profile.jsx";
 import Register from "./pages/Register.jsx";
 import Search from "./pages/Search.jsx";
@@ -62,6 +63,14 @@ const App = () => {
           />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route
+            path="/notifications"
+            element={
+              <ProtectedRoute>
+                <NotificationCenter />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={
