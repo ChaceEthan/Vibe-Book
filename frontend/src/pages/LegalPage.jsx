@@ -14,6 +14,7 @@ const pages = {
   "privacy-policy": {
     title: "Privacy Policy",
     description: "How VibeBook collects, uses, protects, and explains account, media, safety, analytics, and support information.",
+    path: "/privacy-policy",
     updated: "May 10, 2026",
     highlights: ["Rwanda-based platform", "Creator and community safety", "Transparent data controls"],
     sections: [
@@ -51,6 +52,7 @@ const pages = {
   terms: {
     title: "Terms of Service",
     description: "The rules for using VibeBook as a creator-friendly social-video platform.",
+    path: "/terms-of-service",
     updated: "May 10, 2026",
     highlights: ["Use VibeBook lawfully", "Respect creator rights", "Keep communities safe"],
     sections: [
@@ -88,6 +90,7 @@ const pages = {
   "community-guidelines": {
     title: "Community Guidelines",
     description: "Safety and content standards for a Rwanda-based global creator community.",
+    path: "/community-guidelines",
     updated: "May 10, 2026",
     highlights: ["Respect people", "Post original content", "Report harmful behavior"],
     sections: [
@@ -125,6 +128,7 @@ const pages = {
   about: {
     title: "About Us",
     description: platformSummary,
+    path: "/about",
     updated: "May 10, 2026",
     highlights: [`Founder: ${founder}`, location, "Built for creators and communities"],
     sections: [
@@ -156,6 +160,7 @@ const pages = {
   contact: {
     title: "Contact Us",
     description: "Reach VibeBook for support, safety, privacy, copyright, creator, and business questions.",
+    path: "/contact",
     updated: "May 10, 2026",
     highlights: [contactEmail, contactPhone, location],
     sections: [
@@ -183,6 +188,7 @@ const pages = {
   "creator-monetization-policy": {
     title: "Creator Monetization Policy",
     description: "High-level monetization standards and disclaimers for VibeBook creators.",
+    path: "/creator-monetization-policy",
     updated: "May 10, 2026",
     highlights: ["Monetization is not guaranteed", "Original content matters", "Safety affects eligibility"],
     sections: [
@@ -212,18 +218,97 @@ const pages = {
       },
     ],
   },
+  "cookie-policy": {
+    title: "Cookie Policy",
+    description: "How VibeBook may use cookies, local storage, and similar technologies for account security, preferences, analytics, and platform reliability.",
+    path: "/cookie-policy",
+    updated: "May 10, 2026",
+    highlights: ["Preference storage", "Security and analytics", "User controls"],
+    sections: [
+      {
+        title: "How We Use Cookies",
+        body:
+          "VibeBook may use cookies, local storage, session storage, and similar browser technologies to keep users signed in, remember settings, protect accounts, reduce spam, understand site performance, and support reliable creator and community features.",
+      },
+      {
+        title: "Essential Technologies",
+        body:
+          "Some storage is necessary for authentication, security, language choices, playback preferences, notification settings, and basic platform operations. Disabling essential storage may cause login, upload, feed, or settings features to work incorrectly.",
+      },
+      {
+        title: "Analytics And Advertising Readiness",
+        body:
+          "VibeBook may use limited analytics or advertising-related technologies to understand traffic, improve content quality, support creator monetization readiness, and maintain a safe platform. We aim to keep these uses transparent and privacy-conscious.",
+      },
+      {
+        title: "Your Choices",
+        body:
+          "You can adjust browser cookie settings and VibeBook settings such as notifications, content preferences, playback, language, and privacy. Clearing browser storage may reset local preferences on that device.",
+      },
+      {
+        title: "Contact",
+        body: `Cookie and privacy questions can be sent to ${contactEmail}.`,
+      },
+    ],
+  },
+  "copyright-policy": {
+    title: "Copyright Policy",
+    description: "How creators and rights holders can report copyright concerns and how VibeBook reviews intellectual property issues.",
+    path: "/copyright-policy",
+    updated: "May 10, 2026",
+    highlights: ["Respect creator rights", "Report suspected infringement", "Review and response"],
+    sections: [
+      {
+        title: "Creator Ownership",
+        body:
+          "Creators should upload only videos, images, music, captions, thumbnails, and other materials they own or have permission to use. VibeBook respects creator rights and expects users to respect intellectual property rights.",
+      },
+      {
+        title: "Submitting A Copyright Report",
+        body:
+          "A copyright report should include the content URL or identifying details, a description of the copyrighted work, ownership or authorization information, your contact information, and a good-faith explanation of why the content may be infringing.",
+      },
+      {
+        title: "Review Process",
+        body:
+          "VibeBook may review reports, request more information, remove or restrict content, limit repeat offenders, restore content when appropriate, or take other reasonable action under platform rules and applicable law.",
+      },
+      {
+        title: "Counter Requests",
+        body:
+          "If you believe your content was removed or restricted by mistake, contact support with the affected content details, your account information, and a clear explanation of your rights to use the material.",
+      },
+      {
+        title: "Contact For Copyright",
+        body: `Copyright reports can be sent to ${contactEmail}. Include enough detail for VibeBook to identify and review the content.`,
+      },
+    ],
+  },
 };
 
 const LegalPage = ({ page = "privacy-policy" }) => {
   const content = pages[page] || pages["privacy-policy"];
+  const canonicalOrigin = typeof window !== "undefined" ? window.location.origin : "https://vibebook.com";
+  const canonicalHref = `${canonicalOrigin}${content.path}`;
 
   useEffect(() => {
     document.title = `${content.title} | VibeBook`;
-    const description = document.querySelector('meta[name="description"]');
-    if (description) {
-      description.setAttribute("content", content.description);
+    let description = document.querySelector('meta[name="description"]');
+    if (!description) {
+      description = document.createElement("meta");
+      description.setAttribute("name", "description");
+      document.head.appendChild(description);
     }
-  }, [content.description, content.title]);
+    description.setAttribute("content", content.description);
+
+    let canonical = document.querySelector('link[rel="canonical"]');
+    if (!canonical) {
+      canonical = document.createElement("link");
+      canonical.setAttribute("rel", "canonical");
+      document.head.appendChild(canonical);
+    }
+    canonical.setAttribute("href", canonicalHref);
+  }, [canonicalHref, content.description, content.title]);
 
   return (
     <section className="container-page py-8 sm:py-12">
@@ -274,14 +359,23 @@ const LegalPage = ({ page = "privacy-policy" }) => {
           <Link className="btn-secondary" to="/privacy-policy">
             Privacy Policy
           </Link>
-          <Link className="btn-secondary" to="/terms">
-            Terms
+          <Link className="btn-secondary" to="/terms-of-service">
+            Terms of Service
+          </Link>
+          <Link className="btn-secondary" to="/community-guidelines">
+            Community Guidelines
+          </Link>
+          <Link className="btn-secondary" to="/cookie-policy">
+            Cookie Policy
+          </Link>
+          <Link className="btn-secondary" to="/copyright-policy">
+            Copyright Policy
+          </Link>
+          <Link className="btn-secondary" to="/creator-monetization-policy">
+            Creator Monetization
           </Link>
           <Link className="btn-secondary" to="/about">
             About
-          </Link>
-          <Link className="btn-secondary" to="/creator-monetization-policy">
-            Monetization
           </Link>
           <Link className="btn-secondary" to="/contact">
             Contact

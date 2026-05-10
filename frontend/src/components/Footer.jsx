@@ -10,10 +10,9 @@ const Footer = () => {
         </div>
         <nav className="flex flex-wrap gap-x-4 gap-y-2 font-bold text-slate-600" aria-label="Footer">
           <Link to="/about" className="hover:text-navy">About</Link>
-          <Link to="/privacy-policy" className="hover:text-navy">Privacy</Link>
-          <Link to="/terms" className="hover:text-navy">Terms</Link>
-          <Link to="/community-guidelines" className="hover:text-navy">Guidelines</Link>
-          <Link to="/creator-monetization-policy" className="hover:text-navy">Monetization</Link>
+          <Link to="/privacy-policy" className="hover:text-navy">Privacy Policy</Link>
+          <Link to="/terms-of-service" className="hover:text-navy">Terms of Service</Link>
+          <Link to="/community-guidelines" className="hover:text-navy">Community Guidelines</Link>
           <Link to="/contact" className="hover:text-navy">Contact</Link>
         </nav>
       </div>

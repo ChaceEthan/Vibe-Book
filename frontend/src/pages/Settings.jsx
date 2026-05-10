@@ -789,6 +789,14 @@ const Settings = () => {
           <SettingRow icon={BadgeCheck} label="Verification status" detail="Creator identity signal" value={verificationStatus} />
         </SettingsSection>
 
+        <SettingsSection title="Security" icon={ShieldAlert}>
+          <SettingRow icon={Smartphone} label="Login devices" detail="Current device is signed in" actionLabel="View" onClick={openSessionsModal} />
+          <SettingRow icon={LogOut} label="Session management" detail="Review or end this session" actionLabel="Open" onClick={openSessionsModal} />
+          <SettingRow icon={ShieldCheck} label="2FA placeholder" detail="Extra login protection is coming soon" value="Coming soon" />
+          <SettingRow icon={FileText} label="Download preferences" detail="Export account and content data when available" value="Coming soon" />
+          <SettingRow icon={ShieldAlert} label="Security alerts" checked={localPrefs.securityAlerts} onToggle={(checked) => saveLocalPreference("securityAlerts", checked, "Security alerts saved.")} />
+        </SettingsSection>
+
         <SettingsSection title="Privacy" icon={Lock}>
           <SettingRow
             icon={Lock}
@@ -831,17 +839,6 @@ const Settings = () => {
           />
         </SettingsSection>
 
-        <SettingsSection title="Content & Display" icon={Globe2}>
-          <SettingRow icon={Languages} label="Language" selectValue={language} options={languageOptions} onSelect={saveLanguage} />
-          <SettingRow icon={Moon} label="Dark mode" detail="Remember this preference on this device" checked={localPrefs.darkMode} onToggle={(checked) => saveLocalPreference("darkMode", checked, "Display preference saved.")} />
-          <SettingRow icon={Smartphone} label="Data saver" detail="Reduce mobile data usage where supported" checked={localPrefs.dataSaver} onToggle={(checked) => saveLocalPreference("dataSaver", checked, "Data saver saved.")} />
-          <SettingRow icon={Bell} label="Autoplay" detail="Allow videos to start automatically" checked={localPrefs.autoplay} onToggle={(checked) => saveLocalPreference("autoplay", checked, "Autoplay preference saved.")} />
-          <SettingRow icon={Volume2} label="Sound preference" detail="Default feed playback audio" selectValue={localPrefs.soundPreference} options={SOUND_OPTIONS} onSelect={(value) => saveLocalPreference("soundPreference", value, "Sound preference saved.")} />
-          <SettingRow icon={BarChart3} label="Video quality preference" selectValue={localPrefs.videoQuality} options={QUALITY_OPTIONS} onSelect={(value) => saveLocalPreference("videoQuality", value, "Video quality saved.")} />
-          <SettingRow icon={Languages} label="Caption language" selectValue={localPrefs.captionLanguage} options={languageOptions} onSelect={(value) => saveLocalPreference("captionLanguage", value, "Caption language saved.")} />
-          <SettingRow icon={CheckCircle2} label="Accessibility" selectValue={localPrefs.accessibility} options={ACCESSIBILITY_OPTIONS} onSelect={(value) => saveLocalPreference("accessibility", value, "Accessibility preference saved.")} />
-        </SettingsSection>
-
         <SettingsSection title="Notifications" icon={Bell}>
           <SettingRow
             icon={Bell}
@@ -865,14 +862,15 @@ const Settings = () => {
           ))}
         </SettingsSection>
 
-        <SettingsSection title="Safety" icon={ShieldAlert}>
-          <SettingRow icon={Smartphone} label="Login devices" detail="Current device is signed in" actionLabel="View" onClick={openSessionsModal} />
-          <SettingRow icon={LogOut} label="Session management" detail="Review or end this session" actionLabel="Open" onClick={openSessionsModal} />
-          <SettingRow icon={ShieldCheck} label="2FA placeholder" detail="Extra login protection is coming soon" value="Coming soon" />
-          <SettingRow icon={HelpCircle} label="Report problem" actionLabel="Start" onClick={() => notifySuccess("Problem report shortcut opened.")} />
-          <SettingRow icon={BookOpen} label="Community guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
-          <SettingRow icon={FileText} label="Download preferences" detail="Export account and content data when available" value="Coming soon" />
-          <SettingRow icon={ShieldAlert} label="Security alerts" checked={localPrefs.securityAlerts} onToggle={(checked) => saveLocalPreference("securityAlerts", checked, "Security alerts saved.")} />
+        <SettingsSection title="Content Preferences" icon={Globe2}>
+          <SettingRow icon={Languages} label="Language" selectValue={language} options={languageOptions} onSelect={saveLanguage} />
+          <SettingRow icon={Moon} label="Dark mode" detail="Remember this preference on this device" checked={localPrefs.darkMode} onToggle={(checked) => saveLocalPreference("darkMode", checked, "Display preference saved.")} />
+          <SettingRow icon={Smartphone} label="Data saver" detail="Reduce mobile data usage where supported" checked={localPrefs.dataSaver} onToggle={(checked) => saveLocalPreference("dataSaver", checked, "Data saver saved.")} />
+          <SettingRow icon={Bell} label="Autoplay" detail="Allow videos to start automatically" checked={localPrefs.autoplay} onToggle={(checked) => saveLocalPreference("autoplay", checked, "Autoplay preference saved.")} />
+          <SettingRow icon={Volume2} label="Sound preference" detail="Default feed playback audio" selectValue={localPrefs.soundPreference} options={SOUND_OPTIONS} onSelect={(value) => saveLocalPreference("soundPreference", value, "Sound preference saved.")} />
+          <SettingRow icon={BarChart3} label="Video quality preference" selectValue={localPrefs.videoQuality} options={QUALITY_OPTIONS} onSelect={(value) => saveLocalPreference("videoQuality", value, "Video quality saved.")} />
+          <SettingRow icon={Languages} label="Caption language" selectValue={localPrefs.captionLanguage} options={languageOptions} onSelect={(value) => saveLocalPreference("captionLanguage", value, "Caption language saved.")} />
+          <SettingRow icon={CheckCircle2} label="Accessibility" selectValue={localPrefs.accessibility} options={ACCESSIBILITY_OPTIONS} onSelect={(value) => saveLocalPreference("accessibility", value, "Accessibility preference saved.")} />
         </SettingsSection>
 
         <SettingsSection title="Creator Tools" icon={BarChart3}>
@@ -885,17 +883,26 @@ const Settings = () => {
 
         <SettingsSection title="Support" icon={HelpCircle}>
           <SettingRow icon={HelpCircle} label="Help Center" actionLabel="Open" onClick={() => navigate("/contact")} />
-          <SettingRow icon={Info} label="About VibeBook" actionLabel="View" onClick={() => navigate("/about")} />
-          <SettingRow icon={FileText} label="Terms" actionLabel="View" onClick={() => navigate("/terms")} />
-          <SettingRow icon={FileText} label="Privacy policy" actionLabel="View" onClick={() => navigate("/privacy-policy")} />
           <SettingRow icon={Mail} label="Contact support" actionLabel="Email" onClick={() => { window.location.href = "mailto:gebmelody@gmail.com"; }} />
+          <SettingRow icon={HelpCircle} label="Report a Problem" actionLabel="Start" onClick={() => notifySuccess("Problem report shortcut opened.")} />
+          <SettingRow icon={BookOpen} label="Community Guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
+          <SettingRow icon={MessageSquare} label="Feedback" actionLabel="Send" onClick={() => { window.location.href = "mailto:gebmelody@gmail.com?subject=VibeBook%20Feedback"; }} />
         </SettingsSection>
 
         <SettingsSection title="Legal" icon={FileText}>
           <SettingRow icon={FileText} label="Privacy Policy" actionLabel="View" onClick={() => navigate("/privacy-policy")} />
-          <SettingRow icon={FileText} label="Terms of Service" actionLabel="View" onClick={() => navigate("/terms")} />
-          <SettingRow icon={BookOpen} label="Community Guidelines" actionLabel="Read" onClick={() => navigate("/community-guidelines")} />
-          <SettingRow icon={BarChart3} label="Creator Monetization" actionLabel="Read" onClick={() => navigate("/creator-monetization-policy")} />
+          <SettingRow icon={FileText} label="Terms of Service" actionLabel="View" onClick={() => navigate("/terms-of-service")} />
+          <SettingRow icon={BarChart3} label="Creator Monetization Policy" actionLabel="Read" onClick={() => navigate("/creator-monetization-policy")} />
+          <SettingRow icon={FileText} label="Cookie Policy" actionLabel="View" onClick={() => navigate("/cookie-policy")} />
+          <SettingRow icon={FileText} label="Copyright Policy" actionLabel="View" onClick={() => navigate("/copyright-policy")} />
+        </SettingsSection>
+
+        <SettingsSection title="About" icon={Info}>
+          <SettingRow icon={Info} label="About VibeBook" detail="Rwanda-based short-video platform" actionLabel="View" onClick={() => navigate("/about")} />
+          <SettingRow icon={UserRound} label="Company Info" detail="Founder" value="Isaacson" />
+          <SettingRow icon={Mail} label="Contact Email" detail="Official support" actionLabel="Email" onClick={() => { window.location.href = "mailto:gebmelody@gmail.com"; }} />
+          <SettingRow icon={Globe2} label="Rwanda Location" detail="Operations base" value="Kigali, Rwanda" />
+          <SettingRow icon={Smartphone} label="Version/App Info" detail="VibeBook social video platform" value="1.0" />
         </SettingsSection>
       </div>
 

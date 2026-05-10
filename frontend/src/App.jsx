@@ -71,6 +71,8 @@ const App = () => {
           <Route path="/about" element={<LegalPage page="about" />} />
           <Route path="/contact" element={<LegalPage page="contact" />} />
           <Route path="/creator-monetization-policy" element={<LegalPage page="creator-monetization-policy" />} />
+          <Route path="/cookie-policy" element={<LegalPage page="cookie-policy" />} />
+          <Route path="/copyright-policy" element={<LegalPage page="copyright-policy" />} />
           <Route
             path="/notifications"
             element={
