@@ -1,5 +1,34 @@
 // @ts-nocheck
-import { Ban, Bell, Camera, Globe2, ImagePlus, KeyRound, Languages, Lock, LogOut, Phone, ShieldAlert, Trash2, UserRound } from "lucide-react";
+import {
+  BadgeCheck,
+  Ban,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Camera,
+  CheckCircle2,
+  ChevronRight,
+  FileText,
+  Globe2,
+  Heart,
+  HelpCircle,
+  ImagePlus,
+  Info,
+  KeyRound,
+  Languages,
+  Lock,
+  LogOut,
+  Mail,
+  MessageSquare,
+  Moon,
+  Phone,
+  ShieldAlert,
+  ShieldCheck,
+  Smartphone,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -55,6 +84,146 @@ const initialProfileForm = (user = {}) => {
   };
 };
 
+const DEFAULT_LOCAL_PREFS = {
+  darkMode: false,
+  dataSaver: false,
+  autoplay: true,
+  commentPrivacy: "everyone",
+  remixPrivacy: "everyone",
+  mentionPrivacy: "everyone",
+  activityStatus: true,
+  captionLanguage: "en",
+  videoQuality: "auto",
+  accessibility: "default",
+  notifyLikes: true,
+  notifyComments: true,
+  notifyFollows: true,
+  notifyMessages: true,
+  notifyMentions: true,
+  notifyLive: true,
+  securityAlerts: true,
+};
+
+const AUDIENCE_OPTIONS = [
+  { value: "everyone", label: "Everyone" },
+  { value: "followers", label: "Followers" },
+  { value: "none", label: "No one" },
+];
+
+const QUALITY_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "high", label: "High" },
+  { value: "data_saver", label: "Data saver" },
+];
+
+const ACCESSIBILITY_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "reduced_motion", label: "Reduced motion" },
+  { value: "larger_text", label: "Larger text" },
+];
+
+const readLocalPrefs = () => {
+  if (typeof window === "undefined") return DEFAULT_LOCAL_PREFS;
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("vibebook:settings-preferences") || "{}");
+    return { ...DEFAULT_LOCAL_PREFS, ...parsed };
+  } catch {
+    return DEFAULT_LOCAL_PREFS;
+  }
+};
+
+const saveLocalPrefs = (prefs) => {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("vibebook:settings-preferences", JSON.stringify(prefs));
+  }
+};
+
+const SwitchControl = ({ checked, disabled = false, label, onChange }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={checked}
+    aria-label={label}
+    disabled={disabled}
+    onClick={() => onChange(!checked)}
+    className={`relative h-7 w-12 rounded-full transition ${checked ? "bg-brand" : "bg-slate-300"} ${disabled ? "opacity-60" : "hover:shadow-sm"}`}
+  >
+    <span
+      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${
+        checked ? "left-6" : "left-1"
+      }`}
+    />
+  </button>
+);
+
+const SettingRow = ({
+  actionLabel = "",
+  checked,
+  detail = "",
+  disabled = false,
+  icon: Icon,
+  label,
+  onClick,
+  onSelect,
+  onToggle,
+  options = [],
+  selectValue,
+  value = "",
+}) => (
+  <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 first:border-t-0">
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-black text-navy">{label}</p>
+        {detail && <p className="mt-0.5 line-clamp-2 text-xs font-semibold text-slate-500">{detail}</p>}
+      </div>
+    </div>
+
+    {onToggle ? (
+      <SwitchControl checked={checked} disabled={disabled} label={label} onChange={onToggle} />
+    ) : onSelect ? (
+      <select
+        className="max-w-[9rem] rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+        value={selectValue}
+        onChange={(event) => onSelect(event.target.value)}
+        disabled={disabled}
+        aria-label={label}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    ) : onClick ? (
+      <button
+        type="button"
+        className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-2 text-xs font-black text-slate-500 transition hover:bg-slate-100 hover:text-navy"
+        onClick={onClick}
+        disabled={disabled}
+      >
+        {actionLabel || value}
+        <ChevronRight className="h-4 w-4" />
+      </button>
+    ) : (
+      <span className="max-w-[9rem] shrink-0 truncate text-right text-xs font-black text-slate-500">{value}</span>
+    )}
+  </div>
+);
+
+const SettingsSection = ({ children, icon: Icon, title }) => (
+  <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+    <div className="flex items-center gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
+      <Icon className="h-5 w-5 text-brand" />
+      <h2 className="text-sm font-black uppercase tracking-wide text-navy">{title}</h2>
+    </div>
+    <div>{children}</div>
+  </section>
+);
+
 const Settings = () => {
   const { languages, language, setLanguage } = useLanguage();
   const { logout, refreshProfile, sendPhoneCode, updateProfile, user, verifyPhoneCode } = useAuth();
@@ -70,6 +239,7 @@ const Settings = () => {
   const [phoneCode, setPhoneCode] = useState("");
   const [cooldown, setCooldown] = useState(0);
   const [notifications, setNotifications] = useState(user?.notificationEnabled !== false);
+  const [localPrefs, setLocalPrefs] = useState(() => readLocalPrefs());
   const [privacy, setPrivacy] = useState({
     accountVisibility: user?.accountVisibility || "public",
     allowMessagesFrom: user?.allowMessagesFrom || "everyone",
@@ -117,6 +287,19 @@ const Settings = () => {
   const notifyError = (message) => {
     setError(message);
     addToast(message, "error");
+  };
+
+  const saveLocalPreference = (field, value, message = "Preference saved.") => {
+    setLocalPrefs((current) => {
+      const next = { ...current, [field]: value };
+      saveLocalPrefs(next);
+      return next;
+    });
+    notifySuccess(message);
+  };
+
+  const scrollToSettingsBlock = (blockId) => {
+    document.getElementById(blockId)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const updateProfileField = (field, value) => {
@@ -287,19 +470,144 @@ const Settings = () => {
     window.dispatchEvent(new CustomEvent("vibebook:open-upload", { detail: { type: "profile" } }));
   };
 
+  const languageOptions = languages.map((item) => ({ value: item.code, label: item.label }));
+  const phoneDisplay = [user?.countryCode, user?.phoneNumber || user?.phone].filter(Boolean).join(" ") || "Not added";
+  const accountStatus = user?.isSuspended || user?.accountStatus === "suspended" ? "Limited" : "Active";
+  const verificationStatus = user?.isVerified || user?.verified ? "Verified" : "Not verified";
+  const notificationRows = [
+    ["notifyLikes", "Likes", Heart],
+    ["notifyComments", "Comments", MessageSquare],
+    ["notifyFollows", "Follows", Users],
+    ["notifyMessages", "Messages", Bell],
+    ["notifyMentions", "Mentions", MessageSquare],
+    ["notifyLive", "Live notifications", Smartphone],
+  ];
+
   return (
     <section className="container-page py-6 sm:py-10">
       <div className="mb-8">
-        <p className="text-sm font-semibold uppercase text-brand">Settings</p>
-        <h1 className="mt-2 text-3xl font-black text-navy">Account Controls</h1>
-        <p className="mt-2 max-w-2xl text-sm text-slate-600">Manage your profile, phone verification, privacy, and notifications in one place.</p>
+        <p className="text-sm font-semibold uppercase text-brand">Settings & Privacy</p>
+        <h1 className="mt-2 text-3xl font-black text-navy">Settings & Privacy</h1>
+        <p className="mt-2 max-w-2xl text-sm text-slate-600">Manage account access, privacy, content preferences, notifications, safety, creator tools, and support.</p>
       </div>
 
       {status && <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{status}</div>}
       {error && <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <SettingsSection title="Account" icon={UserRound}>
+          <SettingRow icon={UserRound} label="Manage account" detail="Profile editor, creator identity, and public details" actionLabel="Open" onClick={() => scrollToSettingsBlock("account-editor")} />
+          <SettingRow icon={UserRound} label="Username" detail="Lowercase and unique" value={`@${user?.username || profileForm.username || "creator"}`} />
+          <SettingRow icon={KeyRound} label="Password" detail="Change your login password" actionLabel="Edit" onClick={() => scrollToSettingsBlock("password-editor")} />
+          <SettingRow icon={Mail} label="Email" detail="Used for login and account recovery" value={user?.email || "Not added"} />
+          <SettingRow icon={Phone} label="Phone number" detail={user?.phoneVerified ? "Verified" : "Verification available"} actionLabel={phoneDisplay} onClick={() => scrollToSettingsBlock("phone-editor")} />
+          <SettingRow icon={CheckCircle2} label="Birthday" detail="Used for age-appropriate experiences" value={profileForm.birthday || "Not added"} />
+          <SettingRow icon={ShieldCheck} label="Account status" detail="Current account standing" value={accountStatus} />
+          <SettingRow icon={BadgeCheck} label="Verification status" detail="Creator identity signal" value={verificationStatus} />
+        </SettingsSection>
+
+        <SettingsSection title="Privacy" icon={Lock}>
+          <SettingRow
+            icon={Lock}
+            label="Private account"
+            detail="Only approved followers can see private content"
+            checked={privacy.accountVisibility === "private"}
+            onToggle={(checked) => {
+              const next = { ...privacy, accountVisibility: checked ? "private" : "public" };
+              setPrivacy(next);
+              saveSettings(next, "Privacy updated.");
+            }}
+          />
+          <SettingRow icon={MessageSquare} label="Who can comment" selectValue={localPrefs.commentPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("commentPrivacy", value, "Comment privacy saved.")} />
+          <SettingRow
+            icon={MessageSquare}
+            label="Who can message"
+            selectValue={privacy.allowMessagesFrom}
+            options={AUDIENCE_OPTIONS}
+            onSelect={(value) => {
+              const next = { ...privacy, allowMessagesFrom: value };
+              setPrivacy(next);
+              saveSettings(next, "Message privacy updated.");
+            }}
+          />
+          <SettingRow icon={Users} label="Who can duet/remix" selectValue={localPrefs.remixPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("remixPrivacy", value, "Remix privacy saved.")} />
+          <SettingRow icon={Users} label="Who can mention" selectValue={localPrefs.mentionPrivacy} options={AUDIENCE_OPTIONS} onSelect={(value) => saveLocalPreference("mentionPrivacy", value, "Mention privacy saved.")} />
+          <SettingRow icon={Ban} label="Blocked accounts" detail={Array.isArray(user?.blockedUsers) && user.blockedUsers.length ? `${user.blockedUsers.length} blocked` : "No blocked accounts"} actionLabel="Open" onClick={() => scrollToSettingsBlock("blocked-accounts")} />
+          <SettingRow icon={CheckCircle2} label="Activity status" detail="Show when you are active" checked={localPrefs.activityStatus} onToggle={(checked) => saveLocalPreference("activityStatus", checked, "Activity status saved.")} />
+          <SettingRow
+            icon={Globe2}
+            label="Profile visibility"
+            detail="Allow people to discover your profile"
+            checked={privacy.allowProfileDiscovery}
+            onToggle={(checked) => {
+              const next = { ...privacy, allowProfileDiscovery: checked };
+              setPrivacy(next);
+              saveSettings(next, "Discovery updated.");
+            }}
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Content & Display" icon={Globe2}>
+          <SettingRow icon={Languages} label="Language" selectValue={language} options={languageOptions} onSelect={saveLanguage} />
+          <SettingRow icon={Moon} label="Dark mode" detail="Remember this preference on this device" checked={localPrefs.darkMode} onToggle={(checked) => saveLocalPreference("darkMode", checked, "Display preference saved.")} />
+          <SettingRow icon={Smartphone} label="Data saver" detail="Reduce mobile data usage where supported" checked={localPrefs.dataSaver} onToggle={(checked) => saveLocalPreference("dataSaver", checked, "Data saver saved.")} />
+          <SettingRow icon={Bell} label="Autoplay" detail="Allow videos to start automatically" checked={localPrefs.autoplay} onToggle={(checked) => saveLocalPreference("autoplay", checked, "Autoplay preference saved.")} />
+          <SettingRow icon={BarChart3} label="Video quality preference" selectValue={localPrefs.videoQuality} options={QUALITY_OPTIONS} onSelect={(value) => saveLocalPreference("videoQuality", value, "Video quality saved.")} />
+          <SettingRow icon={Languages} label="Caption language" selectValue={localPrefs.captionLanguage} options={languageOptions} onSelect={(value) => saveLocalPreference("captionLanguage", value, "Caption language saved.")} />
+          <SettingRow icon={CheckCircle2} label="Accessibility" selectValue={localPrefs.accessibility} options={ACCESSIBILITY_OPTIONS} onSelect={(value) => saveLocalPreference("accessibility", value, "Accessibility preference saved.")} />
+        </SettingsSection>
+
+        <SettingsSection title="Notifications" icon={Bell}>
+          <SettingRow
+            icon={Bell}
+            label="Push notifications"
+            detail="Activity, chat, and creator updates"
+            checked={notifications}
+            onToggle={(checked) => {
+              setNotifications(checked);
+              saveSettings({ notificationEnabled: checked }, "Notifications updated.");
+            }}
+          />
+          {notificationRows.map(([field, label, Icon]) => (
+            <SettingRow
+              key={field}
+              icon={Icon}
+              label={label}
+              checked={Boolean(localPrefs[field])}
+              disabled={!notifications}
+              onToggle={(checked) => saveLocalPreference(field, checked, "Notification preference saved.")}
+            />
+          ))}
+        </SettingsSection>
+
+        <SettingsSection title="Safety" icon={ShieldAlert}>
+          <SettingRow icon={Smartphone} label="Login devices" detail="Current device is signed in" actionLabel="View" onClick={() => notifySuccess("Current device is active.")} />
+          <SettingRow icon={LogOut} label="Session management" detail="End this session or sign out" actionLabel="Open" onClick={() => scrollToSettingsBlock("session-controls")} />
+          <SettingRow icon={ShieldCheck} label="2FA placeholder" detail="Extra login protection is coming soon" value="Coming soon" />
+          <SettingRow icon={HelpCircle} label="Report problem" actionLabel="Start" onClick={() => notifySuccess("Problem report shortcut opened.")} />
+          <SettingRow icon={BookOpen} label="Community guidelines" actionLabel="Read" onClick={() => notifySuccess("Community guidelines will open here.")} />
+          <SettingRow icon={ShieldAlert} label="Security alerts" checked={localPrefs.securityAlerts} onToggle={(checked) => saveLocalPreference("securityAlerts", checked, "Security alerts saved.")} />
+        </SettingsSection>
+
+        <SettingsSection title="Creator Tools" icon={BarChart3}>
+          <SettingRow icon={BarChart3} label="Creator Studio" detail="Analytics, performance, and creator tools" actionLabel="Open" onClick={() => navigate("/creator-studio")} />
+          <SettingRow icon={BarChart3} label="Analytics" actionLabel="Open" onClick={() => navigate("/creator-studio")} />
+          <SettingRow icon={CheckCircle2} label="Monetization status" value={user?.monetizationEnabled ? "Active" : "Review"} />
+          <SettingRow icon={BadgeCheck} label="Verification request" actionLabel="Request" onClick={() => notifySuccess("Verification request shortcut saved.")} />
+          <SettingRow icon={FileText} label="Saved drafts" actionLabel="Open" onClick={() => navigate("/drafts")} />
+        </SettingsSection>
+
+        <SettingsSection title="Support" icon={HelpCircle}>
+          <SettingRow icon={HelpCircle} label="Help Center" actionLabel="Open" onClick={() => notifySuccess("Help Center shortcut opened.")} />
+          <SettingRow icon={Info} label="About VibeBook" value="VibeBook" />
+          <SettingRow icon={FileText} label="Terms" actionLabel="View" onClick={() => notifySuccess("Terms shortcut opened.")} />
+          <SettingRow icon={FileText} label="Privacy policy" actionLabel="View" onClick={() => notifySuccess("Privacy policy shortcut opened.")} />
+          <SettingRow icon={Mail} label="Contact support" actionLabel="Email" onClick={() => { window.location.href = "mailto:support@vibebook.app"; }} />
+        </SettingsSection>
+      </div>
+
       <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <form className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={saveProfile}>
+        <form id="account-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={saveProfile}>
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-4">
               <img src={profileImage} alt="" className="h-20 w-20 shrink-0 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" />
@@ -409,7 +717,7 @@ const Settings = () => {
         </form>
 
         <div className="space-y-5">
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+          <div id="phone-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <Phone className="h-5 w-5 text-brand" />
@@ -470,7 +778,7 @@ const Settings = () => {
             </select>
           </div>
 
-          <form className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={savePassword}>
+          <form id="password-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={savePassword}>
             <div className="mb-4 flex items-center gap-3">
               <KeyRound className="h-5 w-5 text-brand" />
               <h2 className="text-lg font-black text-navy">Change Password</h2>
@@ -481,7 +789,7 @@ const Settings = () => {
             </button>
           </form>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+          <div id="privacy-controls" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center gap-3">
               <Lock className="h-5 w-5 text-brand" />
               <h2 className="text-lg font-black text-navy">Privacy</h2>
@@ -537,7 +845,7 @@ const Settings = () => {
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+          <div id="notification-controls" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center gap-3">
               <Bell className="h-5 w-5 text-brand" />
               <h2 className="text-lg font-black text-navy">Notifications</h2>
@@ -555,7 +863,7 @@ const Settings = () => {
             </label>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+          <div id="blocked-accounts" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
             <div className="mb-4 flex items-center gap-3">
               <Ban className="h-5 w-5 text-brand" />
               <h2 className="text-lg font-black text-navy">Blocked users</h2>
@@ -568,7 +876,7 @@ const Settings = () => {
           </div>
 
           <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-1">
-            <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
+            <div id="session-controls" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
               <div className="mb-4 flex items-center gap-3">
                 <LogOut className="h-5 w-5 text-brand" />
                 <h2 className="text-lg font-black text-navy">Session</h2>

@@ -1,7 +1,7 @@
 // @ts-nocheck
-import { Bell, CheckCheck, Heart, MessageCircle, MessageSquare, UserPlus, X } from "lucide-react";
+import { BadgeCheck, Bell, CheckCheck, Heart, MessageCircle, MessageSquare, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, notificationApi } from "../services/api";
@@ -47,6 +47,27 @@ const actorFor = (notification = {}) => (notification.actorId && typeof notifica
 const avatarFor = (notification = {}) => {
   const actor = actorFor(notification);
   return actor?.profilePicture || actor?.profileImage || "";
+};
+const actorVerified = (actor = {}) => Boolean(actor?.isVerified || actor?.verified || actor?.premiumBadge);
+const notificationDataFor = (notification = {}) => (notification.data && typeof notification.data === "object" ? notification.data : {});
+const notificationTargetFor = (notification = {}, currentUser = {}) => {
+  const data = notificationDataFor(notification);
+  const actor = actorFor(notification);
+  const actorId = idOf(actor) || idOf(notification.actorId) || idOf(data.actorId) || idOf(data.senderId) || idOf(data.userId);
+  const postId = idOf(notification.postId) || idOf(data.postId) || idOf(data.feedItemId) || idOf(data.post?._id);
+  const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(currentUser?._id);
+  const groupId = idOf(data.groupId) || idOf(data.group?._id);
+
+  if (notification.type === "follow" && actorId) return `/profile/${actorId}`;
+  if (notification.type === "message" && actorId) return `/chat/${actorId}`;
+  if (notification.type === "group_message") return groupId ? `/groups?group=${groupId}` : "/groups";
+  if (["like", "comment", "mention"].includes(notification.type)) {
+    const profileId = postOwnerId || actorId;
+    if (profileId) return `/profile/${profileId}${postId ? `?post=${postId}` : ""}`;
+    return postId ? `/?post=${postId}` : "/notifications";
+  }
+
+  return actorId ? `/profile/${actorId}` : "/notifications";
 };
 const NOTIFICATION_SYNC_EVENT = "vibebook:notifications-unread";
 const broadcastNotificationSync = (detail = {}) => {
@@ -97,20 +118,45 @@ const SkeletonLoader = () => (
 
 export default function NotificationCenter() {
   const { isAuthenticated, user, token } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [selectedType, setSelectedType] = useState("all");
+  const [showUnreadOnly, setShowUnreadOnly] = useState(false);
+  const [deletingIds, setDeletingIds] = useState(() => new Set());
+  const [swipeOffsets, setSwipeOffsets] = useState({});
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const seenRealtimeRef = useRef(new Set());
   const observerRef = useRef(null);
+  const swipeStartRef = useRef(null);
 
   const filteredNotifications = useMemo(() => {
-    if (selectedType === "all") return notifications;
-    return notifications.filter((n) => n.type === selectedType);
-  }, [notifications, selectedType]);
+    const typed = selectedType === "all" ? notifications : notifications.filter((n) => n.type === selectedType);
+    return showUnreadOnly ? typed.filter((notification) => !notification.read) : typed;
+  }, [notifications, selectedType, showUnreadOnly]);
+
+  const groupedNotifications = useMemo(() => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const groups = filteredNotifications.reduce(
+      (acc, notification) => {
+        const createdAt = notification.createdAt ? new Date(notification.createdAt).getTime() : Date.now();
+        const bucket = createdAt >= todayStart.getTime() ? "today" : "earlier";
+        acc[bucket].push(notification);
+        return acc;
+      },
+      { today: [], earlier: [] }
+    );
+
+    return [
+      { label: "Today", items: groups.today },
+      { label: "Earlier", items: groups.earlier },
+    ].filter((group) => group.items.length);
+  }, [filteredNotifications]);
 
   const fetchNotifications = async (pageNum = 1, reset = false) => {
     if (!isAuthenticated) {
@@ -284,7 +330,20 @@ export default function NotificationCenter() {
   };
 
   const deleteNotification = async (notificationId) => {
+    if (!notificationId || deletingIds.has(notificationId)) {
+      return;
+    }
+
     const removed = notifications.find((item) => item._id === notificationId);
+    setDeletingIds((current) => {
+      const next = new Set(current);
+      next.add(notificationId);
+      return next;
+    });
+    setSwipeOffsets((current) => ({ ...current, [notificationId]: -120 }));
+
+    await new Promise((resolve) => window.setTimeout(resolve, 160));
+
     setNotifications((current) => current.filter((item) => item._id !== notificationId));
     if (removed && !removed.read) {
       const optimisticUnread = Math.max(0, Number(unreadCount || 0) - 1);
@@ -300,7 +359,74 @@ export default function NotificationCenter() {
       }
     } catch {
       fetchNotifications(1, true);
+    } finally {
+      setDeletingIds((current) => {
+        const next = new Set(current);
+        next.delete(notificationId);
+        return next;
+      });
+      setSwipeOffsets((current) => {
+        const next = { ...current };
+        delete next[notificationId];
+        return next;
+      });
     }
+  };
+
+  const resetSwipeOffset = (notificationId) => {
+    setSwipeOffsets((current) => {
+      const next = { ...current };
+      delete next[notificationId];
+      return next;
+    });
+  };
+
+  const handleSwipeStart = (event, notificationId) => {
+    if (event.pointerType === "mouse" || event.button > 0) {
+      return;
+    }
+
+    swipeStartRef.current = { id: notificationId, x: event.clientX };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const handleSwipeMove = (event) => {
+    const swipe = swipeStartRef.current;
+    if (!swipe) {
+      return;
+    }
+
+    const delta = event.clientX - swipe.x;
+    if (delta < -8) {
+      event.preventDefault();
+      setSwipeOffsets((current) => ({ ...current, [swipe.id]: Math.max(-112, delta) }));
+    }
+  };
+
+  const handleSwipeEnd = () => {
+    const swipe = swipeStartRef.current;
+    if (!swipe) {
+      return;
+    }
+
+    const offset = Number(swipeOffsets[swipe.id] || 0);
+    swipeStartRef.current = null;
+
+    if (offset <= -72) {
+      deleteNotification(swipe.id);
+      return;
+    }
+
+    resetSwipeOffset(swipe.id);
+  };
+
+  const openNotification = (notification) => {
+    if (Math.abs(Number(swipeOffsets[notification?._id] || 0)) > 8) {
+      return;
+    }
+
+    markAsRead(notification);
+    navigate(notificationTargetFor(notification, user));
   };
 
   if (!isAuthenticated) {
@@ -354,6 +480,19 @@ export default function NotificationCenter() {
               </button>
             ))}
           </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => setShowUnreadOnly((current) => !current)}
+              className={`rounded-full px-4 py-2 text-xs font-black transition ${
+                showUnreadOnly ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {showUnreadOnly ? "Unread only" : "All activity"}
+            </button>
+            <p className="text-xs font-black uppercase text-slate-400">{unreadCount} unread</p>
+          </div>
         </div>
       </div>
 
@@ -362,58 +501,84 @@ export default function NotificationCenter() {
         {loading ? (
           <SkeletonLoader />
         ) : filteredNotifications.length ? (
-          <div className="space-y-3">
-            {filteredNotifications.map((notification) => {
-              const Icon = iconForType(notification.type);
-              const actor = actorFor(notification);
-              const avatar = avatarFor(notification);
-              return (
-                <article
-                  key={notification._id}
-                  className={`flex gap-4 rounded-xl border border-slate-200 p-4 transition duration-200 hover:shadow-md ${
-                    notification.read ? "bg-white" : "bg-blue-50"
-                  }`}
-                >
-                  {/* Icon badge */}
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ${colorForType(notification.type)}`}>
-                    {avatar ? (
-                      <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" />
-                    ) : actor?.name ? (
-                      <span className="text-sm font-black">{initialsFor(actor.name)}</span>
-                    ) : (
-                      <Icon className="h-6 w-6" />
-                    )}
-                  </div>
+          <div className="space-y-5">
+            {groupedNotifications.map((group) => (
+              <section key={group.label} className="space-y-3">
+                <h2 className="px-1 text-xs font-black uppercase tracking-wide text-slate-400">{group.label}</h2>
+                {group.items.map((notification) => {
+                  const Icon = iconForType(notification.type);
+                  const actor = actorFor(notification);
+                  const avatar = avatarFor(notification);
+                  const verified = actorVerified(actor);
+                  const offset = Number(swipeOffsets[notification._id] || 0);
+                  const deleting = deletingIds.has(notification._id);
 
-                  {/* Content */}
-                  <button
-                    type="button"
-                    onClick={() => markAsRead(notification)}
-                    className="min-w-0 flex-1 text-left transition duration-200 hover:opacity-70"
-                  >
-                    <h3 className="truncate text-sm font-bold text-slate-900">{notification.title}</h3>
-                    {actor?.username || actor?.name ? (
-                      <p className="mt-1 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p>
-                    ) : null}
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
-                    <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-                      <time>{relativeTimeFor(notification.createdAt)}</time>
-                      {!notification.read && <span className="h-2 w-2 rounded-full bg-blue-600" />}
+                  return (
+                    <div key={notification._id} className="relative overflow-hidden rounded-xl">
+                      <div className="absolute inset-y-0 right-0 flex w-28 items-center justify-center bg-red-500 text-white">
+                        <X className="h-5 w-5" />
+                      </div>
+                      <article
+                        className={`relative flex gap-4 rounded-xl border border-slate-200 p-4 transition duration-200 hover:shadow-md ${
+                          notification.read ? "bg-white" : "bg-blue-50"
+                        } ${deleting ? "opacity-0" : "opacity-100"}`}
+                        style={{ transform: `translateX(${deleting ? -120 : offset}px)` }}
+                        onPointerDown={(event) => handleSwipeStart(event, notification._id)}
+                        onPointerMove={handleSwipeMove}
+                        onPointerUp={handleSwipeEnd}
+                        onPointerCancel={handleSwipeEnd}
+                      >
+                        {/* Icon badge */}
+                        <div className="relative h-12 w-12 shrink-0">
+                          <div className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${colorForType(notification.type)}`}>
+                            {avatar ? (
+                              <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" />
+                            ) : actor?.name ? (
+                              <span className="text-sm font-black">{initialsFor(actor.name)}</span>
+                            ) : (
+                              <Icon className="h-6 w-6" />
+                            )}
+                          </div>
+                          {verified && <BadgeCheck className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full fill-sky-500 text-white ring-2 ring-white" />}
+                        </div>
+
+                        {/* Content */}
+                        <button
+                          type="button"
+                          onClick={() => openNotification(notification)}
+                          className="min-w-0 flex-1 text-left transition duration-200 hover:opacity-70"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <h3 className="truncate text-sm font-bold text-slate-900">{notification.title}</h3>
+                            {!notification.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-600" />}
+                          </div>
+                          {actor?.username || actor?.name ? (
+                            <p className="mt-1 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p>
+                          ) : null}
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
+                          <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
+                            <time>{relativeTimeFor(notification.createdAt)}</time>
+                          </div>
+                        </button>
+
+                        {/* Delete button */}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            deleteNotification(notification._id);
+                          }}
+                          className="rounded-lg p-2 text-slate-400 transition duration-200 hover:bg-red-50 hover:text-red-600"
+                          aria-label="Delete notification"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </article>
                     </div>
-                  </button>
-
-                  {/* Delete button */}
-                  <button
-                    type="button"
-                    onClick={() => deleteNotification(notification._id)}
-                    className="rounded-lg p-2 text-slate-400 transition duration-200 hover:bg-red-50 hover:text-red-600"
-                    aria-label="Delete notification"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </article>
-              );
-            })}
+                  );
+                })}
+              </section>
+            ))}
 
             {/* Load more observer */}
             {hasMore && (
@@ -435,7 +600,9 @@ export default function NotificationCenter() {
             <Bell className="h-16 w-16 text-slate-300" />
             <h2 className="text-lg font-semibold text-slate-600">No notifications</h2>
             <p className="text-sm text-slate-500">
-              {selectedType === "all"
+              {showUnreadOnly
+                ? "No unread notifications right now."
+                : selectedType === "all"
                 ? "You're all caught up! Check back later for updates."
                 : `No ${notificationTypes.find((t) => t.value === selectedType)?.label.toLowerCase()} yet.`}
             </p>

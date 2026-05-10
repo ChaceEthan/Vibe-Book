@@ -234,7 +234,7 @@ const Navbar = () => {
             {isAuthenticated ? (
               <>
                 <NotificationBell />
-                <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings">
+                <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings & Privacy" title="Settings & Privacy">
                   <Settings className="h-5 w-5" />
                 </Link>
               </>

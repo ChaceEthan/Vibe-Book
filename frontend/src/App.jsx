@@ -152,6 +152,14 @@ const App = () => {
             }
           />
           <Route
+            path="/settings-privacy"
+            element={
+              <ProtectedRoute>
+                <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/admin"
             element={
               <ProtectedRoute>

@@ -71,8 +71,8 @@ const createNotification = async ({
     });
 
     await notification.populate([
-      { path: "actorId", select: "name username profilePicture profileImage" },
-      { path: "postId", select: "mediaUrl caption" },
+      { path: "actorId", select: "name username profilePicture profileImage isVerified verified premiumBadge" },
+      { path: "postId", select: "mediaUrl caption userId" },
       { path: "messageId", select: "message" },
     ]);
     await emitNotification(notification);

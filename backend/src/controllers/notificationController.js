@@ -30,8 +30,8 @@ const getNotifications = async (req, res, next) => {
 
     const [notifications, total, unreadCount] = await Promise.all([
       Notification.find(filter)
-        .populate("actorId", "name username profilePicture profileImage")
-        .populate("postId", "mediaUrl caption")
+        .populate("actorId", "name username profilePicture profileImage isVerified verified premiumBadge")
+        .populate("postId", "mediaUrl caption userId")
         .populate("messageId", "message")
         .sort({ createdAt: -1 })
         .skip(skip)

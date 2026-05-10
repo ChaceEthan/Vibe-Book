@@ -10,15 +10,21 @@ import {
   Image as ImageIcon,
   Link as LinkIcon,
   Lock,
+  LogOut,
   Mail,
+  Menu,
   MessageCircle,
   Pencil,
   Phone,
   Play,
+  QrCode,
   Rocket,
+  Search,
   Send,
+  Settings,
   Share2,
   Sparkles,
+  Star,
   Tag,
   UserMinus,
   UserPlus,
@@ -563,7 +569,7 @@ const ProfileMediaViewer = ({
 
 const Profile = () => {
   const { id } = useParams();
-  const { refreshProfile, user: currentUser } = useAuth();
+  const { logout, refreshProfile, user: currentUser } = useAuth();
   const storePosts = usePostStore((state) => state.posts);
   const mergePosts = usePostStore((state) => state.mergePosts);
   const replacePost = usePostStore((state) => state.replacePost);
@@ -597,6 +603,10 @@ const Profile = () => {
   const [editingPost, setEditingPost] = useState(null);
   const [activeProfileTab, setActiveProfileTab] = useState("Videos");
   const [mediaViewer, setMediaViewer] = useState(null);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [profileShareStatus, setProfileShareStatus] = useState("");
+  const [qrProfileOpen, setQrProfileOpen] = useState(false);
+  const profileActionsRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -647,7 +657,35 @@ const Profile = () => {
     setEditingPost(null);
     setActiveProfileTab("Videos");
     setMediaViewer(null);
+    setProfileMenuOpen(false);
+    setProfileShareStatus("");
+    setQrProfileOpen(false);
   }, [id, currentUser]);
+
+  useEffect(() => {
+    if (!profileMenuOpen) {
+      return undefined;
+    }
+
+    const closeMenu = (event) => {
+      if (!profileActionsRef.current?.contains(event.target)) {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") {
+        setProfileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeMenu, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu, true);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [profileMenuOpen]);
 
   useEffect(() => {
     setBookingForm((current) => ({
@@ -745,6 +783,7 @@ const Profile = () => {
   const activeGridItems =
     activeProfileTab === "Videos" ? videoItems : activeProfileTab === "Photos" ? photoItems : activeProfileTab === "Saved" ? savedItems : taggedItems;
   const activeCommentPost = profilePosts.find((post) => post._id === profileCommentOpen);
+  const profileShareUrl = typeof window !== "undefined" ? `${window.location.origin}/profile/${user?._id || id}` : `/profile/${user?._id || id}`;
 
   const openProfileMedia = (item, fallbackIndex = 0, commentsOpen = false) => {
     const sourceItems = activeProfileTab === "Videos" ? videoItems : activeProfileTab === "Photos" ? photoItems : activeGridItems;
@@ -955,6 +994,50 @@ const Profile = () => {
         setLikeStatus("Unable to share post.");
       }
     }
+  };
+
+  const shareProfile = async () => {
+    const shareData = {
+      title: `${user?.name || "VibeBook"} on VibeBook`,
+      text: `Check out @${user?.username || "creator"} on VibeBook`,
+      url: profileShareUrl,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        setProfileShareStatus("Profile shared.");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(profileShareUrl);
+        setProfileShareStatus("Profile link copied.");
+      } else {
+        setProfileShareStatus(profileShareUrl);
+      }
+    } catch (shareError) {
+      if (shareError?.name !== "AbortError") {
+        setProfileShareStatus("Unable to share profile right now.");
+      }
+    } finally {
+      window.setTimeout(() => setProfileShareStatus(""), 2500);
+    }
+  };
+
+  const openProfileTab = (tab, message = "") => {
+    setActiveProfileTab(tab);
+    setProfileMenuOpen(false);
+    if (message) {
+      setProfileShareStatus(message);
+      window.setTimeout(() => setProfileShareStatus(""), 2500);
+    }
+    window.requestAnimationFrame(() => {
+      document.getElementById("profile-grid")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const handleQuickLogout = () => {
+    setProfileMenuOpen(false);
+    logout();
+    navigate("/");
   };
 
   const handlePostCommentMessage = async (post, message) => {
@@ -1210,7 +1293,7 @@ const Profile = () => {
         <div className="relative h-40 overflow-hidden bg-slate-950 sm:h-56">
           <img src={mediaUrl(coverImage)} alt="" className="h-full w-full object-cover opacity-75" />
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
-          <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+          <div className="absolute left-4 right-40 top-4 flex flex-wrap gap-2 sm:right-48">
             {verified && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sky-500 px-3 py-1 text-xs font-black uppercase text-white shadow">
                 <BadgeCheck className="h-4 w-4 fill-white text-sky-500" />
@@ -1222,6 +1305,77 @@ const Profile = () => {
                 <Sparkles className="h-4 w-4" />
                 Premium
               </span>
+            )}
+          </div>
+          <div ref={profileActionsRef} className="absolute right-3 top-3 z-30 flex items-center gap-2 sm:right-4 sm:top-4">
+            <button
+              type="button"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-800 shadow-lg backdrop-blur transition hover:bg-brand hover:text-navy active:scale-95"
+              onClick={() => navigate("/search")}
+              aria-label="Find friends"
+              title="Find friends"
+            >
+              <Search className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-800 shadow-lg backdrop-blur transition hover:bg-brand hover:text-navy active:scale-95"
+              onClick={shareProfile}
+              aria-label="Share profile"
+              title="Share profile"
+            >
+              <Share2 className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-slate-800 shadow-lg backdrop-blur transition hover:bg-brand hover:text-navy active:scale-95"
+              onClick={(event) => {
+                event.stopPropagation();
+                setProfileMenuOpen((current) => !current);
+              }}
+              aria-label="Open profile menu"
+              aria-expanded={profileMenuOpen}
+              title="Profile menu"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+
+            {profileMenuOpen && (
+              <div className="fixed right-3 top-16 z-[100] w-[min(18rem,calc(100vw-1.5rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 text-left shadow-2xl sm:right-6 sm:top-20">
+                {[
+                  { label: "Settings & Privacy", icon: Settings, action: () => navigate("/settings") },
+                  { label: "Creator Studio", icon: Rocket, action: () => navigate("/creator-studio") },
+                  { label: "Saved", icon: Bookmark, action: () => openProfileTab("Saved") },
+                  { label: "Favorites", icon: Star, action: () => openProfileTab("Saved", "Favorites are grouped with saved posts right now.") },
+                  {
+                    label: "QR Profile",
+                    icon: QrCode,
+                    action: () => {
+                      setProfileMenuOpen(false);
+                      setQrProfileOpen(true);
+                    },
+                  },
+                ].map(({ label, icon: Icon, action }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50 hover:text-navy"
+                    onClick={action}
+                  >
+                    <Icon className="h-4 w-4 text-slate-500" />
+                    <span className="min-w-0 flex-1 truncate">{label}</span>
+                  </button>
+                ))}
+                <div className="my-1 h-px bg-slate-100" />
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-bold text-red-600 transition hover:bg-red-50"
+                  onClick={handleQuickLogout}
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span className="min-w-0 flex-1 truncate">Logout</span>
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -1352,10 +1506,11 @@ const Profile = () => {
             </div>
           )}
 
-          {(followStatus || likeStatus || contactError || paymentStatus || paymentError || lockedImageCount > 0) && (
+          {(followStatus || likeStatus || profileShareStatus || contactError || paymentStatus || paymentError || lockedImageCount > 0) && (
             <div className="mx-auto mt-4 grid max-w-3xl gap-2 text-left">
               {followStatus && <div className="rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{followStatus}</div>}
               {likeStatus && <div className="rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{likeStatus}</div>}
+              {profileShareStatus && <div className="rounded-lg border border-slate-200 bg-surface p-3 text-sm text-slate-700">{profileShareStatus}</div>}
               {contactError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{contactError}</div>}
               {paymentStatus && <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{paymentStatus}</div>}
               {paymentError && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{paymentError}</div>}
@@ -1400,7 +1555,7 @@ const Profile = () => {
         </div>
       </div>
 
-      <div className="mt-6 rounded-lg border border-slate-200 bg-white p-3 shadow-soft sm:p-5">
+      <div id="profile-grid" className="mt-6 scroll-mt-24 rounded-lg border border-slate-200 bg-white p-3 shadow-soft sm:p-5">
         <div className="grid grid-cols-4 gap-1 rounded-lg bg-slate-50 p-1">
           {profileTabs.map((tab) => {
             const Icon = tab.icon;
@@ -1559,6 +1714,58 @@ const Profile = () => {
           </div>
         )}
       </div>
+
+      {qrProfileOpen && (
+        <div
+          className="fixed inset-0 z-[95] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          onClick={() => setQrProfileOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="w-full max-w-sm rounded-t-3xl border border-slate-200 bg-white p-5 shadow-2xl sm:rounded-3xl"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="QR profile"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-navy">QR Profile</h2>
+                <p className="mt-1 truncate text-xs font-bold text-slate-500">@{user?.username || "creator"}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-navy"
+                onClick={() => setQrProfileOpen(false)}
+                aria-label="Close QR profile"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mx-auto flex h-52 w-52 items-center justify-center rounded-3xl border border-slate-200 bg-white p-5 shadow-inner">
+              <div className="grid grid-cols-9 gap-1" aria-hidden="true">
+                {Array.from({ length: 81 }).map((_, index) => {
+                  const row = Math.floor(index / 9);
+                  const col = index % 9;
+                  const finder =
+                    (row < 3 && col < 3) ||
+                    (row < 3 && col > 5) ||
+                    (row > 5 && col < 3);
+                  const filled = finder || (index + String(user?.username || "").length) % 3 === 0 || (row * col) % 5 === 0;
+                  return <span key={index} className={`h-3 w-3 rounded-[2px] ${filled ? "bg-navy" : "bg-slate-100"}`} />;
+                })}
+              </div>
+            </div>
+
+            <p className="mt-4 break-all rounded-xl bg-slate-50 p-3 text-center text-xs font-bold text-slate-500">{profileShareUrl}</p>
+            <button type="button" className="btn-primary mt-4 w-full gap-2" onClick={shareProfile}>
+              <Share2 className="h-4 w-4" />
+              Share profile
+            </button>
+          </div>
+        </div>
+      )}
 
       <ProfileMediaViewer
         viewer={mediaViewer}
