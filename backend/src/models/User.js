@@ -324,6 +324,27 @@ const userSchema = new mongoose.Schema({
       ref: "User",
     },
   ],
+  followRequests: {
+    type: [
+      {
+        from: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        type: {
+          type: String,
+          enum: ["follow"],
+          default: "follow",
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
+    default: [],
+  },
   viewsCount: {
     type: Number,
     default: 0,

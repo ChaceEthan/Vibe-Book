@@ -704,6 +704,8 @@ const Profile = () => {
   const skills = Array.isArray(user?.skills) ? user.skills.filter(Boolean) : [];
   const isOwnProfile = currentUser?._id && user?._id && currentUser._id === user._id;
   const isFollowing = Boolean(user?.isFollowing);
+  const followsViewer = Boolean(user?.followsViewer || user?.followedYou);
+  const isMutualFollow = Boolean(user?.isMutualFollow || user?.mutualFollow || (isFollowing && followsViewer));
   const contentUnlocked = Boolean(isOwnProfile || user?.isUnlocked || user?.contentUnlocked);
   const contentLocked = Boolean(!isOwnProfile && !contentUnlocked);
   const images = allImages;
@@ -733,6 +735,9 @@ const Profile = () => {
   }, [id, storePosts, user]);
 
   const postUrls = useMemo(() => new Set(profilePosts.map(getPostUrl).filter(Boolean)), [profilePosts]);
+  const followButtonLabel = isMutualFollow ? "Following each other" : isFollowing ? "Following" : followsViewer ? "Follow Back" : "Follow";
+  const FollowButtonIcon = isMutualFollow ? BadgeCheck : isFollowing ? UserMinus : UserPlus;
+  const followButtonClass = isFollowing ? "btn-secondary" : "btn-primary";
   const coverImage = user?.coverImage || user?.coverPicture || user?.bannerImage || user?.coverPhoto || images.find((image) => image && image !== profilePicture) || profilePicture || "/logo.png";
   const profileLikes = profilePosts.reduce((total, post) => total + Number(post.likes || post.likeCount || 0), 0);
   const profileViews = profilePosts.reduce((total, post) => total + Number(post.views || post.viewCount || 0), 0);
@@ -882,17 +887,24 @@ const Profile = () => {
     const previousUser = user;
     const nextFollowing = !isFollowing;
     const delta = isFollowing ? -1 : 1;
+    const nextMutual = Boolean(nextFollowing && followsViewer);
     setUser((current) => ({
       ...current,
       isFollowing: nextFollowing,
+      isMutualFollow: nextMutual,
+      mutualFollow: nextMutual,
       followerCount: Math.max(0, Number(current?.followerCount ?? current?.followers?.length ?? 0) + delta),
     }));
 
     try {
-      const { data } = isFollowing ? await userApi.unfollow(user._id) : await userApi.follow(user._id);
+      const { data } = isFollowing
+        ? await userApi.unfollow(user._id)
+        : followsViewer
+          ? await userApi.followBack(user._id)
+          : await userApi.follow(user._id);
       setUser(data.user);
       await refreshProfile();
-      setFollowStatus(data.message || (isFollowing ? "Profile unfollowed." : "Profile followed."));
+      setFollowStatus(data.message || (isFollowing ? "Profile unfollowed." : followsViewer ? "Following each other." : "Profile followed."));
     } catch (requestError) {
       setUser(previousUser);
       setFollowStatus(requestError.response?.data?.message || "Unable to update follow.");
@@ -1448,13 +1460,18 @@ const Profile = () => {
               <>
                 <button
                   type="button"
-                  className={`${isFollowing ? "btn-secondary" : "btn-primary"} gap-2`}
+                  className={`${followButtonClass} gap-2`}
                   onClick={handleFollowToggle}
                   disabled={followUpdating}
                 >
-                  {isFollowing ? <UserMinus className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
-                  {followUpdating ? "Updating..." : isFollowing ? "Unfollow" : "Follow"}
+                  <FollowButtonIcon className="h-4 w-4" />
+                  {followUpdating ? "Updating..." : followButtonLabel}
                 </button>
+                {followsViewer && !isFollowing && (
+                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-2 text-xs font-black text-slate-600">
+                    Follow Back available
+                  </span>
+                )}
                 <Link className="btn-secondary gap-2" to={`/chat/${user._id}`}>
                   <MessageCircle className="h-4 w-4" />
                   Chat

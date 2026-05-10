@@ -3,6 +3,7 @@ const express = require("express");
 const {
   contactUser,
   deleteMyAccount,
+  followBackProfile,
   followProfile,
   getProfile,
   getUserById,
@@ -36,6 +37,7 @@ router.patch("/update", authMiddleware, updateProfile);
 router.post("/pay-access", authMiddleware, payPlatformAccess);
 router.delete("/me", authMiddleware, deleteMyAccount);
 router.post("/:id/follow", authMiddleware, followProfile);
+router.post("/:id/follow-back", authMiddleware, followBackProfile);
 router.post("/:id/unfollow", authMiddleware, unfollowProfile);
 router.post("/:id/like", authMiddleware, likeProfile);
 router.delete("/:id/like", authMiddleware, unlikeProfile);

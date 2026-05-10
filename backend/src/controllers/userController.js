@@ -156,6 +156,14 @@ const viewerFollowsProfile = (viewer, profile) => {
   return hasId(viewer.following, profile._id) || hasId(profile.followers, viewer._id);
 };
 
+const profileFollowsViewer = (profile, viewer) => {
+  if (!viewer || !profile) {
+    return false;
+  }
+
+  return hasId(profile.following, viewer._id) || hasId(viewer.followers, profile._id);
+};
+
 const canViewContact = (viewer, profile) => {
   if (!viewer || !profile) {
     return false;
@@ -331,6 +339,8 @@ const getProfilePosts = async (user, viewer = null, req = null) => {
 const profileResponse = (user, viewer = null, options = {}) => {
   const isOwnProfile = Boolean(viewer && sameId(viewer._id, user?._id));
   const isFollowing = viewerFollowsProfile(viewer, user);
+  const followsViewer = profileFollowsViewer(user, viewer);
+  const isMutualFollow = Boolean(isFollowing && followsViewer && !isOwnProfile);
   const paidUnlocked = hasPaidForProfile(viewer, user?._id);
   const bookingUnlocked = Boolean(options.bookingStarted || options.contactUnlocked);
   const isUnlocked = Boolean(options.includePrivate || isOwnProfile || isFollowing || paidUnlocked || bookingUnlocked);
@@ -436,6 +446,10 @@ const profileResponse = (user, viewer = null, options = {}) => {
     totalWatchTime: Number(user.totalWatchTime || 0),
     earnings: Number(user.earnings || 0),
     isFollowing,
+    followsViewer,
+    followedYou: followsViewer,
+    isMutualFollow,
+    mutualFollow: isMutualFollow,
     isUnlocked,
     contentUnlocked: isUnlocked,
     contentLocked: !isUnlocked,
@@ -1004,9 +1018,98 @@ const followProfile = async (req, res, next) => {
     }
 
     const alreadyFollowing = hasId(req.user.following, target._id) || hasId(target.followers, req.user._id);
+    const targetFollowsViewer = hasId(target.following, req.user._id) || hasId(req.user.followers, target._id);
 
     await Promise.all([
       User.findByIdAndUpdate(req.user._id, { $addToSet: { following: target._id } }, { runValidators: true }),
+      User.findByIdAndUpdate(
+        target._id,
+        {
+          $addToSet: { followers: req.user._id },
+          ...(!alreadyFollowing
+            ? {
+                $pull: { followRequests: { from: req.user._id, type: "follow" } },
+              }
+            : {}),
+        },
+        { runValidators: true }
+      ),
+    ]);
+
+    if (!alreadyFollowing) {
+      await User.findByIdAndUpdate(target._id, {
+        $push: {
+          followRequests: {
+            from: req.user._id,
+            type: "follow",
+            createdAt: new Date(),
+          },
+        },
+      }).catch(() => null);
+      await addMonetizationScore(target._id, "follower");
+      User.findByIdAndUpdate(req.user._id, {
+        $push: {
+          favoriteCreators: { $each: [target._id], $slice: -100 },
+        },
+      }).catch(() => null);
+      queueNotification({
+        userId: target._id,
+        type: "follow",
+        title: `${req.user.name || "Someone"} followed you`,
+        message: targetFollowsViewer ? "You are now following each other." : "Follow Back available",
+        actorId: req.user._id,
+        data: { followBackAvailable: !targetFollowsViewer, mutualFollow: targetFollowsViewer },
+        dedupeKey: `follow:${target._id}:${req.user._id}`,
+      });
+    }
+
+    const [viewer, user] = await Promise.all([
+      User.findById(req.user._id).select("-password"),
+      User.findById(target._id).select("-password"),
+    ]);
+
+    return res.json({
+      user: profileResponse(user, viewer),
+      currentUser: profileResponse(viewer, viewer, { includePrivate: true }),
+      followState: {
+        isFollowing: true,
+        followsViewer: profileFollowsViewer(user, viewer),
+        isMutualFollow: profileFollowsViewer(user, viewer),
+      },
+      message: alreadyFollowing ? "Already following" : "Profile followed",
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const followBackProfile = async (req, res, next) => {
+  try {
+    if (sameId(req.user._id, req.params.id)) {
+      return res.status(400).json({ message: "You cannot follow your own profile" });
+    }
+
+    const target = await User.findOne({
+      _id: req.params.id,
+      isBlocked: false,
+      role: { $ne: "admin" },
+    }).select("-password");
+
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const alreadyFollowing = hasId(req.user.following, target._id) || hasId(target.followers, req.user._id);
+
+    await Promise.all([
+      User.findByIdAndUpdate(
+        req.user._id,
+        {
+          $addToSet: { following: target._id },
+          $pull: { followRequests: { from: target._id, type: "follow" } },
+        },
+        { runValidators: true }
+      ),
       User.findByIdAndUpdate(target._id, { $addToSet: { followers: req.user._id } }, { runValidators: true }),
     ]);
 
@@ -1020,9 +1123,10 @@ const followProfile = async (req, res, next) => {
       queueNotification({
         userId: target._id,
         type: "follow",
-        title: "New follower",
-        message: `${req.user.name || "Someone"} followed you`,
+        title: `${req.user.name || "Someone"} followed you`,
+        message: "You are now following each other.",
         actorId: req.user._id,
+        data: { followBackAvailable: false, mutualFollow: true },
         dedupeKey: `follow:${target._id}:${req.user._id}`,
       });
     }
@@ -1031,11 +1135,17 @@ const followProfile = async (req, res, next) => {
       User.findById(req.user._id).select("-password"),
       User.findById(target._id).select("-password"),
     ]);
+    const mutualFollow = profileFollowsViewer(user, viewer) && viewerFollowsProfile(viewer, user);
 
     return res.json({
       user: profileResponse(user, viewer),
       currentUser: profileResponse(viewer, viewer, { includePrivate: true }),
-      message: alreadyFollowing ? "Already following" : "Profile followed",
+      followState: {
+        isFollowing: true,
+        followsViewer: profileFollowsViewer(user, viewer),
+        isMutualFollow: mutualFollow,
+      },
+      message: mutualFollow ? "Following each other" : alreadyFollowing ? "Already following" : "Followed back",
     });
   } catch (error) {
     return next(error);
@@ -1227,6 +1337,7 @@ module.exports = {
   uploadProfileImages,
   uploadProfileVideos,
   payPlatformAccess,
+  followBackProfile,
   followProfile,
   unfollowProfile,
   likeProfile,

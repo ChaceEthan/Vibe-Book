@@ -185,6 +185,7 @@ export const userApi = {
   deleteMedia: (path) => API.delete(`/media/${mediaId(path)}`),
   payAccess: (payload = {}) => API.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
   follow: (id) => API.post(`/follow/${id}`),
+  followBack: (id) => API.post(`/follow-back/${id}`),
   unfollow: (id) => API.post(`/unfollow/${id}`),
   likeProfile: (id) => API.post(`/users/${id}/like`),
   unlikeProfile: (id) => API.delete(`/users/${id}/like`),
