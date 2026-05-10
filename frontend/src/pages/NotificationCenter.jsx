@@ -252,7 +252,9 @@ export default function NotificationCenter() {
     setNotifications((current) =>
       current.map((item) => (item._id === notification._id ? { ...item, read: true } : item))
     );
-    setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
+    const optimisticUnread = Math.max(0, Number(unreadCount || 0) - 1);
+    setUnreadCount(optimisticUnread);
+    broadcastNotificationSync({ unreadCount: optimisticUnread, readId: notification._id });
 
     try {
       const { data } = await notificationApi.markRead(notification._id);
@@ -285,7 +287,9 @@ export default function NotificationCenter() {
     const removed = notifications.find((item) => item._id === notificationId);
     setNotifications((current) => current.filter((item) => item._id !== notificationId));
     if (removed && !removed.read) {
-      setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
+      const optimisticUnread = Math.max(0, Number(unreadCount || 0) - 1);
+      setUnreadCount(optimisticUnread);
+      broadcastNotificationSync({ unreadCount: optimisticUnread, deletedId: notificationId });
     }
 
     try {
@@ -388,6 +392,9 @@ export default function NotificationCenter() {
                     className="min-w-0 flex-1 text-left transition duration-200 hover:opacity-70"
                   >
                     <h3 className="truncate text-sm font-bold text-slate-900">{notification.title}</h3>
+                    {actor?.username || actor?.name ? (
+                      <p className="mt-1 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p>
+                    ) : null}
                     <p className="mt-1 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
                     <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
                       <time>{relativeTimeFor(notification.createdAt)}</time>

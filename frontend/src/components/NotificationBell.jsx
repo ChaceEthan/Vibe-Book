@@ -59,9 +59,35 @@ export function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const seenRealtimeRef = useRef(new Set());
   const fetchInFlightRef = useRef(false);
+  const rootRef = useRef(null);
   const panelRef = useRef(null);
 
   const visibleNotifications = useMemo(() => notifications.slice(0, 12), [notifications]);
+
+  const openNotifications = (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    setOpen(true);
+    window.setTimeout(fetchNotifications, 0);
+  };
+
+  const closeNotifications = (event) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    setOpen(false);
+  };
+
+  const toggleNotifications = (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (open) {
+      setOpen(false);
+      return;
+    }
+
+    openNotifications();
+  };
 
   const fetchNotifications = async () => {
     if (fetchInFlightRef.current) {
@@ -121,23 +147,29 @@ export function NotificationBell() {
     return () => window.removeEventListener(NOTIFICATION_SYNC_EVENT, handleSync);
   }, []);
 
-  // Close panel when clicking outside
   useEffect(() => {
     if (!open) {
       return undefined;
     }
 
-    const handleClickOutside = (event) => {
-      if (panelRef.current && !panelRef.current.contains(event.target)) {
-        const isButton = event.target?.closest('[aria-label="Notifications"]');
-        if (!isButton) {
-          setOpen(false);
-        }
+    const handlePointerOutside = (event) => {
+      if (!rootRef.current?.contains(event.target)) {
+        setOpen(false);
       }
     };
 
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerOutside, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerOutside, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -189,7 +221,9 @@ export function NotificationBell() {
     }
 
     setNotifications((current) => current.map((item) => (item._id === notification._id ? { ...item, read: true } : item)));
-    setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
+    const optimisticUnread = Math.max(0, Number(unreadCount || 0) - 1);
+    setUnreadCount(optimisticUnread);
+    broadcastNotificationSync({ unreadCount: optimisticUnread, readId: notification._id });
 
     try {
       const { data } = await notificationApi.markRead(notification._id);
@@ -222,7 +256,9 @@ export function NotificationBell() {
     const removed = notifications.find((item) => item._id === notificationId);
     setNotifications((current) => current.filter((item) => item._id !== notificationId));
     if (removed && !removed.read) {
-      setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
+      const optimisticUnread = Math.max(0, Number(unreadCount || 0) - 1);
+      setUnreadCount(optimisticUnread);
+      broadcastNotificationSync({ unreadCount: optimisticUnread, deletedId: notificationId });
     }
 
     try {
@@ -241,21 +277,15 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    <div ref={rootRef} className={`relative ${open ? "z-[90]" : ""}`}>
       <button
         type="button"
-        onClick={() =>
-          setOpen((value) => {
-            const nextOpen = !value;
-            if (nextOpen) {
-              fetchNotifications();
-            }
-            return nextOpen;
-          })
-        }
-        className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition duration-200 hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+        onClick={toggleNotifications}
+        onPointerDown={(event) => event.stopPropagation()}
+        className="relative z-[92] inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition duration-200 hover:bg-slate-100 hover:text-slate-900 active:scale-95"
         aria-label="Notifications"
         aria-expanded={open}
+        aria-controls="notification-panel"
       >
         <Bell className="h-5 w-5" />
         {unreadCount > 0 && (
@@ -269,15 +299,22 @@ export function NotificationBell() {
         <>
           {/* Backdrop for mobile/tablet */}
           <div
-            className="fixed inset-0 z-40 bg-black/20 backdrop-blur-sm md:hidden"
-            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-[80] bg-black/20 backdrop-blur-sm md:hidden"
+            onClick={closeNotifications}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              setOpen(false);
+            }}
             role="presentation"
           />
 
           {/* Notification panel */}
           <div
+            id="notification-panel"
             ref={panelRef}
-            className="fixed inset-x-3 top-16 z-50 max-h-[calc(100svh-5rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-[min(500px,calc(100vh-5rem))]"
+            className="notification-panel-in fixed inset-x-3 top-16 z-[95] max-h-[calc(100svh-5rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-[min(500px,calc(100vh-5rem))]"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -296,7 +333,7 @@ export function NotificationBell() {
                 <button
                   type="button"
                   className="rounded-lg p-2 text-slate-600 transition duration-200 hover:bg-white hover:text-slate-900"
-                  onClick={() => setOpen(false)}
+                  onClick={closeNotifications}
                   aria-label="Close notifications"
                 >
                   <X className="h-4 w-4" />
@@ -345,6 +382,9 @@ export function NotificationBell() {
                             }}
                           >
                             <p className="truncate text-sm font-semibold text-slate-900">{notification.title}</p>
+                            {actor?.username || actor?.name ? (
+                              <p className="mt-0.5 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p>
+                            ) : null}
                             <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
                             <p className="mt-1 text-xs font-medium text-slate-400">
                               {relativeTimeFor(notification.createdAt)}

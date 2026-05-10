@@ -18,6 +18,23 @@ import { feedApi, getApiErrorMessage, isRetryableApiError, mediaUrl, userApi } f
 import { isValidPost, usePostStore } from "../store/postStore";
 
 const FEED_PAGE_SIZE = 10;
+const FEED_AUDIO_PREFERENCE_KEY = "vibebook:feed-audio";
+
+const readFeedAudioPreference = () => {
+  try {
+    return localStorage.getItem(FEED_AUDIO_PREFERENCE_KEY) !== "muted";
+  } catch {
+    return true;
+  }
+};
+
+const saveFeedAudioPreference = (enabled) => {
+  try {
+    localStorage.setItem(FEED_AUDIO_PREFERENCE_KEY, enabled ? "sound" : "muted");
+  } catch {
+    // Audio preference is best-effort.
+  }
+};
 
 const formatCount = (value) => {
   const number = Number(value || 0);
@@ -88,6 +105,11 @@ const FeedItem = memo(
     onSave,
     onShare,
     onViewed,
+    isActive = false,
+    soundEnabled = true,
+    audioUnlockToken = 0,
+    onAudioPreferenceChange,
+    onAutoplayBlocked,
   }) => {
     const [captionExpanded, setCaptionExpanded] = useState(false);
     const [activityBursts, setActivityBursts] = useState([]);
@@ -137,6 +159,7 @@ const FeedItem = memo(
 
     return (
       <article
+        data-feed-post-id={item._id || item.url}
         className="home-feed-viewport relative snap-start snap-always overflow-hidden bg-slate-950"
       >
         <PostMedia
@@ -146,11 +169,17 @@ const FeedItem = memo(
           imageClassName="h-full w-full object-contain"
           videoClassName="h-full w-full object-contain"
           placeholderClassName="h-full w-full"
-          muted
+          active={isActive}
+          audioUnlockToken={audioUnlockToken}
           loop
-          autoPlay
+          autoPlay={isActive}
           controls={false}
           interactive
+          managedPlayback
+          muted={!soundEnabled}
+          soundEnabled={soundEnabled}
+          onAudioPreferenceChange={onAudioPreferenceChange}
+          onAutoplayBlocked={onAutoplayBlocked}
           onDoubleTap={handleLikePress}
           onViewed={(metrics) => onViewed(item, metrics)}
           onInvalid={() => onInvalid(item._id)}
@@ -388,9 +417,14 @@ const Home = () => {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [activePostId, setActivePostId] = useState("");
+  const [soundEnabled, setSoundEnabled] = useState(readFeedAudioPreference);
+  const [audioUnlockToken, setAudioUnlockToken] = useState(0);
   const scrollerRef = useRef(null);
   const loadMoreRef = useRef(null);
   const feedRequestRef = useRef("");
+  const activeRatiosRef = useRef(new Map());
+  const lastAudioUnlockRef = useRef(0);
   const viewedPostsRef = useRef(new Set());
   const retryTimerRef = useRef(null);
   const retryAttemptRef = useRef(0);
@@ -540,6 +574,104 @@ const Home = () => {
   );
 
   const activeCommentPost = useMemo(() => visibleFeed.find((item) => item._id === commentOpen), [commentOpen, visibleFeed]);
+
+  useEffect(() => {
+    const firstId = visibleFeed[0]?._id || visibleFeed[0]?.url || "";
+
+    setActivePostId((current) => {
+      if (current && visibleFeed.some((item) => (item._id || item.url) === current)) {
+        return current;
+      }
+
+      return firstId;
+    });
+  }, [visibleFeed]);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+
+    if (!scroller || !window.IntersectionObserver) {
+      return undefined;
+    }
+
+    const ratios = new Map();
+    activeRatiosRef.current = ratios;
+    const nodes = Array.from(scroller.querySelectorAll("[data-feed-post-id]"));
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const id = entry.target.getAttribute("data-feed-post-id") || "";
+          if (id) {
+            ratios.set(id, entry.intersectionRatio);
+          }
+        });
+
+        let nextId = "";
+        let nextRatio = 0;
+        ratios.forEach((ratio, id) => {
+          if (ratio > nextRatio) {
+            nextRatio = ratio;
+            nextId = id;
+          }
+        });
+
+        if (nextId && nextRatio >= 0.55) {
+          setActivePostId((current) => (current === nextId ? current : nextId));
+        }
+      },
+      {
+        root: scroller,
+        threshold: [0, 0.35, 0.55, 0.72, 0.9, 1],
+      }
+    );
+
+    nodes.forEach((node) => observer.observe(node));
+
+    return () => {
+      observer.disconnect();
+      activeRatiosRef.current = new Map();
+    };
+  }, [visibleFeed]);
+
+  const updateAudioPreference = useCallback((enabled) => {
+    setSoundEnabled(Boolean(enabled));
+    saveFeedAudioPreference(Boolean(enabled));
+
+    if (enabled) {
+      setAudioUnlockToken((current) => current + 1);
+    }
+  }, []);
+
+  const handleAutoplayBlocked = useCallback(() => {
+    // Keep the desired sound preference. A later user gesture will retry the active video.
+  }, []);
+
+  useEffect(() => {
+    const retryAudioAfterInteraction = () => {
+      if (!soundEnabled) {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - lastAudioUnlockRef.current < 700) {
+        return;
+      }
+
+      lastAudioUnlockRef.current = now;
+      setAudioUnlockToken((current) => current + 1);
+    };
+
+    window.addEventListener("pointerdown", retryAudioAfterInteraction, { passive: true });
+    window.addEventListener("keydown", retryAudioAfterInteraction);
+    window.addEventListener("touchstart", retryAudioAfterInteraction, { passive: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", retryAudioAfterInteraction);
+      window.removeEventListener("keydown", retryAudioAfterInteraction);
+      window.removeEventListener("touchstart", retryAudioAfterInteraction);
+    };
+  }, [soundEnabled]);
 
   useEffect(() => {
     if (!hasMore || loading || loadingMore || !loadMoreRef.current) {
@@ -820,9 +952,14 @@ const Home = () => {
             {visibleFeed.map((item, index) => (
               <FeedItem
                 key={item._id || `${item.url}-${index}`}
+                audioUnlockToken={audioUnlockToken}
                 currentUser={currentUser}
                 isAuthenticated={isAuthenticated}
+                isActive={(activePostId || visibleFeed[0]?._id || visibleFeed[0]?.url) === (item._id || item.url)}
                 item={item}
+                soundEnabled={soundEnabled}
+                onAudioPreferenceChange={updateAudioPreference}
+                onAutoplayBlocked={handleAutoplayBlocked}
                 onFollow={handleFollow}
                 onInvalid={removePost}
                 onLike={handleLike}

@@ -13,6 +13,9 @@ const PostMedia = ({
   muted = false,
   preload = "auto",
   managedPlayback = false,
+  active = true,
+  soundEnabled = !muted,
+  audioUnlockToken = 0,
   className = "",
   imageClassName = "",
   videoClassName = "",
@@ -22,6 +25,8 @@ const PostMedia = ({
   onDoubleTap,
   onViewed,
   onInvalid,
+  onAudioPreferenceChange,
+  onAutoplayBlocked,
 }) => {
   const mediaRef = useRef(null);
   const viewedRef = useRef(false);
@@ -83,6 +88,7 @@ const PostMedia = ({
     }
 
     mediaRef.current.muted = isMuted;
+    mediaRef.current.defaultMuted = isMuted;
   }, [isMuted, post?.type, rawUrl]);
 
   useEffect(() => {
@@ -93,14 +99,60 @@ const PostMedia = ({
     const video = mediaRef.current;
     prepareVideo(video);
 
-    if (autoPlay) {
-      video.play?.().catch(() => undefined);
-      setIsPaused(false);
-    } else {
+    if (!active || !autoPlay) {
+      video.muted = true;
+      video.defaultMuted = true;
+      setIsMuted(true);
       video.pause?.();
       setIsPaused(true);
+      return;
     }
-  }, [autoPlay, managedPlayback, post?._id, post?.type, rawUrl]);
+
+    let canceled = false;
+    const preferSound = Boolean(soundEnabled && !muted);
+
+    const play = async () => {
+      video.muted = !preferSound;
+      video.defaultMuted = !preferSound;
+      setIsMuted(video.muted);
+
+      try {
+        await video.play?.();
+        if (!canceled) {
+          setIsPaused(false);
+        }
+      } catch {
+        if (!preferSound || canceled) {
+          if (!canceled) {
+            setIsPaused(true);
+          }
+          return;
+        }
+
+        video.muted = true;
+        video.defaultMuted = true;
+        setIsMuted(true);
+        onAutoplayBlocked?.();
+
+        try {
+          await video.play?.();
+          if (!canceled) {
+            setIsPaused(false);
+          }
+        } catch {
+          if (!canceled) {
+            setIsPaused(true);
+          }
+        }
+      }
+    };
+
+    play();
+
+    return () => {
+      canceled = true;
+    };
+  }, [active, audioUnlockToken, autoPlay, managedPlayback, muted, onAutoplayBlocked, post?._id, post?.type, rawUrl, soundEnabled]);
 
   useEffect(() => {
     return () => {
@@ -138,13 +190,20 @@ const PostMedia = ({
 
     if (video) {
       video.muted = nextMuted;
+      video.defaultMuted = nextMuted;
 
       if (!nextMuted) {
-        video.play?.().catch(() => undefined);
+        video.play?.().catch(() => {
+          video.muted = true;
+          video.defaultMuted = true;
+          setIsMuted(true);
+          onAutoplayBlocked?.();
+        });
       }
     }
 
     setIsMuted(nextMuted);
+    onAudioPreferenceChange?.(!nextMuted);
   };
 
   const prepareVideo = (video) => {
@@ -254,7 +313,7 @@ const PostMedia = ({
       return undefined;
     }
 
-    if (!autoPlay || !mediaRef.current || failed || !window.IntersectionObserver) {
+    if (managedPlayback || !autoPlay || !mediaRef.current || failed || !window.IntersectionObserver) {
       return undefined;
     }
 
@@ -273,6 +332,9 @@ const PostMedia = ({
             video.play?.().catch(() => undefined);
           }
         } else if (entry.intersectionRatio <= 0.28 && !video.paused) {
+          video.muted = true;
+          video.defaultMuted = true;
+          setIsMuted(true);
           video.pause?.();
         }
       },
@@ -281,7 +343,7 @@ const PostMedia = ({
 
     observer.observe(mediaRef.current);
     return () => observer.disconnect();
-  }, [autoPlay, failed, post?._id, post?.type, rawUrl, src]);
+  }, [autoPlay, failed, managedPlayback, post?._id, post?.type, rawUrl, src]);
 
   useEffect(() => {
     if (post?.type === "video" || !mediaRef.current || failed) {
