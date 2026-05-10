@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { Bell, CheckCheck, Heart, MessageCircle, MessageSquare, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, notificationApi } from "../services/api";
@@ -14,6 +15,42 @@ const iconForType = (type) => {
   return Bell;
 };
 
+const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+
+const initialsFor = (value = "VibeBook") =>
+  String(value)
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "VB";
+
+const actorFor = (notification = {}) => (notification.actorId && typeof notification.actorId === "object" ? notification.actorId : null);
+const avatarFor = (notification = {}) => {
+  const actor = actorFor(notification);
+  return actor?.profilePicture || actor?.profileImage || "";
+};
+const NOTIFICATION_SYNC_EVENT = "vibebook:notifications-unread";
+const broadcastNotificationSync = (detail = {}) => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(NOTIFICATION_SYNC_EVENT, { detail }));
+  }
+};
+
+const relativeTimeFor = (value) => {
+  const timestamp = value ? new Date(value).getTime() : 0;
+
+  if (!timestamp || Number.isNaN(timestamp)) return "now";
+
+  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
 export function NotificationBell() {
   const { isAuthenticated, token, user } = useAuth();
   const [notifications, setNotifications] = useState([]);
@@ -21,17 +58,23 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const seenRealtimeRef = useRef(new Set());
+  const fetchInFlightRef = useRef(false);
   const panelRef = useRef(null);
 
   const visibleNotifications = useMemo(() => notifications.slice(0, 12), [notifications]);
 
   const fetchNotifications = async () => {
+    if (fetchInFlightRef.current) {
+      return;
+    }
+
     if (!isAuthenticated) {
       setNotifications([]);
       setUnreadCount(0);
       return;
     }
 
+    fetchInFlightRef.current = true;
     setLoading(true);
     try {
       const { data } = await notificationApi.list({ limit: 12 });
@@ -41,6 +84,7 @@ export function NotificationBell() {
       setNotifications([]);
       setUnreadCount(0);
     } finally {
+      fetchInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -55,6 +99,27 @@ export function NotificationBell() {
     const interval = setInterval(fetchNotifications, 30000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
+
+  useEffect(() => {
+    const handleSync = (event) => {
+      const detail = event.detail || {};
+
+      if (detail.unreadCount !== undefined) {
+        setUnreadCount(Number(detail.unreadCount || 0));
+      }
+
+      if (detail.allRead) {
+        setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+      } else if (detail.readId) {
+        setNotifications((current) => current.map((item) => (item._id === detail.readId ? { ...item, read: true } : item)));
+      } else if (detail.deletedId) {
+        setNotifications((current) => current.filter((item) => item._id !== detail.deletedId));
+      }
+    };
+
+    window.addEventListener(NOTIFICATION_SYNC_EVENT, handleSync);
+    return () => window.removeEventListener(NOTIFICATION_SYNC_EVENT, handleSync);
+  }, []);
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -88,7 +153,7 @@ export function NotificationBell() {
 
     const handleNotification = (payload = {}) => {
       const notification = payload.notification || payload;
-      const id = notification?._id?.toString?.() || "";
+      const id = idOf(notification);
 
       if (id && seenRealtimeRef.current.has(id)) {
         return;
@@ -110,7 +175,6 @@ export function NotificationBell() {
       } else {
         setUnreadCount((current) => Number(current || 0) + 1);
       }
-      fetchNotifications();
     };
 
     socket.on("notification:new", handleNotification);
@@ -128,7 +192,11 @@ export function NotificationBell() {
     setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
 
     try {
-      await notificationApi.markRead(notification._id);
+      const { data } = await notificationApi.markRead(notification._id);
+      if (data?.unreadCount !== undefined) {
+        setUnreadCount(Number(data.unreadCount || 0));
+        broadcastNotificationSync({ unreadCount: Number(data.unreadCount || 0), readId: notification._id });
+      }
     } catch {
       fetchNotifications();
     }
@@ -137,19 +205,32 @@ export function NotificationBell() {
   const markAllAsRead = async () => {
     setNotifications((current) => current.map((item) => ({ ...item, read: true })));
     setUnreadCount(0);
+    broadcastNotificationSync({ unreadCount: 0, allRead: true });
 
     try {
-      await notificationApi.markAllRead();
+      const { data } = await notificationApi.markAllRead();
+      if (data?.unreadCount !== undefined) {
+        setUnreadCount(Number(data.unreadCount || 0));
+        broadcastNotificationSync({ unreadCount: Number(data.unreadCount || 0), allRead: true });
+      }
     } catch {
       fetchNotifications();
     }
   };
 
   const deleteNotification = async (notificationId) => {
+    const removed = notifications.find((item) => item._id === notificationId);
     setNotifications((current) => current.filter((item) => item._id !== notificationId));
+    if (removed && !removed.read) {
+      setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
+    }
 
     try {
-      await notificationApi.delete(notificationId);
+      const { data } = await notificationApi.delete(notificationId);
+      if (data?.unreadCount !== undefined) {
+        setUnreadCount(Number(data.unreadCount || 0));
+        broadcastNotificationSync({ unreadCount: Number(data.unreadCount || 0), deletedId: notificationId });
+      }
     } catch {
       fetchNotifications();
     }
@@ -163,7 +244,15 @@ export function NotificationBell() {
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() =>
+          setOpen((value) => {
+            const nextOpen = !value;
+            if (nextOpen) {
+              fetchNotifications();
+            }
+            return nextOpen;
+          })
+        }
         className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition duration-200 hover:bg-slate-100 hover:text-slate-900 active:scale-95"
         aria-label="Notifications"
         aria-expanded={open}
@@ -188,7 +277,7 @@ export function NotificationBell() {
           {/* Notification panel */}
           <div
             ref={panelRef}
-            className="absolute right-0 top-12 z-50 w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl md:w-[min(22rem,calc(100vw-2rem))]"
+            className="fixed inset-x-3 top-16 z-50 max-h-[calc(100svh-5rem)] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-[min(500px,calc(100vh-5rem))]"
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
@@ -200,6 +289,7 @@ export function NotificationBell() {
                   onClick={markAllAsRead}
                   aria-label="Mark all as read"
                   title="Mark all as read"
+                  disabled={unreadCount === 0}
                 >
                   <CheckCheck className="h-4 w-4" />
                 </button>
@@ -215,7 +305,7 @@ export function NotificationBell() {
             </div>
 
             {/* Content */}
-            <div className="max-h-[500px] overflow-y-auto">
+            <div className="max-h-[calc(100svh-10rem)] overflow-y-auto sm:max-h-[430px]">
               {loading && !visibleNotifications.length ? (
                 <div className="flex items-center justify-center gap-2 px-6 py-8">
                   <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "0ms" }} />
@@ -226,6 +316,8 @@ export function NotificationBell() {
                 <div className="divide-y divide-slate-100">
                   {visibleNotifications.map((notification) => {
                     const Icon = iconForType(notification.type);
+                    const actor = actorFor(notification);
+                    const avatar = avatarFor(notification);
                     return (
                       <article
                         key={notification._id}
@@ -233,8 +325,14 @@ export function NotificationBell() {
                       >
                         <div className="flex items-start gap-3">
                           {/* Icon badge */}
-                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${notification.read ? "bg-slate-200 text-slate-600" : "bg-blue-200 text-blue-600"}`}>
-                            <Icon className="h-5 w-5" />
+                          <div className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full ${notification.read ? "bg-slate-200 text-slate-600" : "bg-blue-200 text-blue-600"}`}>
+                            {avatar ? (
+                              <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" />
+                            ) : actor?.name ? (
+                              <span className="text-xs font-black">{initialsFor(actor.name)}</span>
+                            ) : (
+                              <Icon className="h-5 w-5" />
+                            )}
                           </div>
 
                           {/* Content */}
@@ -249,7 +347,7 @@ export function NotificationBell() {
                             <p className="truncate text-sm font-semibold text-slate-900">{notification.title}</p>
                             <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
                             <p className="mt-1 text-xs font-medium text-slate-400">
-                              {notification.createdAt ? new Date(notification.createdAt).toLocaleDateString() : ""}
+                              {relativeTimeFor(notification.createdAt)}
                             </p>
                           </button>
 
@@ -280,12 +378,13 @@ export function NotificationBell() {
             {/* Footer - View all link */}
             {visibleNotifications.length > 0 && (
               <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-center">
-                <a
-                  href="/notifications"
+                <Link
+                  to="/notifications"
                   className="text-sm font-semibold text-blue-600 transition duration-200 hover:text-blue-700"
+                  onClick={() => setOpen(false)}
                 >
                   View all notifications
-                </a>
+                </Link>
               </div>
             )}
           </div>

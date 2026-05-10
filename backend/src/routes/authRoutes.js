@@ -1,7 +1,7 @@
 const express = require("express");
 const rateLimit = require("express-rate-limit");
 
-const { login, register, sendPhoneCode, verifyPhoneCode } = require("../controllers/authController");
+const { checkAvailability, login, register, sendPhoneCode, verifyPhoneCode } = require("../controllers/authController");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const router = express.Router();
@@ -17,6 +17,7 @@ router.get("/", (req, res) => {
   return res.json({ message: "Auth API is ready" });
 });
 
+router.get("/check", checkAvailability);
 router.post("/register", register);
 router.post("/login", login);
 router.post("/send-phone-code", authMiddleware, phoneOtpLimiter, sendPhoneCode);

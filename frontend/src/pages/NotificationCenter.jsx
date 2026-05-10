@@ -13,6 +13,7 @@ const notificationTypes = [
   { value: "comment", label: "Comments", icon: MessageSquare },
   { value: "follow", label: "Follows", icon: UserPlus },
   { value: "message", label: "Messages", icon: MessageCircle },
+  { value: "group_message", label: "Groups", icon: MessageCircle },
   { value: "mention", label: "Mentions", icon: MessageCircle },
 ];
 
@@ -30,6 +31,53 @@ const colorForType = (type) => {
   if (type === "comment") return "bg-blue-100 text-blue-600";
   if (type === "message" || type === "group_message" || type === "mention") return "bg-purple-100 text-purple-600";
   return "bg-slate-100 text-slate-600";
+};
+
+const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+
+const initialsFor = (value = "VibeBook") =>
+  String(value)
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "VB";
+
+const actorFor = (notification = {}) => (notification.actorId && typeof notification.actorId === "object" ? notification.actorId : null);
+const avatarFor = (notification = {}) => {
+  const actor = actorFor(notification);
+  return actor?.profilePicture || actor?.profileImage || "";
+};
+const NOTIFICATION_SYNC_EVENT = "vibebook:notifications-unread";
+const broadcastNotificationSync = (detail = {}) => {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(NOTIFICATION_SYNC_EVENT, { detail }));
+  }
+};
+
+const relativeTimeFor = (value) => {
+  const timestamp = value ? new Date(value).getTime() : 0;
+
+  if (!timestamp || Number.isNaN(timestamp)) return "now";
+
+  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+const mergeNotificationPage = (current, nextItems, replace = false) => {
+  if (replace) return nextItems;
+
+  const byId = new Map();
+  [...current, ...nextItems].forEach((item) => {
+    const id = idOf(item);
+    if (id) byId.set(id, { ...(byId.get(id) || {}), ...item });
+  });
+  return Array.from(byId.values()).sort((left, right) => new Date(right.createdAt || 0) - new Date(left.createdAt || 0));
 };
 
 const SkeletonLoader = () => (
@@ -87,7 +135,7 @@ export default function NotificationCenter() {
       });
 
       const newNotifications = Array.isArray(data.notifications) ? data.notifications : [];
-      setNotifications((prev) => (pageNum === 1 ? newNotifications : [...prev, ...newNotifications]));
+      setNotifications((prev) => mergeNotificationPage(prev, newNotifications, pageNum === 1));
       setUnreadCount(Number(data.unreadCount || 0));
       setHasMore(data.pagination?.page < data.pagination?.pages);
     } catch (error) {
@@ -110,6 +158,27 @@ export default function NotificationCenter() {
     fetchNotifications(1, true);
   }, [isAuthenticated, selectedType]);
 
+  useEffect(() => {
+    const handleSync = (event) => {
+      const detail = event.detail || {};
+
+      if (detail.unreadCount !== undefined) {
+        setUnreadCount(Number(detail.unreadCount || 0));
+      }
+
+      if (detail.allRead) {
+        setNotifications((current) => current.map((item) => ({ ...item, read: true })));
+      } else if (detail.readId) {
+        setNotifications((current) => current.map((item) => (item._id === detail.readId ? { ...item, read: true } : item)));
+      } else if (detail.deletedId) {
+        setNotifications((current) => current.filter((item) => item._id !== detail.deletedId));
+      }
+    };
+
+    window.addEventListener(NOTIFICATION_SYNC_EVENT, handleSync);
+    return () => window.removeEventListener(NOTIFICATION_SYNC_EVENT, handleSync);
+  }, []);
+
   // Setup real-time socket
   useEffect(() => {
     if (!isAuthenticated || !token || !user?._id) {
@@ -123,7 +192,7 @@ export default function NotificationCenter() {
 
     const handleNotification = (payload = {}) => {
       const notification = payload.notification || payload;
-      const id = notification?._id?.toString?.() || "";
+      const id = idOf(notification);
 
       if (id && seenRealtimeRef.current.has(id)) {
         return;
@@ -186,7 +255,11 @@ export default function NotificationCenter() {
     setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
 
     try {
-      await notificationApi.markRead(notification._id);
+      const { data } = await notificationApi.markRead(notification._id);
+      if (data?.unreadCount !== undefined) {
+        setUnreadCount(Number(data.unreadCount || 0));
+        broadcastNotificationSync({ unreadCount: Number(data.unreadCount || 0), readId: notification._id });
+      }
     } catch {
       fetchNotifications(1, true);
     }
@@ -195,19 +268,32 @@ export default function NotificationCenter() {
   const markAllAsRead = async () => {
     setNotifications((current) => current.map((item) => ({ ...item, read: true })));
     setUnreadCount(0);
+    broadcastNotificationSync({ unreadCount: 0, allRead: true });
 
     try {
-      await notificationApi.markAllRead();
+      const { data } = await notificationApi.markAllRead();
+      if (data?.unreadCount !== undefined) {
+        setUnreadCount(Number(data.unreadCount || 0));
+        broadcastNotificationSync({ unreadCount: Number(data.unreadCount || 0), allRead: true });
+      }
     } catch {
       fetchNotifications(1, true);
     }
   };
 
   const deleteNotification = async (notificationId) => {
+    const removed = notifications.find((item) => item._id === notificationId);
     setNotifications((current) => current.filter((item) => item._id !== notificationId));
+    if (removed && !removed.read) {
+      setUnreadCount((current) => Math.max(0, Number(current || 0) - 1));
+    }
 
     try {
-      await notificationApi.delete(notificationId);
+      const { data } = await notificationApi.delete(notificationId);
+      if (data?.unreadCount !== undefined) {
+        setUnreadCount(Number(data.unreadCount || 0));
+        broadcastNotificationSync({ unreadCount: Number(data.unreadCount || 0), deletedId: notificationId });
+      }
     } catch {
       fetchNotifications(1, true);
     }
@@ -275,6 +361,8 @@ export default function NotificationCenter() {
           <div className="space-y-3">
             {filteredNotifications.map((notification) => {
               const Icon = iconForType(notification.type);
+              const actor = actorFor(notification);
+              const avatar = avatarFor(notification);
               return (
                 <article
                   key={notification._id}
@@ -283,8 +371,14 @@ export default function NotificationCenter() {
                   }`}
                 >
                   {/* Icon badge */}
-                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${colorForType(notification.type)}`}>
-                    <Icon className="h-6 w-6" />
+                  <div className={`flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full ${colorForType(notification.type)}`}>
+                    {avatar ? (
+                      <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" />
+                    ) : actor?.name ? (
+                      <span className="text-sm font-black">{initialsFor(actor.name)}</span>
+                    ) : (
+                      <Icon className="h-6 w-6" />
+                    )}
                   </div>
 
                   {/* Content */}
@@ -296,7 +390,7 @@ export default function NotificationCenter() {
                     <h3 className="truncate text-sm font-bold text-slate-900">{notification.title}</h3>
                     <p className="mt-1 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
                     <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-                      <time>{notification.createdAt ? new Date(notification.createdAt).toLocaleDateString() : ""}</time>
+                      <time>{relativeTimeFor(notification.createdAt)}</time>
                       {!notification.read && <span className="h-2 w-2 rounded-full bg-blue-600" />}
                     </div>
                   </button>

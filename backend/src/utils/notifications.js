@@ -70,6 +70,11 @@ const createNotification = async ({
       read: false,
     });
 
+    await notification.populate([
+      { path: "actorId", select: "name username profilePicture profileImage" },
+      { path: "postId", select: "mediaUrl caption" },
+      { path: "messageId", select: "message" },
+    ]);
     await emitNotification(notification);
     return notification;
   } catch (error) {

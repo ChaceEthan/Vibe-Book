@@ -67,6 +67,40 @@
     touch-action: pan-y;
   }
 
+  .home-feed-viewport {
+    height: calc(100vh - 3.5rem);
+  }
+
+  @supports (height: 100svh) {
+    .home-feed-viewport {
+      height: calc(100svh - 3.5rem);
+    }
+  }
+
+  @supports (height: 100dvh) {
+    .home-feed-viewport {
+      height: calc(100dvh - 3.5rem);
+    }
+  }
+
+  @media (min-width: 640px) {
+    .home-feed-viewport {
+      height: calc(100vh - 4rem);
+    }
+
+    @supports (height: 100svh) {
+      .home-feed-viewport {
+        height: calc(100svh - 4rem);
+      }
+    }
+
+    @supports (height: 100dvh) {
+      .home-feed-viewport {
+        height: calc(100dvh - 4rem);
+      }
+    }
+  }
+
   .home-feed-scroll::-webkit-scrollbar {
     display: none;
   }

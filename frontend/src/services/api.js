@@ -125,6 +125,7 @@ API.interceptors.response.use(
 export const authApi = {
   login: (payload) => API.post("/auth/login", payload),
   register: (payload) => API.post("/auth/register", payload),
+  checkAvailability: (params = {}, options = {}) => API.get("/auth/check", { params, signal: options.signal }),
   sendPhoneCode: (payload = {}) => API.post("/auth/send-phone-code", payload),
   verifyPhoneCode: (payload = {}) => API.post("/auth/verify-phone-code", payload),
 };

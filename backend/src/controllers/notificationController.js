@@ -30,7 +30,7 @@ const getNotifications = async (req, res, next) => {
 
     const [notifications, total, unreadCount] = await Promise.all([
       Notification.find(filter)
-        .populate("actorId", "name profilePicture profileImage")
+        .populate("actorId", "name username profilePicture profileImage")
         .populate("postId", "mediaUrl caption")
         .populate("messageId", "message")
         .sort({ createdAt: -1 })
@@ -72,7 +72,9 @@ const markAsRead = async (req, res, next) => {
       return res.status(404).json({ message: "Notification not found" });
     }
 
-    return res.json({ notification, message: "Notification marked as read" });
+    const unreadCount = await Notification.countDocuments({ userId: req.user._id, read: false });
+
+    return res.json({ notification, unreadCount, message: "Notification marked as read" });
   } catch (error) {
     console.error("[notification:mark-read]", error);
     return next(error);
@@ -88,6 +90,7 @@ const markAllAsRead = async (req, res, next) => {
 
     return res.json({
       updated: result.modifiedCount,
+      unreadCount: 0,
       message: "All notifications marked as read",
     });
   } catch (error) {
@@ -111,7 +114,9 @@ const deleteNotification = async (req, res, next) => {
       return res.status(404).json({ message: "Notification not found" });
     }
 
-    return res.json({ message: "Notification deleted" });
+    const unreadCount = await Notification.countDocuments({ userId: req.user._id, read: false });
+
+    return res.json({ unreadCount, message: "Notification deleted" });
   } catch (error) {
     console.error("[notification:delete]", error);
     return next(error);

@@ -27,7 +27,7 @@ const supportedPhoneCountries = [
 
 const escapeRegex = (value = "") => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const normalizeUsername = (value = "") => String(value).trim().replace(/^@+/, "").toLowerCase();
+const normalizeUsername = (value = "") => String(value).trim().replace(/^@+/, "").replace(/\s+/g, "_").toLowerCase();
 
 const normalizeCountryCode = (value = "") => {
   const raw = String(value || "").trim();
@@ -280,15 +280,92 @@ const hasAcceptedTerms = (acceptedTerms) => {
   return acceptedTerms === true || acceptedTerms === "true";
 };
 
+const isValidPhoneNumber = (phoneNumber = "") => {
+  const digits = normalizePhoneDigits(phoneNumber);
+  return digits.length >= 7 && digits.length <= 15;
+};
+
+const checkAvailability = async (req, res, next) => {
+  try {
+    const field = String(req.query.field || "").trim().toLowerCase();
+    const rawValue = String(req.query.value || "").trim();
+
+    if (field === "username") {
+      const username = normalizeUsername(rawValue);
+
+      if (!usernamePattern.test(username)) {
+        return res.status(400).json({
+          field,
+          available: false,
+          message: "Username must be 3-30 characters and use only lowercase letters, numbers, hyphens, or underscores",
+        });
+      }
+
+      const existingUsername = await User.findOne({ username }).select("_id").lean();
+
+      return res.json({
+        field,
+        value: username,
+        available: !existingUsername,
+        message: existingUsername ? "Username already taken" : "Username is available",
+        ...(existingUsername ? { suggestions: await usernameSuggestions(username) } : {}),
+      });
+    }
+
+    if (field === "email") {
+      const email = normalizeEmail(rawValue);
+
+      if (!isValidEmail(email)) {
+        return res.status(400).json({ field, available: false, message: "Invalid email address" });
+      }
+
+      const existingEmail = await findUserByEmailInsensitive(email).select("_id").lean();
+
+      return res.json({
+        field,
+        value: email,
+        available: !existingEmail,
+        message: existingEmail ? "Email already exists" : "Email is available",
+      });
+    }
+
+    if (field === "phone") {
+      const phoneFields = normalizePhonePayload({
+        country: req.query.country,
+        countryCode: req.query.countryCode,
+        phoneNumber: rawValue || req.query.phoneNumber,
+      });
+
+      if (!isValidPhoneNumber(phoneFields.phoneNumber)) {
+        return res.status(400).json({ field, available: false, message: "Invalid phone number" });
+      }
+
+      const existingPhone = await findUserByPhoneFields(phoneFields);
+
+      return res.json({
+        field,
+        value: phoneFields.phone,
+        available: !existingPhone,
+        message: existingPhone ? "Phone already exists" : "Phone is available",
+      });
+    }
+
+    return res.status(400).json({ message: "Unsupported availability field" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const register = async (req, res, next) => {
   try {
     const { name, password } = req.body;
     const email = normalizeEmail(req.body.email);
     const phoneFields = normalizePhonePayload(req.body);
     const username = normalizeUsername(req.body.username);
+    const displayName = String(name || username || "").trim();
 
-    if (!name || !password) {
-      return res.status(400).json({ message: "Name and password are required" });
+    if (!password) {
+      return res.status(400).json({ message: "Password is required" });
     }
 
     if (!email && !phoneFields.phoneNumber) {
@@ -311,8 +388,16 @@ const register = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid email address" });
     }
 
+    if (phoneFields.phoneNumber && !isValidPhoneNumber(phoneFields.phoneNumber)) {
+      return res.status(400).json({ message: "Invalid phone number" });
+    }
+
     if (password.length < 6) {
       return res.status(400).json({ message: "Password must be at least 6 characters" });
+    }
+
+    if (!req.body.birthday) {
+      return res.status(400).json({ message: "Birthday is required" });
     }
 
     const existingUser = email ? await findUserByEmailInsensitive(email) : null;
@@ -352,12 +437,16 @@ const register = async (req, res, next) => {
     userData.countryCode = phoneFields.countryCode || userData.countryCode || "";
     userData.country = phoneFields.country || userData.country || "";
     userData.phoneVerified = false;
-    userData.referralCode = createReferralCode(name);
+    userData.name = displayName;
+    userData.referralCode = createReferralCode(displayName);
 
     if (req.body.birthday) {
       const birthday = new Date(req.body.birthday);
       if (Number.isNaN(birthday.getTime())) {
         return res.status(400).json({ message: "Birthday must be a valid date" });
+      }
+      if (birthday.getTime() > Date.now()) {
+        return res.status(400).json({ message: "Birthday cannot be in the future" });
       }
       userData.birthday = birthday;
     }
@@ -559,6 +648,7 @@ const verifyPhoneCode = async (req, res, next) => {
 };
 
 module.exports = {
+  checkAvailability,
   register,
   login,
   sendPhoneCode,

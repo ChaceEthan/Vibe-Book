@@ -840,12 +840,22 @@ const Profile = () => {
     setFollowStatus("");
     setContactError("");
 
+    const previousUser = user;
+    const nextFollowing = !isFollowing;
+    const delta = isFollowing ? -1 : 1;
+    setUser((current) => ({
+      ...current,
+      isFollowing: nextFollowing,
+      followerCount: Math.max(0, Number(current?.followerCount ?? current?.followers?.length ?? 0) + delta),
+    }));
+
     try {
       const { data } = isFollowing ? await userApi.unfollow(user._id) : await userApi.follow(user._id);
       setUser(data.user);
       await refreshProfile();
       setFollowStatus(data.message || (isFollowing ? "Profile unfollowed." : "Profile followed."));
     } catch (requestError) {
+      setUser(previousUser);
       setFollowStatus(requestError.response?.data?.message || "Unable to update follow.");
     } finally {
       setFollowUpdating(false);

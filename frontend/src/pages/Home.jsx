@@ -137,7 +137,7 @@ const FeedItem = memo(
 
     return (
       <article
-        className="relative h-[calc(100dvh-3.5rem)] snap-start snap-always overflow-hidden bg-slate-950 sm:h-[calc(100dvh-4rem)]"
+        className="home-feed-viewport relative snap-start snap-always overflow-hidden bg-slate-950"
       >
         <PostMedia
           post={item}
@@ -390,6 +390,7 @@ const Home = () => {
   const [error, setError] = useState("");
   const scrollerRef = useRef(null);
   const loadMoreRef = useRef(null);
+  const feedRequestRef = useRef("");
   const viewedPostsRef = useRef(new Set());
   const retryTimerRef = useRef(null);
   const retryAttemptRef = useRef(0);
@@ -401,6 +402,13 @@ const Home = () => {
 
   const loadFeed = useCallback(async (nextPage = 1, options = {}) => {
     const append = Boolean(options.append);
+    const requestKey = `${feedMode}:${nextPage}:${append ? "append" : "replace"}`;
+
+    if (feedRequestRef.current === requestKey) {
+      return;
+    }
+
+    feedRequestRef.current = requestKey;
 
     if (append) {
       setLoadingMore(true);
@@ -464,6 +472,9 @@ const Home = () => {
         setError(message);
       }
     } finally {
+      if (feedRequestRef.current === requestKey) {
+        feedRequestRef.current = "";
+      }
       setLoading(false);
       setLoadingMore(false);
     }
@@ -481,6 +492,7 @@ const Home = () => {
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
+      feedRequestRef.current = "";
     };
   }, []);
 
@@ -638,8 +650,16 @@ const Home = () => {
 
     setError("");
 
+    const isFollowing = Boolean(item.userId?.isFollowing);
+    const delta = isFollowing ? -1 : 1;
+
+    updatePostsByUser(profileId, (profile) => ({
+      ...profile,
+      isFollowing: !isFollowing,
+      followerCount: Math.max(0, Number(profile.followerCount ?? profile.followers?.length ?? 0) + delta),
+    }));
+
     try {
-      const isFollowing = Boolean(item.userId?.isFollowing);
       const { data } = isFollowing ? await userApi.unfollow(profileId) : await userApi.follow(profileId);
       const nextUser = data.user || {};
 
@@ -650,6 +670,11 @@ const Home = () => {
         followerCount: Number(nextUser.followerCount ?? profile.followerCount ?? profile.followers?.length ?? 0),
       }));
     } catch (requestError) {
+      updatePostsByUser(profileId, (profile) => ({
+        ...profile,
+        isFollowing,
+        followerCount: Math.max(0, Number(profile.followerCount ?? profile.followers?.length ?? 0) - delta),
+      }));
       setError(requestError.response?.data?.message || "Unable to update follow.");
     }
   }, [currentUser?._id, isAuthenticated, navigate, updatePostsByUser]);
@@ -739,7 +764,7 @@ const Home = () => {
 
   if (loading) {
     return (
-      <section className="h-[calc(100dvh-3.5rem)] bg-slate-950 p-2 sm:h-[calc(100dvh-4rem)]">
+      <section className="home-feed-viewport bg-slate-950 p-2">
         <div className="mx-auto h-full max-w-[min(100vw,48rem)] animate-pulse rounded-lg bg-slate-800" />
       </section>
     );
@@ -759,7 +784,7 @@ const Home = () => {
   }
 
   return (
-    <section className="relative h-[calc(100dvh-3.5rem)] overflow-hidden bg-slate-950 text-white sm:h-[calc(100dvh-4rem)]">
+    <section className="home-feed-viewport relative overflow-hidden bg-slate-950 text-white">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center pt-3">
         <div className="pointer-events-auto flex rounded-full bg-slate-950/55 p-1 text-xs font-black text-white shadow-xl backdrop-blur">
           {[
@@ -787,7 +812,7 @@ const Home = () => {
 
       <div
         ref={scrollerRef}
-        className="home-feed-scroll mx-auto h-[calc(100dvh-3.5rem)] max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto bg-slate-950 sm:h-[calc(100dvh-4rem)]"
+        className="home-feed-scroll home-feed-viewport mx-auto max-w-[min(100vw,48rem)] snap-y snap-mandatory overflow-y-auto bg-slate-950"
         style={{ overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" }}
       >
         {visibleFeed.length ? (

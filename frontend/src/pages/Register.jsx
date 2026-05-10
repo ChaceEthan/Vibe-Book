@@ -1,49 +1,78 @@
 // @ts-nocheck
-import { BadgeCheck, Camera, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Phone, ShieldCheck, UserRound } from "lucide-react";
+import {
+  AtSign,
+  BadgeCheck,
+  CalendarDays,
+  CheckCircle2,
+  Loader2,
+  LockKeyhole,
+  Mail,
+  Phone,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
-import { GENDER_OPTIONS } from "../constants/profile";
 import { useAuth } from "../context/AuthContext.jsx";
+import { authApi } from "../services/api";
 
 const PHONE_COUNTRIES = [
-  { country: "Rwanda", code: "+250", flag: "🇷🇼" },
-  { country: "Uganda", code: "+256", flag: "🇺🇬" },
-  { country: "Kenya", code: "+254", flag: "🇰🇪" },
-  { country: "Tanzania", code: "+255", flag: "🇹🇿" },
-  { country: "Burundi", code: "+257", flag: "🇧🇮" },
-  { country: "DR Congo", code: "+243", flag: "🇨🇩" },
-  { country: "International", code: "+", flag: "🌐" },
+  { country: "Rwanda", code: "+250" },
+  { country: "Uganda", code: "+256" },
+  { country: "Kenya", code: "+254" },
+  { country: "Tanzania", code: "+255" },
+  { country: "Burundi", code: "+257" },
+  { country: "DR Congo", code: "+243" },
+  { country: "International", code: "+" },
 ];
 
 const initialForm = {
-  name: "",
   username: "",
   contactMethod: "email",
   email: "",
   password: "",
   birthday: "",
-  gender: "",
   country: "Rwanda",
   countryCode: "+250",
   phoneNumber: "",
-  profilePicture: "",
-  bio: "",
-  acceptedTerms: false,
+};
+
+const emptyAvailability = {
+  username: { status: "idle", message: "" },
+  email: { status: "idle", message: "" },
+  phone: { status: "idle", message: "" },
 };
 
 const cleanUsername = (value = "") => value.trim().replace(/^@+/, "").replace(/\s+/g, "_").toLowerCase();
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const usernamePattern = /^[a-z0-9_][a-z0-9_-]{2,29}$/;
+const isAbortError = (error) => error?.code === "ERR_CANCELED" || error?.name === "CanceledError" || error?.name === "AbortError";
+const today = () => new Date().toISOString().slice(0, 10);
+
+const statusClass = (status) => {
+  if (status === "available") return "text-green-700";
+  if (status === "taken" || status === "invalid") return "text-red-700";
+  if (status === "checking") return "text-slate-500";
+  return "text-slate-500";
+};
+
+const ValidationLine = ({ state }) => {
+  if (!state?.message) return null;
+
+  return <p className={`mt-1 text-xs font-semibold ${statusClass(state.status)}`}>{state.message}</p>;
+};
 
 const Register = () => {
   const { isAuthenticated, register, sendPhoneCode, verifyPhoneCode } = useAuth();
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState(initialForm);
-  const [step, setStep] = useState(1);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const [availability, setAvailability] = useState(emptyAvailability);
   const [phoneVerification, setPhoneVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "" });
   const navigate = useNavigate();
 
@@ -52,23 +81,193 @@ const Register = () => {
     [form.country]
   );
 
+  const contactValue = form.contactMethod === "email" ? form.email.trim().toLowerCase() : form.phoneNumber;
+  const contactAvailability = form.contactMethod === "email" ? availability.email : availability.phone;
+  const passwordState =
+    form.password && form.password.length < 6
+      ? { status: "invalid", message: "Weak password. Use at least 6 characters." }
+      : form.password.length >= 6
+        ? { status: "available", message: "Password looks usable." }
+        : { status: "idle", message: "" };
+  const birthdayState =
+    form.birthday && form.birthday > today()
+      ? { status: "invalid", message: "Birthday cannot be in the future." }
+      : { status: "idle", message: "" };
+
+  const canSubmit =
+    cleanUsername(form.username) &&
+    contactValue &&
+    form.password.length >= 6 &&
+    form.birthday &&
+    birthdayState.status !== "invalid" &&
+    availability.username.status !== "checking" &&
+    availability.username.status !== "taken" &&
+    availability.username.status !== "invalid" &&
+    contactAvailability.status !== "checking" &&
+    contactAvailability.status !== "taken" &&
+    contactAvailability.status !== "invalid";
+
   useEffect(() => {
     if (!phoneVerification.open || phoneVerification.cooldown <= 0) {
       return undefined;
     }
 
-    const timer = setInterval(() => {
+    const timer = window.setInterval(() => {
       setPhoneVerification((current) => ({ ...current, cooldown: Math.max(0, Number(current.cooldown || 0) - 1) }));
     }, 1000);
 
-    return () => clearInterval(timer);
+    return () => window.clearInterval(timer);
   }, [phoneVerification.open, phoneVerification.cooldown]);
+
+  useEffect(() => {
+    const username = cleanUsername(form.username);
+
+    setSuggestions([]);
+
+    if (!username) {
+      setAvailability((current) => ({ ...current, username: { status: "idle", message: "" } }));
+      return undefined;
+    }
+
+    if (!usernamePattern.test(username)) {
+      setAvailability((current) => ({
+        ...current,
+        username: { status: "invalid", message: "Use 3-30 lowercase letters, numbers, hyphens, or underscores." },
+      }));
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setAvailability((current) => ({ ...current, username: { status: "checking", message: "Checking username..." } }));
+
+      try {
+        const { data } = await authApi.checkAvailability({ field: "username", value: username }, { signal: controller.signal });
+        setAvailability((current) => ({
+          ...current,
+          username: { status: data.available ? "available" : "taken", message: data.message || "" },
+        }));
+        setSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+      } catch (requestError) {
+        if (!isAbortError(requestError)) {
+          setAvailability((current) => ({
+            ...current,
+            username: { status: "invalid", message: requestError.response?.data?.message || "Unable to check username." },
+          }));
+        }
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [form.username]);
+
+  useEffect(() => {
+    if (form.contactMethod !== "email") {
+      setAvailability((current) => ({ ...current, email: { status: "idle", message: "" } }));
+      return undefined;
+    }
+
+    const email = form.email.trim().toLowerCase();
+
+    if (!email) {
+      setAvailability((current) => ({ ...current, email: { status: "idle", message: "" } }));
+      return undefined;
+    }
+
+    if (!emailPattern.test(email)) {
+      setAvailability((current) => ({ ...current, email: { status: "invalid", message: "Invalid email address." } }));
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setAvailability((current) => ({ ...current, email: { status: "checking", message: "Checking email..." } }));
+
+      try {
+        const { data } = await authApi.checkAvailability({ field: "email", value: email }, { signal: controller.signal });
+        setAvailability((current) => ({
+          ...current,
+          email: { status: data.available ? "available" : "taken", message: data.message || "" },
+        }));
+      } catch (requestError) {
+        if (!isAbortError(requestError)) {
+          setAvailability((current) => ({
+            ...current,
+            email: { status: "invalid", message: requestError.response?.data?.message || "Unable to check email." },
+          }));
+        }
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [form.contactMethod, form.email]);
+
+  useEffect(() => {
+    if (form.contactMethod !== "phone") {
+      setAvailability((current) => ({ ...current, phone: { status: "idle", message: "" } }));
+      return undefined;
+    }
+
+    const phoneNumber = cleanPhone(form.phoneNumber);
+
+    if (!phoneNumber) {
+      setAvailability((current) => ({ ...current, phone: { status: "idle", message: "" } }));
+      return undefined;
+    }
+
+    if (phoneNumber.length < 7 || phoneNumber.length > 15) {
+      setAvailability((current) => ({ ...current, phone: { status: "invalid", message: "Invalid phone number." } }));
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setAvailability((current) => ({ ...current, phone: { status: "checking", message: "Checking phone..." } }));
+
+      try {
+        const { data } = await authApi.checkAvailability(
+          {
+            field: "phone",
+            value: phoneNumber,
+            country: form.country,
+            countryCode: form.countryCode,
+          },
+          { signal: controller.signal }
+        );
+        setAvailability((current) => ({
+          ...current,
+          phone: { status: data.available ? "available" : "taken", message: data.message || "" },
+        }));
+      } catch (requestError) {
+        if (!isAbortError(requestError)) {
+          setAvailability((current) => ({
+            ...current,
+            phone: { status: "invalid", message: requestError.response?.data?.message || "Unable to check phone." },
+          }));
+        }
+      }
+    }, 450);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [form.contactMethod, form.country, form.countryCode, form.phoneNumber]);
 
   if (isAuthenticated && !phoneVerification.open) {
     return <Navigate to="/dashboard" replace />;
   }
 
   const updateField = (name, value) => {
+    setError("");
+    setStatus("");
+
     setForm((current) => {
       if (name === "country") {
         const country = PHONE_COUNTRIES.find((item) => item.country === value) || PHONE_COUNTRIES[0];
@@ -79,6 +278,10 @@ const Register = () => {
         return { ...current, username: cleanUsername(value) };
       }
 
+      if (name === "email") {
+        return { ...current, email: value.trim().toLowerCase() };
+      }
+
       if (name === "phoneNumber") {
         return { ...current, phoneNumber: cleanPhone(value) };
       }
@@ -87,43 +290,29 @@ const Register = () => {
     });
   };
 
-  const validateStep = () => {
-    if (step === 1) {
-      if (!form.name.trim() || !form.username.trim() || !form.password) {
-        return "Name, username, and password are required.";
-      }
+  const validateForm = () => {
+    const username = cleanUsername(form.username);
 
-      if (form.username.length < 3) {
-        return "Username must be at least 3 characters.";
-      }
+    if (!username) return "Username is required.";
+    if (!usernamePattern.test(username)) return "Username must be 3-30 characters and use only lowercase letters, numbers, hyphens, or underscores.";
+    if (availability.username.status === "taken") return "Username already taken.";
 
-      if (form.contactMethod === "email" && !form.email.trim()) {
-        return "Email is required.";
-      }
-
-      if (form.contactMethod === "phone" && !form.phoneNumber.trim()) {
-        return "Phone number is required.";
-      }
-
-      if (form.password.length < 6) {
-        return "Password must be at least 6 characters.";
-      }
+    if (form.contactMethod === "email") {
+      const email = form.email.trim().toLowerCase();
+      if (!email) return "Email is required.";
+      if (!emailPattern.test(email)) return "Invalid email address.";
+      if (availability.email.status === "taken") return "Email already exists.";
+    } else {
+      if (!form.phoneNumber) return "Phone number is required.";
+      if (form.phoneNumber.length < 7 || form.phoneNumber.length > 15) return "Invalid phone number.";
+      if (availability.phone.status === "taken") return "Phone already exists.";
     }
 
-    if (step === 2 && !form.birthday) {
-      return "Birthday is required.";
-    }
+    if (form.password.length < 6) return "Weak password. Use at least 6 characters.";
+    if (!form.birthday) return "Birthday is required.";
+    if (form.birthday > today()) return "Birthday cannot be in the future.";
 
     return "";
-  };
-
-  const goNext = () => {
-    const message = validateStep();
-    setError(message);
-
-    if (!message) {
-      setStep((current) => Math.min(3, current + 1));
-    }
   };
 
   const sendVerificationCode = async () => {
@@ -153,7 +342,7 @@ const Register = () => {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    const message = validateStep();
+    const message = validateForm();
     setError(message);
     setSuggestions([]);
 
@@ -161,36 +350,36 @@ const Register = () => {
       return;
     }
 
+    const usesPhone = form.contactMethod === "phone";
     setSubmitting(true);
+
+    if (usesPhone) {
+      setPhoneVerification((current) => ({ ...current, open: true }));
+    }
 
     try {
       await register({
-        name: form.name.trim(),
         username: cleanUsername(form.username),
         email: form.contactMethod === "email" ? form.email.trim().toLowerCase() : "",
         password: form.password,
         birthday: form.birthday,
-        gender: form.gender,
-        country: form.country,
-        countryCode: form.countryCode,
-        phoneNumber: form.phoneNumber,
-        phone: form.phoneNumber ? `${form.countryCode}${form.phoneNumber}` : "",
-        profilePicture: form.profilePicture.trim(),
-        bio: form.bio.trim(),
-        acceptedTerms: form.acceptedTerms,
+        country: usesPhone ? form.country : "",
+        countryCode: usesPhone ? form.countryCode : "",
+        phoneNumber: usesPhone ? form.phoneNumber : "",
+        phone: usesPhone && form.phoneNumber ? `${form.countryCode}${form.phoneNumber}` : "",
+        acceptedTerms: true,
         referralCode: searchParams.get("ref") || "",
       });
 
-      if (form.phoneNumber) {
-        setPhoneVerification((current) => ({ ...current, open: true }));
+      if (usesPhone) {
         await sendVerificationCode();
       } else {
         navigate("/dashboard", { replace: true });
       }
     } catch (requestError) {
+      setPhoneVerification((current) => ({ ...current, open: false }));
       setError(requestError.response?.data?.message || "Registration failed. Please review your details.");
       setSuggestions(requestError.response?.data?.suggestions || []);
-      setStep(1);
     } finally {
       setSubmitting(false);
     }
@@ -214,35 +403,22 @@ const Register = () => {
 
   return (
     <section className="container-page flex min-h-[78vh] items-center justify-center py-6 sm:py-10">
-      <div className="w-full max-w-xs overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft md:max-w-2xl">
+      <div className="w-full max-w-md overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
         <div className="border-b border-slate-100 bg-slate-950 p-5 text-white sm:p-6">
           <p className="inline-flex items-center gap-2 rounded-full bg-brand px-3 py-1 text-xs font-black uppercase text-navy">
             <ShieldCheck className="h-4 w-4" />
             Join VibeBook
           </p>
-          <h1 className="mt-4 text-2xl font-black leading-tight md:text-3xl">Create your social profile</h1>
-          <p className="mt-2 text-sm text-white/70">Set up your identity, choose how people find you, and start watching or posting.</p>
+          <h1 className="mt-4 text-2xl font-black leading-tight">Create your account</h1>
+          <p className="mt-2 text-sm text-white/70">Start watching and posting in seconds.</p>
         </div>
 
-        <div className="grid grid-cols-3 border-b border-slate-100 text-center text-[11px] font-black text-slate-500 md:text-xs">
-          {["Account", "About", "Profile"].map((item, index) => (
-            <button
-              key={item}
-              type="button"
-              className={`px-1 py-3 md:px-3 ${step === index + 1 ? "bg-brand/10 text-navy" : ""}`}
-              onClick={() => setStep(index + 1)}
-            >
-              {index + 1}. {item}
-            </button>
-          ))}
-        </div>
-
-        <form className="p-5 sm:p-6" onSubmit={handleSubmit}>
-          {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-          {status && <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">{status}</div>}
+        <form className="grid gap-4 p-5 sm:p-6" onSubmit={handleSubmit}>
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+          {status && <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700">{status}</div>}
 
           {suggestions.length > 0 && (
-            <div className="mb-4 rounded-lg bg-surface p-3 text-sm text-slate-600">
+            <div className="rounded-lg bg-surface p-3 text-sm text-slate-600">
               <span className="font-bold text-navy">Try:</span>{" "}
               {suggestions.map((item) => (
                 <button key={item} type="button" className="mr-2 font-bold text-brand" onClick={() => updateField("username", item)}>
@@ -252,190 +428,132 @@ const Register = () => {
             </div>
           )}
 
-          {step === 1 && (
-            <div className="grid gap-4">
-              <label className="space-y-2">
-                <span className="label">Name</span>
-                <input className="field" name="name" value={form.name} onChange={(event) => updateField("name", event.target.value)} required />
-              </label>
-
-              <label className="space-y-2">
-                <span className="label">Username</span>
-                <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
-                  <span className="flex items-center px-3 text-sm font-black text-slate-400">@</span>
-                  <input
-                    className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
-                    name="username"
-                    value={form.username}
-                    onChange={(event) => updateField("username", event.target.value)}
-                    placeholder="vibebook_user"
-                    required
-                  />
-                </div>
-              </label>
-
-              <div className="grid grid-cols-2 gap-2 rounded-lg bg-surface p-1">
-                {[
-                  { value: "email", label: "Email" },
-                  { value: "phone", label: "Phone" },
-                ].map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    className={`rounded-lg px-4 py-3 text-sm font-black ${form.contactMethod === item.value ? "bg-white text-navy shadow-sm" : "text-slate-500"}`}
-                    onClick={() => updateField("contactMethod", item.value)}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-
-              {form.contactMethod === "email" ? (
-                <label className="space-y-2">
-                  <span className="label">Email</span>
-                  <input className="field" type="email" name="email" value={form.email} onChange={(event) => updateField("email", event.target.value)} required />
-                </label>
-              ) : (
-                <div className="grid gap-3 md:grid-cols-[1fr_1.2fr]">
-                  <label className="space-y-2">
-                    <span className="label">Country</span>
-                    <select className="field" value={form.country} onChange={(event) => updateField("country", event.target.value)}>
-                      {PHONE_COUNTRIES.map((item) => (
-                        <option key={item.country} value={item.country}>
-                          {item.flag} {item.country} {item.code}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="space-y-2">
-                    <span className="label">Phone number</span>
-                    <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
-                      <span className="flex shrink-0 items-center gap-1 px-3 text-sm font-black text-slate-600">
-                        <Phone className="h-4 w-4" />
-                        {form.countryCode}
-                      </span>
-                      <input
-                        className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
-                        inputMode="tel"
-                        name="phoneNumber"
-                        value={form.phoneNumber}
-                        onChange={(event) => updateField("phoneNumber", event.target.value)}
-                        required
-                      />
-                    </div>
-                  </label>
-                </div>
-              )}
-
-              <label className="space-y-2">
-                <span className="label">Password</span>
-                <input
-                  className="field"
-                  type="password"
-                  name="password"
-                  value={form.password}
-                  onChange={(event) => updateField("password", event.target.value)}
-                  minLength={6}
-                  required
-                />
-              </label>
+          <label className="space-y-2">
+            <span className="label">Username</span>
+            <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <span className="flex items-center px-3 text-sm font-black text-slate-400">
+                <AtSign className="h-4 w-4" />
+              </span>
+              <input
+                className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
+                name="username"
+                value={form.username}
+                onChange={(event) => updateField("username", event.target.value)}
+                placeholder="vibebook_user"
+                autoComplete="username"
+                required
+              />
             </div>
-          )}
+            <ValidationLine state={availability.username} />
+          </label>
 
-          {step === 2 && (
-            <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid grid-cols-2 gap-2 rounded-lg bg-surface p-1">
+            {[
+              { value: "email", label: "Email", icon: Mail },
+              { value: "phone", label: "Phone", icon: Phone },
+            ].map(({ value, label, icon: Icon }) => (
+              <button
+                key={value}
+                type="button"
+                className={`inline-flex min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-3 text-sm font-black ${
+                  form.contactMethod === value ? "bg-white text-navy shadow-sm" : "text-slate-500"
+                }`}
+                onClick={() => updateField("contactMethod", value)}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {form.contactMethod === "email" ? (
+            <label className="space-y-2">
+              <span className="label">Email</span>
+              <input
+                className="field"
+                type="email"
+                name="email"
+                value={form.email}
+                onChange={(event) => updateField("email", event.target.value)}
+                autoComplete="email"
+                required
+              />
+              <ValidationLine state={availability.email} />
+            </label>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-[0.9fr_1.1fr]">
               <label className="space-y-2">
-                <span className="label">Birthday</span>
-                <input className="field" type="date" name="birthday" value={form.birthday} onChange={(event) => updateField("birthday", event.target.value)} required />
-              </label>
-
-              <label className="space-y-2">
-                <span className="label">Gender (optional)</span>
-                <select className="field" name="gender" value={form.gender} onChange={(event) => updateField("gender", event.target.value)}>
-                  <option value="">Prefer not to say</option>
-                  {GENDER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="space-y-2 md:col-span-2">
-                <span className="label">Country</span>
+                <span className="label">Code</span>
                 <select className="field" value={form.country} onChange={(event) => updateField("country", event.target.value)}>
                   {PHONE_COUNTRIES.map((item) => (
                     <option key={item.country} value={item.country}>
-                      {item.flag} {item.country}
+                      {item.country} {item.code}
                     </option>
                   ))}
                 </select>
               </label>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="grid gap-4">
-              <div className="rounded-lg border border-dashed border-slate-300 bg-surface p-5 text-center">
-                <Camera className="mx-auto h-8 w-8 text-slate-400" />
-                <h2 className="mt-3 text-base font-black text-navy">Profile picture is optional</h2>
-                <p className="mt-1 text-sm text-slate-500">You can add or replace it later from your profile.</p>
-              </div>
-
               <label className="space-y-2">
-                <span className="label">Profile picture URL (optional)</span>
-                <input className="field" name="profilePicture" value={form.profilePicture} onChange={(event) => updateField("profilePicture", event.target.value)} placeholder="https://..." />
-              </label>
-
-              <label className="space-y-2">
-                <span className="label">Bio (optional)</span>
-                <textarea
-                  className="field min-h-28 resize-y"
-                  name="bio"
-                  value={form.bio}
-                  onChange={(event) => updateField("bio", event.target.value)}
-                  maxLength={200}
-                  placeholder="Tell people what you create or love watching."
-                />
-              </label>
-
-              <label className="flex items-start gap-3 rounded-lg bg-surface p-4">
-                <input
-                  className="mt-1 h-4 w-4 accent-brand"
-                  type="checkbox"
-                  name="acceptedTerms"
-                  checked={form.acceptedTerms}
-                  onChange={(event) => updateField("acceptedTerms", event.target.checked)}
-                  required
-                />
-                <span className="text-sm text-slate-600">I agree to create an authentic VibeBook account and follow the community guidelines.</span>
+                <span className="label">Phone</span>
+                <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+                  <span className="flex shrink-0 items-center px-3 text-sm font-black text-slate-600">{form.countryCode}</span>
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
+                    inputMode="tel"
+                    name="phoneNumber"
+                    value={form.phoneNumber}
+                    onChange={(event) => updateField("phoneNumber", event.target.value)}
+                    autoComplete="tel-national"
+                    required
+                  />
+                </div>
+                <ValidationLine state={availability.phone} />
               </label>
             </div>
           )}
 
-          <div className="mt-6 flex items-center justify-between gap-3">
-            <button
-              type="button"
-              className="btn-secondary px-4 py-2.5"
-              onClick={() => setStep((current) => Math.max(1, current - 1))}
-              disabled={step === 1 || submitting}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Back
-            </button>
+          <label className="space-y-2">
+            <span className="label">Password</span>
+            <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <span className="flex items-center px-3 text-sm font-black text-slate-400">
+                <LockKeyhole className="h-4 w-4" />
+              </span>
+              <input
+                className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
+                type="password"
+                name="password"
+                value={form.password}
+                onChange={(event) => updateField("password", event.target.value)}
+                minLength={6}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <ValidationLine state={passwordState} />
+          </label>
 
-            {step < 3 ? (
-              <button type="button" className="btn-primary px-4 py-2.5" onClick={goNext}>
-                Continue
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <button type="submit" className="btn-primary px-4 py-2.5" disabled={submitting || !form.acceptedTerms}>
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />}
-                {submitting ? "Creating..." : "Create account"}
-              </button>
-            )}
-          </div>
+          <label className="space-y-2">
+            <span className="label">Birthday</span>
+            <div className="flex rounded-lg border border-slate-200 bg-white focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20">
+              <span className="flex items-center px-3 text-sm font-black text-slate-400">
+                <CalendarDays className="h-4 w-4" />
+              </span>
+              <input
+                className="min-w-0 flex-1 rounded-lg border-0 px-0 py-3 pr-3 text-sm text-slate-900 outline-none"
+                type="date"
+                name="birthday"
+                value={form.birthday}
+                max={today()}
+                onChange={(event) => updateField("birthday", event.target.value)}
+                required
+              />
+            </div>
+            <ValidationLine state={birthdayState} />
+          </label>
+
+          <button type="submit" className="btn-primary mt-2 w-full py-3.5" disabled={submitting || !canSubmit}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />}
+            {submitting ? "Creating..." : "Create account"}
+          </button>
         </form>
 
         <p className="border-t border-slate-100 p-5 text-center text-sm text-slate-600">
@@ -453,10 +571,10 @@ const Register = () => {
               <span className="flex h-11 w-11 items-center justify-center rounded-full bg-brand/15 text-navy">
                 <BadgeCheck className="h-5 w-5" />
               </span>
-              <div>
+              <div className="min-w-0">
                 <h2 className="text-lg font-black text-navy">Verify your phone</h2>
-                <p className="text-sm text-slate-500">
-                  Code sent to {selectedCountry.flag} {form.countryCode} {form.phoneNumber}
+                <p className="truncate text-sm text-slate-500">
+                  Code sent to {selectedCountry.code} {form.phoneNumber}
                 </p>
               </div>
             </div>
@@ -467,7 +585,7 @@ const Register = () => {
             <label className="space-y-2">
               <span className="label">6-digit code</span>
               <input
-                className="field text-center text-2xl font-black tracking-[0.4em]"
+                className="field text-center text-2xl font-black tracking-[0.35em]"
                 inputMode="numeric"
                 maxLength={6}
                 value={phoneVerification.code}
@@ -487,7 +605,7 @@ const Register = () => {
 
             <button
               type="button"
-              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100"
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
               onClick={sendVerificationCode}
               disabled={phoneVerification.cooldown > 0}
             >

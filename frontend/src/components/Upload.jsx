@@ -188,6 +188,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const prependPost = usePostStore((state) => state.prependPost);
   const videoPreviewRef = useRef(null);
   const cameraVideoRef = useRef(null);
+  const cameraFileInputRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
@@ -660,7 +661,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       setProgress(100);
       setStatus("Upload complete");
 
-      if (!isProfile && nextUrl) {
+      if (!isProfile && nextUrl && !data.feedItem) {
         const { data: feedData } = await feedApi.get({ page: 1, limit: 10 });
         const uploadedFeedItem = (Array.isArray(feedData?.posts) ? feedData.posts : Array.isArray(feedData?.feed) ? feedData.feed : [])
           .find((post) => post?.url === nextUrl);
@@ -936,6 +937,21 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             )}
 
             {cameraError && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">{cameraError}</div>}
+            {cameraError && !isProfile && (
+              <label className="mt-3 flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-navy shadow-sm transition hover:border-brand">
+                <Camera className="h-4 w-4" />
+                Use device camera picker
+                <input
+                  ref={cameraFileInputRef}
+                  className="hidden"
+                  type="file"
+                  accept="video/*"
+                  capture="environment"
+                  onChange={(event) => handleSelect(event, "video")}
+                  disabled={uploading}
+                />
+              </label>
+            )}
 
             {detectedOrientation && (
               <div className="mt-3 rounded-lg bg-white p-3 text-xs font-semibold text-slate-600 shadow-sm">
