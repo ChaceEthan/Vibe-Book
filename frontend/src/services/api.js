@@ -208,6 +208,15 @@ export const creatorApi = {
   dashboard: () => API.get("/creator/dashboard"),
 };
 
+export const walletApi = {
+  get: () => API.get("/wallet"),
+  history: (params = {}) => API.get("/wallet/history", { params }),
+  claimDaily: () => API.post("/wallet/reward/daily"),
+  transfer: (payload = {}) => API.post("/wallet/transfer", payload),
+  topEarners: (params = {}) => API.get("/wallet/leaderboard/earners", { params }),
+  topSpenders: (params = {}) => API.get("/wallet/leaderboard/spenders", { params }),
+};
+
 export const notificationApi = {
   list: (params = {}) => API.get("/notifications", { params }),
   unreadCount: () => API.get("/notifications/unread-count"),

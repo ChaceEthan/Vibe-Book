@@ -22,6 +22,7 @@ import Search from "./pages/Search.jsx";
 import Settings from "./pages/Settings.jsx";
 
 const CreatorDashboard = lazy(() => import("./components/CreatorDashboard.jsx"));
+const Wallet = lazy(() => import("./pages/Wallet.jsx"));
 
 const ProtectedRoute = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
@@ -73,6 +74,22 @@ const App = () => {
           <Route path="/creator-monetization-policy" element={<LegalPage page="creator-monetization-policy" />} />
           <Route path="/cookie-policy" element={<LegalPage page="cookie-policy" />} />
           <Route path="/copyright-policy" element={<LegalPage page="copyright-policy" />} />
+          <Route
+            path="/wallet"
+            element={
+              <ProtectedRoute>
+                <Suspense
+                  fallback={
+                    <div className="container-page flex min-h-[60vh] items-center justify-center">
+                      <p className="text-sm font-medium text-slate-500">Loading NEX Wallet...</p>
+                    </div>
+                  }
+                >
+                  <Wallet />
+                </Suspense>
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/notifications"
             element={

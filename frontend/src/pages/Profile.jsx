@@ -2,6 +2,7 @@
 import {
   BadgeCheck,
   Bookmark,
+  Coins,
   CreditCard,
   Eye,
   Gift,
@@ -39,6 +40,7 @@ import EditVideoModal from "../components/EditVideoModal.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { bookingApi, feedApi, mediaUrl, paymentApi, userApi } from "../services/api";
 import { usePostStore } from "../store/postStore";
+import { useWalletStore } from "../store/walletStore";
 
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
 
@@ -570,6 +572,7 @@ const ProfileMediaViewer = ({
 const Profile = () => {
   const { id } = useParams();
   const { logout, refreshProfile, user: currentUser } = useAuth();
+  const { wallet: profileWallet, loadWallet: loadProfileWallet } = useWalletStore();
   const storePosts = usePostStore((state) => state.posts);
   const mergePosts = usePostStore((state) => state.mergePosts);
   const replacePost = usePostStore((state) => state.replacePost);
@@ -686,6 +689,12 @@ const Profile = () => {
       window.removeEventListener("keydown", closeOnEscape);
     };
   }, [profileMenuOpen]);
+
+  useEffect(() => {
+    if (currentUser?._id && id === currentUser._id) {
+      loadProfileWallet();
+    }
+  }, [currentUser?._id, id, loadProfileWallet]);
 
   useEffect(() => {
     setBookingForm((current) => ({
@@ -1417,6 +1426,26 @@ const Profile = () => {
               </div>
             ))}
           </div>
+
+          {isOwnProfile && profileWallet && (
+            <Link
+              to="/wallet"
+              className="mx-auto mt-4 grid max-w-2xl grid-cols-3 gap-2 rounded-lg border border-brand/30 bg-brand/10 p-2 text-left transition hover:border-brand hover:bg-brand/15"
+            >
+              <div className="col-span-3 flex items-center gap-2 px-2 pt-1 text-xs font-black uppercase text-green-700 sm:col-span-1 sm:pt-0">
+                <Coins className="h-4 w-4" />
+                NEX Wallet
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 shadow-sm">
+                <p className="text-base font-black text-navy">{formatCompactNumber(profileWallet.balance)}</p>
+                <p className="text-[10px] font-black uppercase text-slate-400">Balance</p>
+              </div>
+              <div className="rounded-lg bg-white px-3 py-2 shadow-sm">
+                <p className="text-base font-black text-navy">{profileWallet.levelName || "Starter"}</p>
+                <p className="text-[10px] font-black uppercase text-slate-400">Creator level</p>
+              </div>
+            </Link>
+          )}
 
           <p className="mx-auto mt-5 max-w-2xl whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">
             {contentLocked ? "Follow to unlock this creator's content." : user.bio || "This creator has not added a bio yet."}

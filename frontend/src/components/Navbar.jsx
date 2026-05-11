@@ -8,6 +8,7 @@ import {
   Plus,
   Settings,
   User,
+  Wallet,
 } from "lucide-react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -85,7 +86,7 @@ const Navbar = () => {
       return undefined;
     }
 
-    const socket = connectSocket(token);
+    const socket = connectSocket(token, { userId: user._id });
 
     if (!socket) {
       return undefined;
@@ -233,6 +234,18 @@ const Navbar = () => {
             </select>
             {isAuthenticated ? (
               <>
+                <NavLink
+                  to="/wallet"
+                  aria-label="NEX Wallet"
+                  className={({ isActive }) =>
+                    `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-slate-600 transition hover:border-brand hover:bg-brand/10 hover:text-navy ${
+                      isActive ? "border-brand bg-brand/15 text-navy" : "border-slate-200 bg-white"
+                    }`
+                  }
+                  title="NEX Wallet"
+                >
+                  <Wallet className="h-5 w-5" />
+                </NavLink>
                 <NotificationBell />
                 <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings & Privacy" title="Settings & Privacy">
                   <Settings className="h-5 w-5" />

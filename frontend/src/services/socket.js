@@ -29,6 +29,7 @@ const SOCKET_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 let socket = null;
 let connectRequested = false;
 let disconnectTimer = null;
+let socketAuth = {};
 
 const clearDisconnectTimer = () => {
   if (disconnectTimer) {
@@ -41,18 +42,25 @@ export const getStoredToken = () => localStorage.getItem("token") || localStorag
 
 export const getChatId = (left, right) => [left, right].filter(Boolean).map(String).sort().join(":");
 
-export const getSocket = (token = getStoredToken()) => {
+const buildAuth = (token, extraAuth = {}) => {
+  socketAuth = { ...socketAuth, ...extraAuth };
+  return { ...socketAuth, token };
+};
+
+export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
   if (!token) {
     return null;
   }
 
+  const auth = buildAuth(token, extraAuth);
+
   if (socket) {
-    socket.auth = { token };
+    socket.auth = auth;
     return socket;
   }
 
   socket = io(SOCKET_URL, {
-    auth: { token },
+    auth,
     autoConnect: false,
     withCredentials: true,
     reconnection: true,
@@ -80,15 +88,15 @@ export const getSocket = (token = getStoredToken()) => {
     const nextToken = getStoredToken();
 
     if (nextToken) {
-      socket.auth = { token: nextToken };
+      socket.auth = buildAuth(nextToken);
     }
   });
 
   return socket;
 };
 
-export const connectSocket = (token = getStoredToken()) => {
-  const activeSocket = getSocket(token);
+export const connectSocket = (token = getStoredToken(), extraAuth = {}) => {
+  const activeSocket = getSocket(token, extraAuth);
 
   clearDisconnectTimer();
 
