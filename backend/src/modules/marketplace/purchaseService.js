@@ -55,6 +55,16 @@ const ensureCatalog = async () => {
     await MarketplaceItem.insertMany(DEFAULT_MARKETPLACE_ITEMS, { ordered: false }).catch(() => null);
   }
 
+  await Promise.all(
+    DEFAULT_MARKETPLACE_ITEMS.map((item) =>
+      MarketplaceItem.updateOne(
+        { itemId: item.itemId },
+        { $setOnInsert: item },
+        { upsert: true, runValidators: true }
+      ).catch(() => null)
+    )
+  );
+
   const reactionItems = DEFAULT_MARKETPLACE_ITEMS.filter((item) => item.category === MARKETPLACE_CATEGORIES.REACTIONS);
   await Promise.all(
     reactionItems.map((item) =>

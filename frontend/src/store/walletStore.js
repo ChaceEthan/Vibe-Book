@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { create } from "zustand";
 
 import { getApiErrorMessage, marketplaceApi, walletApi } from "../services/api";
@@ -24,14 +25,60 @@ const DEFAULT_PAGINATION = { limit: HISTORY_LIMIT, offset: 0, total: 0, hasMore:
 const DEFAULT_LEADERBOARDS = { earners: [], spenders: [] };
 const FALLBACK_STORE_ITEMS = [
   {
+    itemId: "frame_starter_neon",
+    name: "Starter Neon",
+    description: "Clean neon creator frame with soft animated glow for first NEX store unlocks.",
+    category: "frames",
+    price: 50,
+    rarity: "common",
+    levelRequired: 1,
+    preview: { icon: "sparkles", gradient: "from-cyan-300 via-lime-300 to-emerald-500", animation: "pulse", frameStyle: "neon" },
+    metadata: { frameStyle: "neon", collection: "Neon Creator Frames" },
+  },
+  {
+    itemId: "frame_gold_aura",
+    name: "Gold Aura",
+    description: "Royal gold profile frame with glass depth and metallic sweep.",
+    category: "frames",
+    price: 250,
+    rarity: "rare",
+    levelRequired: 1,
+    preview: { icon: "crown", gradient: "from-yellow-200 via-amber-400 to-orange-600", animation: "shine", frameStyle: "royal" },
+    metadata: { frameStyle: "royal", collection: "Royal Gold Frames" },
+  },
+  {
+    itemId: "frame_diamond_elite",
+    name: "Diamond Elite",
+    description: "Crystalline profile frame with elite sparkle depth.",
+    category: "frames",
+    price: 1200,
+    rarity: "legendary",
+    levelRequired: 3,
+    preview: { icon: "gem", gradient: "from-cyan-200 via-white to-violet-500", animation: "sparkle", frameStyle: "diamond" },
+    metadata: { frameStyle: "diamond", collection: "Diamond Elite Frames" },
+  },
+  {
+    itemId: "frame_nex_genesis_founder",
+    name: "NEX Genesis Founder",
+    description: "Founder-exclusive genesis frame for VibeBook creator finance leaders.",
+    category: "frames",
+    price: 5000,
+    rarity: "mythic",
+    levelRequired: 5,
+    preview: { icon: "trophy", gradient: "from-black via-lime-300 to-cyan-200", animation: "orbit", frameStyle: "genesis" },
+    metadata: { frameStyle: "genesis", founderExclusive: true, collection: "NEX Genesis Founder Frames" },
+  },
+  {
     itemId: "vision-frame-neon",
-    name: "Vision Frame Neon",
-    description: "Luxury neon profile frame for future NEX Coin creators.",
+    name: "Vision Neon Archive",
+    description: "Archive neon profile frame kept as a fallback store item.",
     category: "frames",
     price: 150,
     rarity: "epic",
     levelRequired: 1,
     preview: { emoji: "◇", gradient: "from-cyan-300 via-fuchsia-500 to-violet-700" },
+    preview: { icon: "sparkles", gradient: "from-cyan-300 via-fuchsia-500 to-violet-700", frameStyle: "neon" },
+    metadata: { frameStyle: "neon", collection: "Neon Creator Frames" },
   },
   {
     itemId: "creator-boost-24h",
@@ -43,6 +90,7 @@ const FALLBACK_STORE_ITEMS = [
     levelRequired: 1,
     durationHours: 24,
     preview: { emoji: "↗", gradient: "from-emerald-300 to-sky-600" },
+    preview: { icon: "rocket", gradient: "from-emerald-300 to-sky-600" },
   },
   {
     itemId: "nex-founder-badge",
@@ -129,6 +177,31 @@ const dailyRewardEstimate = (wallet = {}) => {
   return 10;
 };
 
+const logWalletError = (error) => {
+  console.error("Wallet Error:", error);
+};
+
+const apiDataOrThrow = (response, fallback = "Wallet request failed.") => {
+  const body = response?.data || {};
+  const nestedData = body?.data && typeof body.data === "object" ? body.data : {};
+  const data = { ...nestedData, ...body };
+
+  if (body?.success === false) {
+    const error = new Error(body?.message || fallback);
+    error.response = { data: body, status: response?.status };
+    throw error;
+  }
+
+  return data;
+};
+
+const itemIdOf = (itemOrId) => {
+  if (typeof itemOrId === "string") return itemOrId.trim();
+  return String(itemOrId?.itemId || itemOrId?._id || itemOrId?.id || "").trim();
+};
+
+const purchaseLockKey = (itemId) => `purchase:${itemId}`;
+
 export const useWalletStore = create((set, get) => ({
   wallet: DEFAULT_WALLET,
   walletLoaded: false,
@@ -163,18 +236,21 @@ export const useWalletStore = create((set, get) => ({
   loadWallet: async () => {
     set({ loading: true, error: "" });
     try {
-      const { data } = await walletApi.get();
-      const wallet = normalizeWallet(data?.wallet);
+      const response = await walletApi.get();
+      const data = apiDataOrThrow(response, "Unable to load wallet.");
+      const wallet = normalizeWallet(data?.wallet || get().wallet);
       set((state) => ({
         wallet,
         walletLoaded: true,
-        loading: false,
         cooldowns: dailyCooldownFromWallet(wallet) ? { ...state.cooldowns, daily: dailyCooldownFromWallet(wallet) } : state.cooldowns,
       }));
       return wallet;
     } catch (error) {
-      set({ wallet: DEFAULT_WALLET, walletLoaded: true, loading: false, error: getApiErrorMessage(error, "Unable to load wallet.") });
-      return DEFAULT_WALLET;
+      logWalletError(error);
+      set({ walletLoaded: true, error: getApiErrorMessage(error, "Unable to load wallet.") });
+      return normalizeWallet(get().wallet || DEFAULT_WALLET);
+    } finally {
+      set({ loading: false });
     }
   },
 
@@ -186,15 +262,18 @@ export const useWalletStore = create((set, get) => ({
     set({ historyLoading: true });
 
     try {
-      const { data } = await walletApi.history({ limit: HISTORY_LIMIT, offset });
+      const response = await walletApi.history({ limit: HISTORY_LIMIT, offset });
+      const data = apiDataOrThrow(response, "Unable to load wallet history.");
       const nextTransactions = asArray(data?.transactions).map(normalizeTransaction);
       set((state) => ({
         transactions: reset ? nextTransactions : [...asArray(state.transactions), ...nextTransactions],
         pagination: normalizePagination(data?.pagination, { ...DEFAULT_PAGINATION, offset }),
-        historyLoading: false,
       }));
     } catch (error) {
-      set({ historyLoading: false, error: getApiErrorMessage(error, "Unable to load wallet history.") });
+      logWalletError(error);
+      set({ error: getApiErrorMessage(error, "Unable to load wallet history.") });
+    } finally {
+      set({ historyLoading: false });
     }
   },
 
@@ -205,50 +284,79 @@ export const useWalletStore = create((set, get) => ({
         walletApi.topEarners({ limit: 25, period }),
         walletApi.topSpenders({ limit: 25, period }),
       ]);
+      const earnersData = apiDataOrThrow(earners, "Unable to load top earners.");
+      const spendersData = apiDataOrThrow(spenders, "Unable to load top spenders.");
       set({
         leaderboards: {
-          earners: asArray(earners.data?.earners).map(normalizeLeaderboardEntry),
-          spenders: asArray(spenders.data?.spenders).map(normalizeLeaderboardEntry),
+          earners: asArray(earnersData?.earners).map(normalizeLeaderboardEntry),
+          spenders: asArray(spendersData?.spenders).map(normalizeLeaderboardEntry),
           period,
         },
-        leaderboardLoading: false,
       });
     } catch (error) {
-      set({ leaderboardLoading: false, error: getApiErrorMessage(error, "Unable to load leaderboards.") });
+      logWalletError(error);
+      set({ error: getApiErrorMessage(error, "Unable to load leaderboards.") });
+    } finally {
+      set({ leaderboardLoading: false });
     }
   },
 
   loadStore: async (category = "") => {
     set({ storeLoading: true });
     try {
-      const [{ data: itemsData }, { data: inventoryData }] = await Promise.all([
+      const [itemsResponse, inventoryResponse] = await Promise.all([
         marketplaceApi.items(category ? { category } : {}),
         marketplaceApi.inventory(),
       ]);
+      const itemsData = apiDataOrThrow(itemsResponse, "Unable to load NEX Store.");
+      const inventoryData = apiDataOrThrow(inventoryResponse, "Unable to load inventory.");
       set({
         storeItems: asArray(itemsData?.items),
         inventory: inventoryData?.inventory || { ownedFrames: [], ownedBadges: [], ownedReactions: [], ownedThemes: [], ownedBoosts: [], ownedFeatured: [], active: {} },
         activeBoosts: asArray(inventoryData?.boosts),
         featuredQueue: asArray(inventoryData?.featured),
-        storeLoading: false,
       });
     } catch (error) {
+      logWalletError(error);
       set({
         storeItems: FALLBACK_STORE_ITEMS,
         inventory: get().inventory,
-        storeLoading: false,
         error: getApiErrorMessage(error, "Unable to load NEX Store."),
       });
+    } finally {
+      set({ storeLoading: false });
     }
   },
 
   purchaseStoreItem: async (itemId, payload = {}) => {
+    const safeItemId = itemIdOf(itemId || payload?.itemId);
     const { requestLocks, pushNotification } = get();
-    if (requestLocks[`purchase:${itemId}`]) return { ok: false, message: "Purchase already in progress." };
 
-    set((state) => ({ requestLocks: { ...state.requestLocks, [`purchase:${itemId}`]: true }, error: "" }));
+    if (!safeItemId) {
+      const message = "Choose a valid store item first.";
+      pushNotification({ type: "warning", title: "Purchase failed", message });
+      return { ok: false, message };
+    }
+
+    const lockKey = purchaseLockKey(safeItemId);
+    if (requestLocks?.[lockKey]) return { ok: false, message: "Purchase already in progress." };
+
+    const storeItem = asArray(get().storeItems).find((entry) => itemIdOf(entry) === safeItemId) || {};
+    const amount = Number(payload?.amount || storeItem?.price || 0);
+    const previousWallet = normalizeWallet(get().wallet);
+
+    set((state) => ({
+      wallet: amount > 0 ? mergeWallet(state.wallet, {
+        balance: Math.max(0, Number(state.wallet?.balance || 0) - amount),
+        lifetimeSpent: Number(state.wallet?.lifetimeSpent || 0) + amount,
+      }) : state.wallet,
+      requestLocks: { ...state.requestLocks, [lockKey]: true },
+      error: "",
+    }));
+
     try {
-      const { data } = await marketplaceApi.purchase(itemId, payload);
+      const response = await marketplaceApi.purchase(safeItemId, payload);
+      const data = apiDataOrThrow(response, "Purchase failed.");
       const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
       set((state) => ({
         wallet: normalizeWallet(data?.wallet || state.wallet),
@@ -257,62 +365,77 @@ export const useWalletStore = create((set, get) => ({
         activeBoosts: data?.boost ? [data.boost, ...asArray(state.activeBoosts)] : state.activeBoosts,
         featuredQueue: data?.featured ? [data.featured, ...asArray(state.featuredQueue)] : state.featuredQueue,
         transactions: prependTransaction(state.transactions, transaction),
-        requestLocks: { ...state.requestLocks, [`purchase:${itemId}`]: false },
       }));
       pushNotification({ type: "purchase", title: data?.item?.name || "Store item unlocked", message: data?.message || "Inventory updated." });
       return { ok: true, data };
     } catch (error) {
+      let finalError = error;
+
       if (error?.response?.status === 404 || error?.response?.status === 405) {
-        const item = asArray(get().storeItems).find((entry) => entry.itemId === itemId) || {};
+        const item = asArray(get().storeItems).find((entry) => itemIdOf(entry) === safeItemId) || {};
         try {
-          const { data } = await walletApi.redeem({
-            itemId,
-            rewardId: itemId,
+          const response = await walletApi.redeem({
+            itemId: safeItemId,
+            rewardId: safeItemId,
             name: item.name,
             category: item.category || "marketplace",
             amount: item.price || payload.amount,
           });
+          const data = apiDataOrThrow(response, "Reward redeem failed.");
           const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
           set((state) => ({
             wallet: normalizeWallet(data?.wallet || state.wallet),
             walletLoaded: true,
             transactions: prependTransaction(state.transactions, transaction),
-            requestLocks: { ...state.requestLocks, [`purchase:${itemId}`]: false },
           }));
           pushNotification({ type: "purchase", title: item.name || "Reward redeemed", message: data?.message || "NEX Points redeemed." });
           return { ok: true, data };
         } catch (redeemError) {
-          error = redeemError;
+          finalError = redeemError;
         }
       }
-      const message = getApiErrorMessage(error, "Purchase failed.");
+      logWalletError(finalError);
+      const message = getApiErrorMessage(finalError, "Purchase failed.");
       set((state) => ({
-        requestLocks: { ...state.requestLocks, [`purchase:${itemId}`]: false },
-        cooldowns: error.response?.data?.cooldownUntil ? { ...state.cooldowns, [`store:${itemId}`]: error.response.data.cooldownUntil } : state.cooldowns,
+        wallet: previousWallet,
+        cooldowns: finalError?.response?.data?.cooldownUntil ? { ...state.cooldowns, [`store:${safeItemId}`]: finalError.response.data.cooldownUntil } : state.cooldowns,
         error: message,
       }));
       pushNotification({ type: "warning", title: "Purchase failed", message });
       return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, [lockKey]: false } }));
     }
   },
 
   equipStoreItem: async (itemId, action = "equip") => {
+    const safeItemId = itemIdOf(itemId);
     const { requestLocks, pushNotification } = get();
-    if (requestLocks[`equip:${itemId}`]) return { ok: false, message: "Inventory update already in progress." };
 
-    set((state) => ({ requestLocks: { ...state.requestLocks, [`equip:${itemId}`]: true }, error: "" }));
+    if (!safeItemId) {
+      const message = "Choose a valid inventory item first.";
+      pushNotification({ type: "warning", title: "Inventory update failed", message });
+      return { ok: false, message };
+    }
+
+    if (requestLocks?.[`equip:${safeItemId}`]) return { ok: false, message: "Inventory update already in progress." };
+
+    set((state) => ({ requestLocks: { ...state.requestLocks, [`equip:${safeItemId}`]: true }, error: "" }));
     try {
-      const { data } = await marketplaceApi.equip(itemId, action);
+      const response = await marketplaceApi.equip(safeItemId, action);
+      const data = apiDataOrThrow(response, "Unable to update inventory.");
       set((state) => ({
         inventory: data?.inventory || state.inventory,
-        requestLocks: { ...state.requestLocks, [`equip:${itemId}`]: false },
       }));
       pushNotification({ type: "inventory", title: action === "unequip" ? "Item removed" : "Item equipped", message: data?.message || "Profile prestige updated." });
       return { ok: true, data };
     } catch (error) {
+      logWalletError(error);
       const message = getApiErrorMessage(error, "Unable to update inventory.");
-      set((state) => ({ requestLocks: { ...state.requestLocks, [`equip:${itemId}`]: false }, error: message }));
+      set({ error: message });
       return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, [`equip:${safeItemId}`]: false } }));
     }
   },
 
@@ -353,8 +476,9 @@ export const useWalletStore = create((set, get) => ({
     }));
 
     try {
-      const { data } = await walletApi.claimDaily();
-      const wallet = normalizeWallet(data?.wallet);
+      const response = await walletApi.claimDaily();
+      const data = apiDataOrThrow(response, "Daily reward could not be claimed.");
+      const wallet = normalizeWallet(data?.wallet || get().wallet);
       const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
       set((state) => ({
         wallet,
@@ -362,24 +486,25 @@ export const useWalletStore = create((set, get) => ({
         transactions: transaction
           ? prependTransaction(asArray(state.transactions).filter((item) => item._id !== optimisticTransaction._id), transaction)
           : asArray(state.transactions).map((item) => (item._id === optimisticTransaction._id ? { ...item, status: "completed" } : item)),
-        requestLocks: { ...state.requestLocks, daily: false },
         cooldowns: { ...state.cooldowns, daily: data?.nextClaimTime || dailyCooldownFromWallet(wallet) || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
       }));
-      pushNotification({ type: "reward", title: "Daily reward earned", amount: data?.rewardAmount || transaction?.amount || 5, message: data?.message });
+      pushNotification({ type: "reward", title: "Daily reward earned", amount: data?.rewardAmount || transaction?.amount || optimisticAmount, message: data?.message || "Daily reward claimed successfully" });
       return { ok: true, data };
     } catch (error) {
+      logWalletError(error);
       const message = getApiErrorMessage(error, "Daily reward could not be claimed.");
       set((state) => ({
         wallet: previousWallet,
         transactions: previousTransactions,
-        requestLocks: { ...state.requestLocks, daily: false },
-        cooldowns: error.response?.data?.nextClaimTime
+        cooldowns: error?.response?.data?.nextClaimTime
           ? { ...state.cooldowns, daily: error.response.data.nextClaimTime }
           : state.cooldowns,
         error: message,
       }));
       pushNotification({ type: "warning", title: "Daily reward failed", message });
       return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, daily: false } }));
     }
   },
 
@@ -396,54 +521,63 @@ export const useWalletStore = create((set, get) => ({
     }));
 
     try {
-      const { data } = await walletApi.spend(payload);
+      const response = await walletApi.spend(payload);
+      const data = apiDataOrThrow(response, "Spend failed.");
       const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
       set((state) => ({
         wallet: normalizeWallet(data?.wallet || state.wallet),
         transactions: prependTransaction(state.transactions, transaction),
-        requestLocks: { ...state.requestLocks, spend: false },
       }));
       pushNotification({ type: "spend", title: "NEX spent", message: data?.message || "Transaction complete." });
       return { ok: true, data };
     } catch (error) {
+      logWalletError(error);
       const message = getApiErrorMessage(error, "Spend failed.");
-      set((state) => ({ wallet: previousWallet, requestLocks: { ...state.requestLocks, spend: false }, error: message }));
+      set({ wallet: previousWallet, error: message });
       pushNotification({ type: "warning", title: "Spend failed", message });
       return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, spend: false } }));
     }
   },
 
   generateWalletQr: async (payload = {}) => {
     set((state) => ({ requestLocks: { ...state.requestLocks, qr: true }, error: "" }));
     try {
-      const { data } = await walletApi.generateQr(payload);
-      set((state) => ({ requestLocks: { ...state.requestLocks, qr: false } }));
+      const response = await walletApi.generateQr(payload);
+      const data = apiDataOrThrow(response, "Unable to generate QR.");
       return { ok: true, data };
     } catch (error) {
+      logWalletError(error);
       const message = getApiErrorMessage(error, "Unable to generate QR.");
-      set((state) => ({ requestLocks: { ...state.requestLocks, qr: false }, error: message }));
+      set({ error: message });
       get().pushNotification({ type: "warning", title: "QR failed", message });
       return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, qr: false } }));
     }
   },
 
   scanWalletQr: async (payload = {}) => {
     set((state) => ({ requestLocks: { ...state.requestLocks, scan: true }, error: "" }));
     try {
-      const { data } = await walletApi.scanQr(payload);
+      const response = await walletApi.scanQr(payload);
+      const data = apiDataOrThrow(response, "Unable to scan QR.");
       const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
       set((state) => ({
         wallet: normalizeWallet(data?.sender || state.wallet),
         transactions: prependTransaction(state.transactions, transaction),
-        requestLocks: { ...state.requestLocks, scan: false },
-      }));
+      })); 
       get().pushNotification({ type: "qr", title: "QR scanned", message: data?.message || "QR processed." });
       return { ok: true, data };
     } catch (error) {
+      logWalletError(error);
       const message = getApiErrorMessage(error, "Unable to scan QR.");
-      set((state) => ({ requestLocks: { ...state.requestLocks, scan: false }, error: message }));
+      set({ error: message });
       get().pushNotification({ type: "warning", title: "QR scan failed", message });
       return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, scan: false } }));
     }
   },
 
@@ -463,23 +597,27 @@ export const useWalletStore = create((set, get) => ({
     }));
 
     try {
-      const { data } = await walletApi.transfer(payload);
+      const response = await walletApi.transfer(payload);
+      const data = apiDataOrThrow(response, "Transfer failed. Your balance was restored.");
       const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
       set((state) => ({
-        wallet: normalizeWallet(data?.sender),
+        wallet: normalizeWallet(data?.sender || state.wallet),
         walletLoaded: true,
         transactions: prependTransaction(state.transactions, transaction),
-        requestLocks: { ...state.requestLocks, transfer: false },
       }));
       pushNotification({ type: "transfer", title: "Transfer sent", amount, message: "NEX Points moved instantly." });
       return { ok: true, data };
     } catch (error) {
-      set((state) => ({
+      logWalletError(error);
+      const message = getApiErrorMessage(error, "Transfer failed. Your balance was restored.");
+      set({
         wallet: normalizeWallet(wallet),
-        requestLocks: { ...state.requestLocks, transfer: false },
-        error: getApiErrorMessage(error, "Transfer failed. Your balance was restored."),
-      }));
-      return { ok: false, message: getApiErrorMessage(error, "Transfer failed. Your balance was restored.") };
+        error: message,
+      });
+      pushNotification({ type: "warning", title: "Transfer failed", message });
+      return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, transfer: false } }));
     }
   },
 

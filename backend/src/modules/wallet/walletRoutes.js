@@ -32,6 +32,7 @@ const walletLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  message: { success: false, message: "Too many wallet requests. Please try again later.", data: null },
   skip: (req) => req.method === "GET",
 });
 
@@ -40,7 +41,7 @@ const transferLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Too many transfers. Please try again later." },
+  message: { success: false, message: "Too many transfers. Please try again later.", data: null },
 });
 
 const rewardLimiter = rateLimit({
@@ -48,7 +49,7 @@ const rewardLimiter = rateLimit({
   max: 8,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many reward requests. Please slow down." },
+  message: { success: false, message: "Too many reward requests. Please slow down.", data: null },
 });
 
 const qrLimiter = rateLimit({
@@ -56,7 +57,7 @@ const qrLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, message: "Too many QR requests. Please try again shortly." },
+  message: { success: false, message: "Too many QR requests. Please try again shortly.", data: null },
 });
 
 const adminLimiter = rateLimit({
@@ -64,6 +65,7 @@ const adminLimiter = rateLimit({
   max: 50,
   standardHeaders: true,
   legacyHeaders: false,
+  message: { success: false, message: "Too many admin wallet requests. Please try again later.", data: null },
 });
 
 // Public leaderboard routes

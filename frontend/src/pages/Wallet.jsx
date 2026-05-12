@@ -72,6 +72,10 @@ const compact = (value = 0) => new Intl.NumberFormat("en", { notation: "compact"
 const asArray = (value) => (Array.isArray(value) ? value : []);
 const safeObject = (value) => (value && typeof value === "object" ? value : {});
 const idOf = (value) => value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
+const itemIdOf = (value) => {
+  if (typeof value === "string") return value.trim();
+  return String(value?.itemId || value?._id || value?.id || "").trim();
+};
 
 const getLevelMeta = (wallet = {}) => {
   const earned = Number(wallet?.lifetimeEarned || 0);
@@ -204,10 +208,23 @@ const WalletTopNav = ({ section }) => (
 );
 
 const BalanceHero = ({ user, wallet, socketConnected }) => {
+  const [copiedWalletId, setCopiedWalletId] = useState(false);
   const { current, next, progress, remaining, displayName } = getLevelMeta(wallet);
   const LevelIcon = current?.icon || Star;
   const points = Number(wallet?.balance || 0);
   const futureToken = Number(wallet?.tokenBalance || wallet?.futureTokenBalance || 0);
+  const walletId = idOf(wallet?.userId || user?._id);
+
+  const copyWalletId = async () => {
+    if (!walletId) return;
+    try {
+      await navigator.clipboard?.writeText(walletId);
+      setCopiedWalletId(true);
+      window.setTimeout(() => setCopiedWalletId(false), 1600);
+    } catch (error) {
+      console.error("Wallet Error:", error);
+    }
+  };
 
   return (
     <section className="relative overflow-hidden rounded-lg bg-slate-950 p-4 text-white shadow-2xl sm:p-5">
@@ -229,6 +246,14 @@ const BalanceHero = ({ user, wallet, socketConnected }) => {
             <Radio className="h-3.5 w-3.5" />
             {socketConnected ? "Live" : "Syncing"}
           </span>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={copyWalletId} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-black text-white/80 backdrop-blur transition hover:bg-white/15">
+            <Copy className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">Wallet ID: {walletId ? `${walletId.slice(0, 8)}...${walletId.slice(-4)}` : "Pending"}</span>
+          </button>
+          {copiedWalletId && <span className="rounded-full bg-brand/15 px-2 py-1 text-[11px] font-black text-brand">Copied</span>}
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -270,6 +295,13 @@ const DailyClaimCard = ({ wallet, onClaim, locked, cooldown }) => {
   }, []);
   const cooldownActive = cooldown && new Date(cooldown).getTime() > now;
   const streak = Math.min(7, Number(wallet?.streakCount || 0));
+  const handleClaim = async () => {
+    try {
+      await onClaim?.();
+    } catch (error) {
+      console.error("Wallet Error:", error);
+    }
+  };
 
   return (
     <section className="rounded-lg border border-orange-200 bg-gradient-to-br from-orange-50 via-white to-amber-50 p-4 shadow-sm">
@@ -289,7 +321,7 @@ const DailyClaimCard = ({ wallet, onClaim, locked, cooldown }) => {
           </div>
         ))}
       </div>
-      <button type="button" className="btn-primary mt-4 w-full gap-2" onClick={onClaim} disabled={locked || cooldownActive}>
+      <button type="button" className="btn-primary mt-4 w-full gap-2" onClick={handleClaim} disabled={locked || cooldownActive}>
         {locked ? <Loader2 className="h-4 w-4 animate-spin" /> : cooldownActive ? <Clock className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
         {cooldownActive ? `Next claim in ${formatDuration(cooldown)}` : "Claim Daily Reward"}
       </button>
@@ -299,6 +331,13 @@ const DailyClaimCard = ({ wallet, onClaim, locked, cooldown }) => {
 
 const QuickAction = ({ icon: Icon, label, to, onClick, disabled }) => {
   const className = "flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-sm transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60";
+  const handleClick = async () => {
+    try {
+      await onClick?.();
+    } catch (error) {
+      console.error("Wallet Error:", error);
+    }
+  };
   const content = (
     <>
       <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-navy"><Icon className="h-5 w-5" /></span>
@@ -306,7 +345,7 @@ const QuickAction = ({ icon: Icon, label, to, onClick, disabled }) => {
     </>
   );
   if (to) return <Link to={to} className={className}>{content}</Link>;
-  return <button type="button" onClick={onClick} disabled={disabled} className={className}>{content}</button>;
+  return <button type="button" onClick={handleClick} disabled={disabled} className={className}>{content}</button>;
 };
 
 const TransactionList = ({ transactions, pagination, loading, onLoadMore, filter = "all" }) => {
@@ -372,9 +411,13 @@ const ReferralPage = ({ user, transactions, generateWalletQr, scanWalletQr, requ
   useEffect(() => {
     let canceled = false;
     const generate = async () => {
-      const result = await generateWalletQr?.({ type: "referral_invite", referralCode: code, memo: "VibeBook referral invite" });
-      if (!canceled && result?.data?.qrText) {
-        setQrText(result.data.qrText);
+      try {
+        const result = await generateWalletQr?.({ type: "referral_invite", referralCode: code, memo: "VibeBook referral invite" });
+        if (!canceled && result?.data?.qrText) {
+          setQrText(result.data.qrText);
+        }
+      } catch (error) {
+        console.error("Wallet Error:", error);
       }
     };
     generate();
@@ -414,8 +457,14 @@ const ReferralPage = ({ user, transactions, generateWalletQr, scanWalletQr, requ
   const scanQr = async (event) => {
     event.preventDefault();
     if (!scanValue.trim()) return;
-    const result = await scanWalletQr?.({ payload: scanValue.trim() });
-    setScanResult(result?.ok ? result.data?.message || "QR scanned" : result?.message || "Unable to scan QR");
+    try {
+      const result = await scanWalletQr?.({ payload: scanValue.trim() });
+      setScanResult(result?.ok ? result?.data?.message || "QR scanned" : result?.message || "Unable to scan QR");
+      if (result?.ok) setScanValue("");
+    } catch (error) {
+      console.error("Wallet Error:", error);
+      setScanResult("Unable to scan QR");
+    }
   };
 
   return (
@@ -563,18 +612,36 @@ const TransactionsPage = ({ transactions, pagination, loading, onLoadMore }) => 
 const TransferPage = ({ wallet, user, transferPoints }) => {
   const [form, setForm] = useState({ receiverId: "", amount: "" });
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const locks = useWalletStore((state) => state.requestLocks);
+  const busy = Boolean(locks?.transfer || submitting);
 
   const submit = async (event) => {
     event.preventDefault();
     setMessage("");
+    const amount = Number(form.amount);
+
     if (form.receiverId.trim() === user?._id) {
       setMessage("Self-transfer blocked to protect wallet integrity.");
       return;
     }
-    const result = await transferPoints({ receiverId: form.receiverId.trim(), amount: Number(form.amount) });
-    setMessage(result.ok ? "Transfer sent. NEX Points moved instantly." : result.message);
-    if (result.ok) setForm({ receiverId: "", amount: "" });
+
+    if (!form.receiverId.trim() || !amount || amount < 1) {
+      setMessage("Enter a valid creator ID and amount.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await transferPoints({ receiverId: form.receiverId.trim(), amount });
+      setMessage(result?.ok ? "Transfer sent. NEX Points moved instantly." : result?.message || "Transfer failed.");
+      if (result?.ok) setForm({ receiverId: "", amount: "" });
+    } catch (error) {
+      console.error("Wallet Error:", error);
+      setMessage("Transfer failed. Your balance was restored.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -588,8 +655,8 @@ const TransferPage = ({ wallet, user, transferPoints }) => {
         <form onSubmit={submit} className="grid gap-3">
           <input className="field" placeholder="Creator user ID" value={form.receiverId} onChange={(event) => setForm((current) => ({ ...current, receiverId: event.target.value }))} />
           <input className="field" placeholder="Amount" inputMode="numeric" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value.replace(/[^\d]/g, "") }))} />
-          <button type="submit" className="btn-primary sticky bottom-24 z-20 gap-2 sm:static" disabled={locks.transfer}>
-            {locks.transfer ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          <button type="submit" className="btn-primary sticky bottom-24 z-20 gap-2 sm:static" disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             Send Points
           </button>
         </form>
@@ -608,8 +675,15 @@ const RewardsPage = ({ wallet, storeItems, inventory, storeLoading, requestLocks
   }, [loadStore]);
 
   const confirmPurchase = async (item, payload) => {
-    const result = await purchaseStoreItem(item.itemId, payload);
-    if (result.ok) setSelected(null);
+    const safeItemId = itemIdOf(item);
+    if (!safeItemId) return;
+
+    try {
+      const result = await purchaseStoreItem(safeItemId, payload);
+      if (result?.ok) setSelected(null);
+    } catch (error) {
+      console.error("Wallet Error:", error);
+    }
   };
 
   return (
@@ -645,7 +719,7 @@ const RewardsPage = ({ wallet, storeItems, inventory, storeLoading, requestLocks
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-72 animate-pulse rounded-lg bg-white" />)}</div>
       ) : (
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {rewardItems.slice(0, 9).map((item) => <StoreItemCard key={item.itemId} item={item} inventory={inventory} wallet={wallet} requestLocks={requestLocks} onBuy={setSelected} onEquip={equipStoreItem} />)}
+          {rewardItems.slice(0, 9).map((item, index) => <StoreItemCard key={itemIdOf(item) || `reward-${index}`} item={item} inventory={inventory} wallet={wallet} requestLocks={requestLocks} onBuy={setSelected} onEquip={equipStoreItem} />)}
           {!rewardItems.length && <p className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm font-bold text-slate-500 sm:col-span-2 lg:col-span-3">Reward store is warming up.</p>}
         </section>
       )}
@@ -658,7 +732,7 @@ const RewardsPage = ({ wallet, storeItems, inventory, storeLoading, requestLocks
         </div>
         <p className="mt-3 text-xs font-bold text-slate-500">Points are an internal reward system. Conversion to NEX Token will be enabled later, and the exchange rate will be announced later. Example only: 1000 NEX Points to 1 NEX Token.</p>
       </section>
-      <PurchaseModal item={selected} wallet={wallet} onClose={() => setSelected(null)} onConfirm={confirmPurchase} busy={Boolean(selected && requestLocks[`purchase:${selected.itemId}`])} />
+      <PurchaseModal item={selected} wallet={wallet} onClose={() => setSelected(null)} onConfirm={confirmPurchase} busy={Boolean(selected && requestLocks?.[`purchase:${itemIdOf(selected)}`])} />
     </div>
   );
 };
@@ -693,26 +767,75 @@ const inventoryFieldFor = (category) => ({
 
 const itemOwned = (inventory, item) => {
   const field = inventoryFieldFor(item?.category);
-  return Boolean(field && asArray(inventory?.[field]).some((entry) => entry.itemId === item.itemId && (!entry.expiresAt || new Date(entry.expiresAt) > new Date())));
+  const safeItemId = itemIdOf(item);
+  return Boolean(safeItemId && field && asArray(inventory?.[field]).some((entry) => entry?.itemId === safeItemId && (!entry?.expiresAt || new Date(entry.expiresAt) > new Date())));
 };
 
 const itemEquipped = (inventory, item) => {
-  if (item?.category === "frames") return inventory?.active?.frame === item.itemId;
-  if (item?.category === "themes") return inventory?.active?.theme === (item.metadata?.themeKey || item.itemId);
-  if (item?.category === "badges") return asArray(inventory?.active?.badges).includes(item.itemId);
-  if (item?.category === "reactions") return asArray(inventory?.active?.reactions).includes(item.itemId);
+  const safeItemId = itemIdOf(item);
+  if (!safeItemId) return false;
+  if (item?.category === "frames") return inventory?.active?.frame === safeItemId;
+  if (item?.category === "themes") return inventory?.active?.theme === (item?.metadata?.themeKey || safeItemId);
+  if (item?.category === "badges") return asArray(inventory?.active?.badges).includes(safeItemId);
+  if (item?.category === "reactions") return asArray(inventory?.active?.reactions).includes(safeItemId);
   return false;
 };
 
+const previewIconFor = (item = {}) => {
+  const key = item?.preview?.icon || item?.metadata?.icon || item?.category;
+  return {
+    "badge-check": BadgeCheck,
+    "shield-check": ShieldCheck,
+    crown: Crown,
+    flame: Flame,
+    gem: Gem,
+    play: Play,
+    radio: Radio,
+    rocket: Rocket,
+    sparkles: Sparkles,
+    star: Star,
+    trophy: Trophy,
+    zap: Zap,
+    badges: Medal,
+    boosts: Rocket,
+    featured: Play,
+    frames: Sparkles,
+    reactions: Gift,
+    themes: Crown,
+  }[key] || Sparkles;
+};
+
 const StorePreview = ({ item }) => {
-  const tone = rarityTone(item.rarity);
-  const emoji = item.preview?.emoji;
+  const safeItem = safeObject(item);
+  const tone = rarityTone(safeItem.rarity);
+  const emoji = safeItem.preview?.emoji;
+  const PreviewIcon = previewIconFor(safeItem);
+  const frameStyle = safeItem.preview?.frameStyle || safeItem.metadata?.frameStyle || safeItem.metadata?.aura || "default";
+  const isFrame = safeItem.category === "frames";
   return (
-    <div className={`relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br ${item.preview?.gradient || tone}`}>
+    <div className={`relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br ${safeItem.preview?.gradient || tone}`}>
+      <div className="absolute inset-0 wallet-grid opacity-20" />
       <motion.div className="absolute inset-0 wallet-shine opacity-60" animate={{ x: ["-60%", "60%"] }} transition={{ duration: 2.8, repeat: Infinity, repeatType: "mirror" }} />
-      <motion.div animate={{ scale: [1, 1.08, 1], rotate: item.preview?.animation === "orbit" ? [0, 8, -8, 0] : 0 }} transition={{ duration: 2.2, repeat: Infinity }} className="relative z-10 flex h-20 w-20 items-center justify-center rounded-full border border-white/35 bg-slate-950/35 text-white shadow-2xl backdrop-blur">
-        {emoji ? <span className="text-4xl">{emoji}</span> : item.category === "frames" ? <Sparkles className="h-9 w-9" /> : item.category === "badges" ? <Medal className="h-9 w-9" /> : item.category === "boosts" ? <Rocket className="h-9 w-9" /> : item.category === "featured" ? <Play className="h-9 w-9" /> : <Crown className="h-9 w-9" />}
-      </motion.div>
+      {isFrame ? (
+        <div className="relative z-10 grid w-full place-items-center px-4">
+          <motion.div
+            animate={{ scale: [1, 1.035, 1], rotate: safeItem.preview?.animation === "orbit" ? [0, 2, -2, 0] : 0 }}
+            transition={{ duration: 2.6, repeat: Infinity }}
+            className={`premium-frame-preview premium-frame-${frameStyle}`}
+          >
+            <div className="premium-frame-avatar">
+              <PreviewIcon className="h-9 w-9" />
+            </div>
+          </motion.div>
+          <div className="mt-3 max-w-full rounded-full border border-white/20 bg-slate-950/35 px-3 py-1 text-center text-[10px] font-black uppercase tracking-wide text-white/85 backdrop-blur">
+            {safeItem.metadata?.collection || "Creator Frame"}
+          </div>
+        </div>
+      ) : (
+        <motion.div animate={{ scale: [1, 1.08, 1], rotate: safeItem.preview?.animation === "orbit" ? [0, 8, -8, 0] : 0 }} transition={{ duration: 2.2, repeat: Infinity }} className="relative z-10 flex h-20 w-20 items-center justify-center rounded-full border border-white/35 bg-slate-950/35 text-white shadow-2xl backdrop-blur">
+          {emoji ? <span className="text-4xl">{emoji}</span> : <PreviewIcon className="h-9 w-9" />}
+        </motion.div>
+      )}
     </div>
   );
 };
@@ -720,31 +843,34 @@ const StorePreview = ({ item }) => {
 const PurchaseModal = ({ item, wallet, onClose, onConfirm, busy }) => {
   const [postId, setPostId] = useState("");
   if (!item) return null;
-  const canAfford = Number(wallet?.balance || 0) >= Number(item.price || 0);
+  const safeItem = safeObject(item);
+  const safeItemId = itemIdOf(safeItem);
+  const canAfford = Number(wallet?.balance || 0) >= Number(safeItem.price || 0);
+  const disabled = busy || !safeItemId || !canAfford || (safeItem.category === "featured" && !postId);
   return (
     <div className="fixed inset-0 z-[100] flex items-end bg-slate-950/70 p-3 backdrop-blur sm:items-center sm:justify-center">
       <motion.section initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="w-full overflow-hidden rounded-lg border border-white/15 bg-white shadow-2xl sm:max-w-md">
-        <StorePreview item={item} />
+        <StorePreview item={safeItem} />
         <div className="p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-xl font-black text-navy">{item.name}</p>
-              <p className="mt-1 text-xs font-black uppercase text-slate-400">{item.rarity} {item.category}</p>
+              <p className="text-xl font-black text-navy">{safeItem.name || "Store item"}</p>
+              <p className="mt-1 text-xs font-black uppercase text-slate-400">{safeItem.rarity || "common"} {safeItem.category || "item"}</p>
             </div>
             <button type="button" onClick={onClose} className="rounded-lg bg-slate-100 p-2 text-slate-600"><X className="h-4 w-4" /></button>
           </div>
-          <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">{item.description}</p>
-          {item.category === "featured" && (
+          <p className="mt-3 text-sm font-semibold leading-6 text-slate-600">{safeItem.description || "Unlock with NEX Points."}</p>
+          {safeItem.category === "featured" && (
             <input className="field mt-3" value={postId} onChange={(event) => setPostId(event.target.value.trim())} placeholder="Video post ID to feature" />
           )}
           <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-            <div className="rounded-lg bg-slate-50 p-3"><p className="text-sm font-black text-navy">{formatNumber(item.price)}</p><p className="text-[10px] font-black uppercase text-slate-400">NEX cost</p></div>
-            <div className="rounded-lg bg-slate-50 p-3"><p className="text-sm font-black text-navy">{item.durationHours ? `${item.durationHours}h` : item.durationDays ? `${item.durationDays}d` : "Forever"}</p><p className="text-[10px] font-black uppercase text-slate-400">Duration</p></div>
-            <div className="rounded-lg bg-slate-50 p-3"><p className="text-sm font-black text-navy">{item.metadata?.estimatedReach || `Lv ${item.levelRequired}`}</p><p className="text-[10px] font-black uppercase text-slate-400">Reach</p></div>
+            <div className="rounded-lg bg-slate-50 p-3"><p className="text-sm font-black text-navy">{formatNumber(safeItem.price)}</p><p className="text-[10px] font-black uppercase text-slate-400">NEX cost</p></div>
+            <div className="rounded-lg bg-slate-50 p-3"><p className="text-sm font-black text-navy">{safeItem.durationHours ? `${safeItem.durationHours}h` : safeItem.durationDays ? `${safeItem.durationDays}d` : "Forever"}</p><p className="text-[10px] font-black uppercase text-slate-400">Duration</p></div>
+            <div className="rounded-lg bg-slate-50 p-3"><p className="text-sm font-black text-navy">{safeItem.metadata?.estimatedReach || `Lv ${safeItem.levelRequired || 1}`}</p><p className="text-[10px] font-black uppercase text-slate-400">Reach</p></div>
           </div>
-          <button type="button" className="btn-primary mt-4 w-full gap-2" disabled={busy || !canAfford || (item.category === "featured" && !postId)} onClick={() => onConfirm(item, { postId })}>
+          <button type="button" className="btn-primary mt-4 w-full gap-2" disabled={disabled} onClick={() => onConfirm?.(safeItem, { postId })}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />}
-            {canAfford ? "Unlock instantly" : "Need more NEX"}
+            {!safeItemId ? "Item unavailable" : canAfford ? "Unlock instantly" : "Need more NEX"}
           </button>
         </div>
       </motion.section>
@@ -753,32 +879,37 @@ const PurchaseModal = ({ item, wallet, onClose, onConfirm, busy }) => {
 };
 
 const StoreItemCard = ({ item, inventory, wallet, requestLocks, onBuy, onEquip }) => {
-  const owned = itemOwned(inventory, item);
-  const equipped = itemEquipped(inventory, item);
-  const busy = requestLocks[`purchase:${item.itemId}`] || requestLocks[`equip:${item.itemId}`];
-  const comingSoon = item.status === "coming_soon";
+  const safeItem = safeObject(item);
+  const safeItemId = itemIdOf(safeItem);
+  const owned = itemOwned(inventory, safeItem);
+  const equipped = itemEquipped(inventory, safeItem);
+  const busy = Boolean(requestLocks?.[`purchase:${safeItemId}`] || requestLocks?.[`equip:${safeItemId}`]);
+  const comingSoon = safeItem.status === "coming_soon";
+  const canAfford = Number(wallet?.balance || 0) >= Number(safeItem.price || 0);
+  const canEquip = Boolean(safeItemId && !busy);
+  const canBuy = Boolean(safeItemId && !busy && !comingSoon && canAfford);
   return (
-    <motion.article layout whileHover={{ y: -4 }} className={`overflow-hidden rounded-lg border bg-white shadow-sm ${rarityTone(item.rarity).split(" ").find((part) => part.startsWith("border-")) || "border-slate-200"}`}>
-      <StorePreview item={item} />
+    <motion.article layout whileHover={{ y: -4 }} className={`overflow-hidden rounded-lg border bg-white shadow-sm ${rarityTone(safeItem.rarity).split(" ").find((part) => part.startsWith("border-")) || "border-slate-200"}`}>
+      <StorePreview item={safeItem} />
       <div className="p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate text-sm font-black text-navy">{item.name}</p>
-            <p className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">{item.rarity} - Level {item.levelRequired}</p>
+            <p className="truncate text-sm font-black text-navy">{safeItem.name || "Store item"}</p>
+            <p className="mt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">{safeItem.rarity || "common"} - Level {safeItem.levelRequired || 1}</p>
           </div>
-          <span className="rounded-full bg-slate-950 px-2 py-1 text-[11px] font-black text-brand">{formatNumber(item.price)} NEX</span>
+          <span className="rounded-full bg-slate-950 px-2 py-1 text-[11px] font-black text-brand">{formatNumber(safeItem.price)} NEX</span>
         </div>
-        <p className="mt-2 line-clamp-2 min-h-10 text-xs font-semibold leading-5 text-slate-500">{item.description}</p>
+        <p className="mt-2 line-clamp-2 min-h-10 text-xs font-semibold leading-5 text-slate-500">{safeItem.description || "Unlock with NEX Points."}</p>
         <div className="mt-3 flex items-center gap-2">
-          {owned && ["frames", "badges", "reactions", "themes"].includes(item.category) ? (
-            <button type="button" className={equipped ? "btn-secondary flex-1 gap-2 py-2" : "btn-primary flex-1 gap-2 py-2"} disabled={busy} onClick={() => onEquip(item, equipped ? "unequip" : "equip")}>
+          {owned && ["frames", "badges", "reactions", "themes"].includes(safeItem.category) ? (
+            <button type="button" className={equipped ? "btn-secondary flex-1 gap-2 py-2" : "btn-primary flex-1 gap-2 py-2"} disabled={!canEquip} onClick={() => onEquip?.(safeItemId, equipped ? "unequip" : "equip")}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               {equipped ? "Equipped" : "Equip"}
             </button>
           ) : (
-            <button type="button" className="btn-primary flex-1 gap-2 py-2" disabled={busy || comingSoon || Number(wallet?.balance || 0) < Number(item.price || 0)} onClick={() => onBuy(item)}>
+            <button type="button" className="btn-primary flex-1 gap-2 py-2" disabled={!canBuy} onClick={() => onBuy?.(safeItem)}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />}
-              {comingSoon ? "Soon" : owned && !["boosts", "featured"].includes(item.category) ? "Owned" : "Buy"}
+              {!safeItemId ? "Unavailable" : comingSoon ? "Soon" : owned && !["boosts", "featured"].includes(safeItem.category) ? "Owned" : canAfford ? "Buy" : "Need NEX"}
             </button>
           )}
         </div>
@@ -797,8 +928,15 @@ const NexStorePage = ({ wallet, storeItems, inventory, activeBoosts, featuredQue
   }, [loadStore, tab.category]);
 
   const confirmPurchase = async (item, payload) => {
-    const result = await purchaseStoreItem(item.itemId, payload);
-    if (result.ok) setSelected(null);
+    const safeItemId = itemIdOf(item);
+    if (!safeItemId) return;
+
+    try {
+      const result = await purchaseStoreItem(safeItemId, payload);
+      if (result?.ok) setSelected(null);
+    } catch (error) {
+      console.error("Wallet Error:", error);
+    }
   };
 
   return (
@@ -838,11 +976,11 @@ const NexStorePage = ({ wallet, storeItems, inventory, activeBoosts, featuredQue
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-72 animate-pulse rounded-lg bg-white" />)}</div>
       ) : (
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {visibleItems.map((item) => <StoreItemCard key={item.itemId} item={item} inventory={inventory} wallet={wallet} requestLocks={requestLocks} onBuy={setSelected} onEquip={equipStoreItem} />)}
+          {visibleItems.map((item, index) => <StoreItemCard key={itemIdOf(item) || `store-${index}`} item={item} inventory={inventory} wallet={wallet} requestLocks={requestLocks} onBuy={setSelected} onEquip={equipStoreItem} />)}
           {!visibleItems.length && <p className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center text-sm font-bold text-slate-500 sm:col-span-2 lg:col-span-3">This shelf is warming up.</p>}
         </section>
       )}
-      <PurchaseModal item={selected} wallet={wallet} onClose={() => setSelected(null)} onConfirm={confirmPurchase} busy={Boolean(selected && requestLocks[`purchase:${selected.itemId}`])} />
+      <PurchaseModal item={selected} wallet={wallet} onClose={() => setSelected(null)} onConfirm={confirmPurchase} busy={Boolean(selected && requestLocks?.[`purchase:${itemIdOf(selected)}`])} />
     </div>
   );
 };
@@ -876,10 +1014,10 @@ const Dashboard = ({ user, wallet, stats, claimDailyReward, requestLocks, cooldo
       </div>
       <section className="grid gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:grid-cols-5">
         <QuickAction icon={Send} label="Transfer Points" to="/wallet/transfer" />
+        <QuickAction icon={QrCode} label="Receive" to="/wallet/referrals" />
         <QuickAction icon={UserPlus} label="Invite Friends" to="/wallet/referrals" />
         <QuickAction icon={Sparkles} label="Claim Daily Reward" onClick={claimDailyReward} disabled={requestLocks.daily} />
-        <QuickAction icon={Trophy} label="View Leaderboard" to="/wallet/leaderboard" />
-        <QuickAction icon={Gift} label="Redeem Rewards" to="/wallet/rewards" />
+        <QuickAction icon={ShieldCheck} label="Wallet Settings" to="/settings" />
       </section>
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between">

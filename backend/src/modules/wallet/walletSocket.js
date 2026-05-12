@@ -26,7 +26,7 @@ const initializeWalletSockets = (io, onlineUsers) => {
         const wallet = await walletService.getWallet(userId);
         socket.emit("wallet:data", formatWalletResponse(wallet));
       } catch (error) {
-        console.error("[wallet:get socket error]", error.message);
+        console.error("[wallet]", error);
         socket.emit("wallet:error", { message: "Failed to fetch wallet" });
       }
     });
@@ -53,7 +53,7 @@ const initializeWalletSockets = (io, onlineUsers) => {
           },
         });
       } catch (error) {
-        console.error("[wallet:history socket error]", error.message);
+        console.error("[wallet]", error);
         socket.emit("wallet:error", { message: "Failed to fetch history" });
       }
     });
@@ -89,6 +89,7 @@ const initializeWalletSockets = (io, onlineUsers) => {
         // Broadcast balance update to user's other connections
         io.to(userId?.toString()).emit("wallet:update", wallet);
       } catch (error) {
+        console.error("[wallet]", error);
         if (error.code === "DAILY_REWARD_ALREADY_CLAIMED") {
           return socket.emit("wallet:error", {
             message: error.message,
@@ -97,7 +98,6 @@ const initializeWalletSockets = (io, onlineUsers) => {
           });
         }
 
-        console.error("[wallet:claim-daily socket error]", error.message);
         socket.emit("wallet:error", { message: "Failed to claim daily reward" });
       }
     });
@@ -121,7 +121,7 @@ const emitWalletUpdate = (io, userId, walletData) => {
       updatedAt: new Date(),
     });
   } catch (error) {
-    console.error("[wallet socket emit error]", error.message);
+    console.error("[wallet]", error);
   }
 };
 
@@ -140,7 +140,7 @@ const emitRewardNotification = (io, userId, rewardData) => {
       timestamp: new Date(),
     });
   } catch (error) {
-    console.error("[wallet reward socket error]", error.message);
+    console.error("[wallet]", error);
   }
 };
 
@@ -161,7 +161,7 @@ const emitGiftNotification = (io, userId, giftData) => {
       timestamp: new Date(),
     });
   } catch (error) {
-    console.error("[wallet gift socket error]", error.message);
+    console.error("[wallet]", error);
   }
 };
 
@@ -180,7 +180,7 @@ const emitBalanceChange = (io, userId, changeData) => {
       timestamp: new Date(),
     });
   } catch (error) {
-    console.error("[wallet balance change socket error]", error.message);
+    console.error("[wallet]", error);
   }
 };
 

@@ -13,7 +13,7 @@ const purchaseLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Too many marketplace actions. Please slow down." },
+  message: { success: false, message: "Too many marketplace actions. Please slow down.", data: null },
 });
 
 const adminLimiter = rateLimit({
@@ -21,6 +21,7 @@ const adminLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  message: { success: false, message: "Too many marketplace admin actions. Please slow down.", data: null },
 });
 
 router.get("/items", authMiddleware, controller.listStore);

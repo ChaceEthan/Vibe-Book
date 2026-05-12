@@ -226,7 +226,9 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
   const cleanMetadata = sanitizeMetadata(metadata);
 
   if (senderId.toString() === receiverId.toString()) {
-    throw new Error("Cannot transfer to yourself");
+    const error = new Error("Cannot transfer to yourself");
+    error.code = "SELF_TRANSFER";
+    throw error;
   }
 
   const session = await Wallet.startSession();

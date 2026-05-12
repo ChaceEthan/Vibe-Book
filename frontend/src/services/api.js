@@ -39,6 +39,8 @@ const API = axios.create({
   timeout: 25000,
 });
 const UPLOAD_TIMEOUT_MS = 180000;
+const WALLET_REQUEST_TIMEOUT_MS = 15000;
+const MARKETPLACE_REQUEST_TIMEOUT_MS = 20000;
 
 export const getApiErrorMessage = (error, fallback = "Request failed. Please try again.") => {
   const data = error?.response?.data;
@@ -213,24 +215,24 @@ export const creatorApi = {
 };
 
 export const walletApi = {
-  get: () => API.get("/wallet"),
-  history: (params = {}) => API.get("/wallet/history", { params }),
-  claimDaily: () => API.post("/wallet/reward/daily"),
-  redeem: (payload = {}) => API.post("/wallet/reward/redeem", payload),
-  referral: (payload = {}) => API.post("/wallet/reward/referral", payload),
-  spend: (payload = {}) => API.post("/wallet/spend", payload),
-  generateQr: (payload = {}) => API.post("/wallet/qr/generate", payload),
-  scanQr: (payload = {}) => API.post("/wallet/qr/scan", payload),
-  transfer: (payload = {}) => API.post("/wallet/transfer", payload),
-  topEarners: (params = {}) => API.get("/wallet/leaderboard/earners", { params }),
-  topSpenders: (params = {}) => API.get("/wallet/leaderboard/spenders", { params }),
+  get: () => API.get("/wallet", { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  history: (params = {}) => API.get("/wallet/history", { params, timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  claimDaily: () => API.post("/wallet/reward/daily", {}, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  redeem: (payload = {}) => API.post("/wallet/reward/redeem", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  referral: (payload = {}) => API.post("/wallet/reward/referral", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  spend: (payload = {}) => API.post("/wallet/spend", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  generateQr: (payload = {}) => API.post("/wallet/qr/generate", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  scanQr: (payload = {}) => API.post("/wallet/qr/scan", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  transfer: (payload = {}) => API.post("/wallet/transfer", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  topEarners: (params = {}) => API.get("/wallet/leaderboard/earners", { params, timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  topSpenders: (params = {}) => API.get("/wallet/leaderboard/spenders", { params, timeout: WALLET_REQUEST_TIMEOUT_MS }),
 };
 
 export const marketplaceApi = {
-  items: (params = {}) => API.get("/marketplace/items", { params }),
-  inventory: () => API.get("/marketplace/inventory"),
-  purchase: (itemId, payload = {}) => API.post(`/marketplace/purchase/${itemId}`, payload),
-  equip: (itemId, action = "equip") => API.post(`/marketplace/inventory/${itemId}/${action === "unequip" ? "unequip" : "equip"}`, { action }),
+  items: (params = {}) => API.get("/marketplace/items", { params, timeout: MARKETPLACE_REQUEST_TIMEOUT_MS }),
+  inventory: () => API.get("/marketplace/inventory", { timeout: MARKETPLACE_REQUEST_TIMEOUT_MS }),
+  purchase: (itemId, payload = {}) => API.post(`/marketplace/purchase/${itemId}`, payload, { timeout: MARKETPLACE_REQUEST_TIMEOUT_MS }),
+  equip: (itemId, action = "equip") => API.post(`/marketplace/inventory/${itemId}/${action === "unequip" ? "unequip" : "equip"}`, { action }, { timeout: MARKETPLACE_REQUEST_TIMEOUT_MS }),
   adminOverview: () => API.get("/marketplace/admin/overview"),
   adminSaveItem: (payload = {}) => API.post("/marketplace/admin/items", payload),
   adminFeaturedStatus: (id, payload = {}) => API.patch(`/marketplace/admin/featured/${id}`, payload),

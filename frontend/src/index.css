@@ -138,6 +138,90 @@
     background: linear-gradient(110deg, transparent 20%, rgba(255, 255, 255, 0.3) 45%, transparent 68%);
     transform: translateX(-120%);
   }
+
+  .premium-frame-preview {
+    position: relative;
+    display: grid;
+    height: 7.5rem;
+    width: 7.5rem;
+    place-items: center;
+    border-radius: 9999px;
+    isolation: isolate;
+  }
+
+  .premium-frame-preview::before,
+  .premium-frame-preview::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .premium-frame-preview::before {
+    padding: 5px;
+    background: conic-gradient(from 0deg, #22d3ee, #a3e635, #f0abfc, #22d3ee);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: frameOrbit 4200ms linear infinite;
+  }
+
+  .premium-frame-preview::after {
+    inset: -0.65rem;
+    opacity: 0.72;
+    filter: blur(14px);
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.45), transparent 58%);
+    animation: frameGlow 2400ms ease-in-out infinite;
+  }
+
+  .premium-frame-avatar {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    height: 5.7rem;
+    width: 5.7rem;
+    place-items: center;
+    border-radius: 9999px;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.82), rgba(15, 23, 42, 0.42));
+    color: white;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 22px 50px rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(14px);
+  }
+
+  .premium-frame-royal::before,
+  .premium-frame-vip::before {
+    background: conic-gradient(from 20deg, #111827, #fef3c7, #f59e0b, #ffffff, #111827);
+  }
+
+  .premium-frame-anime::before {
+    background: conic-gradient(from 40deg, #f472b6, #8b5cf6, #38bdf8, #facc15, #f472b6);
+  }
+
+  .premium-frame-cyber::before {
+    background: conic-gradient(from 90deg, #0f172a, #2563eb, #2dd4bf, #93c5fd, #0f172a);
+  }
+
+  .premium-frame-kigali::before {
+    background: conic-gradient(from 120deg, #312e81, #c026d3, #facc15, #22c55e, #312e81);
+  }
+
+  .premium-frame-diamond::before {
+    background: conic-gradient(from 10deg, #e0f2fe, #ffffff, #67e8f9, #a78bfa, #e0f2fe);
+  }
+
+  .premium-frame-flame::before {
+    background: conic-gradient(from 20deg, #fed7aa, #f97316, #e11d48, #7f1d1d, #fed7aa);
+  }
+
+  .premium-frame-minimal::before {
+    background: conic-gradient(from 20deg, #f8fafc, #94a3b8, #111827, #e5e7eb, #f8fafc);
+  }
+
+  .premium-frame-genesis::before {
+    background: conic-gradient(from 20deg, #020617, #a3e635, #67e8f9, #ffffff, #020617);
+    animation-duration: 3000ms;
+  }
 }
 
 @keyframes commentSheetIn {
@@ -189,5 +273,24 @@
   55%,
   100% {
     transform: translateX(120%);
+  }
+}
+
+@keyframes frameOrbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes frameGlow {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 0.82;
+    transform: scale(1.04);
   }
 }

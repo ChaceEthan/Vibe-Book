@@ -8,6 +8,61 @@ const walletService = require("./walletService");
 const { getIo } = require("../../socket");
 const { formatWalletResponse, formatTransactionResponse } = require("./walletUtils");
 
+const statusForWalletError = (error = {}) => {
+  if (error.statusCode || error.status) {
+    return Number(error.statusCode || error.status);
+  }
+
+  if (error.code === "DAILY_REWARD_ALREADY_CLAIMED") return 429;
+  if (error.code === "REFERRAL_ALREADY_REWARDED") return 409;
+  if (error.code === "INSUFFICIENT_BALANCE") return 402;
+  if (["SELF_REFERRAL", "SELF_TRANSFER", "INVALID_QR_PAYLOAD", "QR_EXPIRED", "SELF_QR_SCAN"].includes(error.code)) return 400;
+  if (error.name === "ValidationError" || error.name === "CastError") return 400;
+
+  return 500;
+};
+
+const walletErrorPayload = (error = {}) => {
+  const message = error.message || "Wallet request failed";
+  return {
+    success: false,
+    message,
+    data: null,
+    error: message,
+    ...(error.code ? { code: error.code } : {}),
+    ...(error.nextClaimTime ? { nextClaimTime: error.nextClaimTime } : {}),
+    ...(error.cooldownUntil ? { cooldownUntil: error.cooldownUntil } : {}),
+  };
+};
+
+const walletSuccess = (res, message, payload = {}, status = 200) => {
+  return res.status(status).json({
+    success: true,
+    message,
+    data: payload,
+    ...payload,
+  });
+};
+
+const walletFailure = (res, status, message, extra = {}) => {
+  return res.status(status).json({
+    success: false,
+    message,
+    data: null,
+    ...extra,
+  });
+};
+
+const handleWalletError = (req, res, next, error) => {
+  console.error("[wallet]", error);
+
+  if (res.headersSent) {
+    return typeof next === "function" ? next(error) : undefined;
+  }
+
+  return res.status(statusForWalletError(error)).json(walletErrorPayload(error));
+};
+
 const emitToUser = (userId, event, payload = {}) => {
   const io = getIo?.();
   if (io && userId) {
@@ -24,20 +79,14 @@ const getWallet = async (req, res, next) => {
     const userId = req.user?._id;
 
     if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const wallet = await walletService.getWallet(userId);
 
-    return res.json({
-      success: true,
-      wallet: formatWalletResponse(wallet),
-    });
+    return walletSuccess(res, "Wallet loaded successfully", { wallet: formatWalletResponse(wallet) });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -51,16 +100,12 @@ const getTransactionHistory = async (req, res, next) => {
     const { limit = 50, offset = 0 } = req.query;
 
     if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const result = await walletService.getTransactionHistory(userId, Math.min(limit, 100), offset);
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Wallet history loaded successfully", {
       transactions: result.transactions.map(formatTransactionResponse),
       pagination: {
         limit: result.limit,
@@ -70,7 +115,7 @@ const getTransactionHistory = async (req, res, next) => {
       },
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -84,17 +129,11 @@ const transferPoints = async (req, res, next) => {
     const { receiverId, amount } = req.body;
 
     if (!senderId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     if (!receiverId || !amount) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields: receiverId, amount",
-      });
+      return walletFailure(res, 400, "Missing required fields: receiverId, amount");
     }
 
     const result = await walletService.transferPoints(senderId, receiverId, amount);
@@ -113,14 +152,13 @@ const transferPoints = async (req, res, next) => {
       message: "NEX Points received",
     });
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Transfer completed successfully", {
       sender: senderWallet,
       receiver: receiverWallet,
       transaction: sendTransaction,
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -133,10 +171,7 @@ const claimDailyReward = async (req, res, next) => {
     const userId = req.user?._id;
 
     if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const result = await walletService.rewardDailyLogin(userId);
@@ -162,24 +197,15 @@ const claimDailyReward = async (req, res, next) => {
     emitToUser(userId, "wallet:reward", payload);
     emitToUser(userId, "reward:claimed", payload);
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Daily reward claimed successfully", {
       wallet,
       transaction,
       rewardAmount,
       nextClaimTime,
       streakCount: wallet?.streakCount,
-      message: "Daily reward claimed successfully",
     });
   } catch (error) {
-    if (error.code === "DAILY_REWARD_ALREADY_CLAIMED") {
-      return res.status(429).json({
-        success: false,
-        message: error.message,
-        nextClaimTime: error.nextClaimTime,
-      });
-    }
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -188,7 +214,7 @@ const redeemReward = async (req, res, next) => {
     const userId = req.user?._id;
 
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const result = await walletService.redeemReward(userId, req.body || {});
@@ -203,14 +229,12 @@ const redeemReward = async (req, res, next) => {
       message: "Reward redeemed",
     });
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Reward redeemed successfully", {
       wallet,
       transaction,
-      message: "Reward redeemed successfully",
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -220,14 +244,14 @@ const referralReward = async (req, res, next) => {
     const { referrerId, referredUserId } = req.body || {};
 
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const targetReferrer = referrerId || userId;
     const targetReferred = referredUserId;
 
     if (!targetReferred) {
-      return res.status(400).json({ success: false, message: "referredUserId is required" });
+      return walletFailure(res, 400, "referredUserId is required");
     }
 
     const result = await walletService.rewardReferral(targetReferrer, targetReferred);
@@ -243,17 +267,12 @@ const referralReward = async (req, res, next) => {
       message: "Referral signup bonus earned",
     });
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Referral reward tracked", {
       wallet,
       transaction,
-      message: "Referral reward tracked",
     });
   } catch (error) {
-    if (error.code === "REFERRAL_ALREADY_REWARDED") {
-      return res.status(409).json({ success: false, message: error.message });
-    }
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -262,7 +281,7 @@ const spendPoints = async (req, res, next) => {
     const userId = req.user?._id;
 
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const result = await walletService.spend(userId, req.body || {});
@@ -271,14 +290,12 @@ const spendPoints = async (req, res, next) => {
 
     emitToUser(userId, "wallet:update", wallet);
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "NEX Points spent successfully", {
       wallet,
       transaction,
-      message: "NEX Points spent successfully",
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -287,21 +304,19 @@ const generateQr = async (req, res, next) => {
     const userId = req.user?._id;
 
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const result = await walletService.generateQr(userId, req.body || {});
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "QR payload generated", {
       qrId: result.qrId,
       qrPayload: result.qrPayload,
       qrText: result.qrText,
       expiresAt: result.expiresAt,
-      message: "QR payload generated",
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -310,7 +325,7 @@ const scanQr = async (req, res, next) => {
     const userId = req.user?._id;
 
     if (!userId) {
-      return res.status(401).json({ success: false, message: "Authentication required" });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     const result = await walletService.scanQr(userId, req.body?.payload || req.body?.qrText || req.body || {});
@@ -320,17 +335,16 @@ const scanQr = async (req, res, next) => {
       emitToUser(result.receiver?.userId, "wallet:update", formatWalletResponse(result.receiver));
     }
 
-    return res.json({
-      success: true,
+    const message = result.action === "wallet_transfer" ? "QR payment completed" : "Referral QR scanned";
+    return walletSuccess(res, message, {
       action: result.action,
       sender: result.sender ? formatWalletResponse(result.sender) : undefined,
       receiver: result.receiver ? formatWalletResponse(result.receiver) : undefined,
       transaction: result.sendTransaction ? formatTransactionResponse(result.sendTransaction) : undefined,
       referralCode: result.referralCode,
-      message: result.action === "wallet_transfer" ? "QR payment completed" : "Referral QR scanned",
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -345,29 +359,21 @@ const adminAddPoints = async (req, res, next) => {
     const { userId, amount, reason } = req.body;
 
     if (!adminId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
+      return walletFailure(res, 401, "Authentication required");
     }
 
     if (!userId || !amount || !reason) {
-      return res.status(400).json({
-        success: false,
-        message: "Missing required fields: userId, amount, reason",
-      });
+      return walletFailure(res, 400, "Missing required fields: userId, amount, reason");
     }
 
     const result = await walletService.adminAdjustment(userId, amount, reason, adminId);
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Wallet adjusted successfully", {
       wallet: formatWalletResponse(result.wallet),
       transaction: formatTransactionResponse(result.transaction),
-      message: "Wallet adjusted successfully",
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -381,13 +387,12 @@ const getTopEarners = async (req, res, next) => {
 
     const earners = await walletService.getTopEarners(Math.min(limit, 1000), period);
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Top earners loaded successfully", {
       earners,
       period,
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 
@@ -401,13 +406,12 @@ const getTopSpenders = async (req, res, next) => {
 
     const spenders = await walletService.getTopSpenders(Math.min(limit, 1000), period);
 
-    return res.json({
-      success: true,
+    return walletSuccess(res, "Top spenders loaded successfully", {
       spenders,
       period,
     });
   } catch (error) {
-    next(error);
+    return handleWalletError(req, res, next, error);
   }
 };
 

@@ -11,24 +11,57 @@ const emitToUser = (userId, event, payload = {}) => {
   }
 };
 
+const logMarketplaceError = (error) => {
+  if (!error?.walletLogged) {
+    console.error("[wallet]", error);
+    if (error && typeof error === "object") {
+      error.walletLogged = true;
+    }
+  }
+};
+
+const marketplaceSuccess = (res, message, payload = {}, status = 200) => {
+  return res.status(status).json({
+    success: true,
+    message,
+    data: payload,
+    ...payload,
+  });
+};
+
+const handleMarketplaceError = (req, res, next, error) => {
+  logMarketplaceError(error);
+
+  if (res.headersSent) {
+    return typeof next === "function" ? next(error) : undefined;
+  }
+
+  return res.status(error.statusCode || error.status || 500).json({
+    success: false,
+    message: error.message || "Marketplace wallet request failed",
+    data: null,
+    ...(error.code ? { code: error.code } : {}),
+  });
+};
+
 const listStore = async (req, res, next) => {
   try {
     const items = await marketplaceService.listStore({
       category: req.query.category,
       includeDisabled: req.user?.role === "admin" || req.user?.accountRole === "admin",
     });
-    return res.json({ success: true, items });
+    return marketplaceSuccess(res, "Marketplace items loaded successfully", { items });
   } catch (error) {
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
 const getInventory = async (req, res, next) => {
   try {
     const economy = await marketplaceService.getCreatorEconomy(req.user._id);
-    return res.json({ success: true, ...economy });
+    return marketplaceSuccess(res, "Inventory loaded successfully", economy);
   } catch (error) {
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
@@ -40,7 +73,6 @@ const purchaseItem = async (req, res, next) => {
       source: req.body.source,
     });
     const payload = {
-      success: true,
       item: result.item,
       wallet: formatWalletResponse(result.wallet),
       transaction: formatTransactionResponse(result.transaction),
@@ -56,21 +88,25 @@ const purchaseItem = async (req, res, next) => {
     if (result.featured) emitToUser(userId, "featured:update", { featured: result.featured });
     if (result.item.category === "themes") emitToUser(userId, "profile:theme", { inventory: result.inventory });
 
-    return res.status(201).json(payload);
+    return marketplaceSuccess(res, payload.message, payload, 201);
   } catch (error) {
+    logMarketplaceError(error);
+
     if (error.code === "INSUFFICIENT_BALANCE") {
-      return res.status(402).json({ success: false, message: "Not enough NEX Points for this purchase" });
+      return res.status(402).json({ success: false, message: "Not enough NEX Points for this purchase", data: null, code: error.code });
     }
 
     if (["ALREADY_OWNED", "LEVEL_REQUIRED", "ITEM_UNAVAILABLE", "BOOST_COOLDOWN", "POST_REQUIRED", "POST_NOT_FOUND", "FEATURED_DUPLICATE", "PURCHASE_LOCKED"].includes(error.code)) {
       return res.status(error.code === "BOOST_COOLDOWN" || error.code === "PURCHASE_LOCKED" ? 429 : 400).json({
         success: false,
         message: error.message,
+        data: null,
+        code: error.code,
         cooldownUntil: error.cooldownUntil,
       });
     }
 
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
@@ -79,24 +115,28 @@ const equipItem = async (req, res, next) => {
     const inventory = await purchaseService.equipItem(req.user._id, req.params.itemId || req.body.itemId, req.body.action || "equip");
     emitToUser(req.user._id, "inventory:update", { inventory });
     emitToUser(req.user._id, "profile:theme", { inventory });
-    return res.json({ success: true, inventory, message: "Inventory updated" });
+    return marketplaceSuccess(res, "Inventory updated", { inventory });
   } catch (error) {
+    logMarketplaceError(error);
+
     if (["ITEM_NOT_FOUND", "NOT_OWNED"].includes(error.code)) {
-      return res.status(404).json({ success: false, message: error.message });
+      return res.status(404).json({ success: false, message: error.message, data: null, code: error.code });
     }
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
 const adminUpsertItem = async (req, res, next) => {
   try {
     const item = await marketplaceService.adminUpsertItem(req.body, req.user._id);
-    return res.status(201).json({ success: true, item, message: "Marketplace item saved" });
+    return marketplaceSuccess(res, "Marketplace item saved", { item }, 201);
   } catch (error) {
+    logMarketplaceError(error);
+
     if (error.code === "INVALID_ITEM") {
-      return res.status(400).json({ success: false, message: error.message });
+      return res.status(400).json({ success: false, message: error.message, data: null, code: error.code });
     }
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
@@ -104,21 +144,23 @@ const adminFeaturedStatus = async (req, res, next) => {
   try {
     const featured = await marketplaceService.adminUpdateFeaturedStatus(req.params.id, req.body.status, req.user._id, req.body.reason);
     emitToUser(featured.userId, "featured:update", { featured });
-    return res.json({ success: true, featured, message: "Featured status updated" });
+    return marketplaceSuccess(res, "Featured status updated", { featured });
   } catch (error) {
+    logMarketplaceError(error);
+
     if (error.code === "FEATURED_NOT_FOUND") {
-      return res.status(404).json({ success: false, message: error.message });
+      return res.status(404).json({ success: false, message: error.message, data: null, code: error.code });
     }
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
 const adminOverview = async (req, res, next) => {
   try {
     const overview = await marketplaceService.adminEconomyOverview();
-    return res.json({ success: true, overview });
+    return marketplaceSuccess(res, "Marketplace overview loaded successfully", { overview });
   } catch (error) {
-    next(error);
+    return handleMarketplaceError(req, res, next, error);
   }
 };
 
