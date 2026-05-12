@@ -117,8 +117,7 @@ const getReferralLink = (referralCode) => {
     return "";
   }
 
-  const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || "").replace(/\/$/, "");
-  return `${frontendUrl}/register?ref=${referralCode}`;
+  return `https://vibe-book-kappa.vercel.app/register?ref=${encodeURIComponent(referralCode)}`;
 };
 
 const hasPaidForProfile = (viewer, profileId) => {

@@ -247,14 +247,21 @@ const claimDailyReward = async (req, res) => {
     return walletSuccess(res, "Daily reward claimed successfully", {
       wallet,
       transaction,
+      claimed: true,
       reward: rewardAmount,
       rewardAmount,
+      balance: Number(wallet?.balance ?? 0),
       nextClaimTime,
       streak: Number(wallet?.streakCount ?? 0),
       streakCount: Number(wallet?.streakCount ?? 0),
     });
   } catch (error) {
-    console.error("[DAILY_REWARD_ERROR]", error);
+    console.error(
+      "[DAILY_REWARD_FATAL]",
+      error,
+      error?.message,
+      error?.stack
+    );
 
     if (res.headersSent) {
       return undefined;
@@ -263,8 +270,9 @@ const claimDailyReward = async (req, res) => {
     const message = error.message || "Daily reward failed";
     const alreadyClaimed = error.code === "DAILY_REWARD_ALREADY_CLAIMED";
     const invalidWallet = error.message === "Invalid user ID" || error.name === "CastError" || error.name === "ValidationError";
+    const walletUpdateFailed = error.code === "WALLET_UPDATE_FAILED";
     const status = alreadyClaimed ? 409 : invalidWallet ? 400 : statusForWalletError(error);
-    const responseMessage = alreadyClaimed ? "Already claimed today" : message;
+    const responseMessage = alreadyClaimed ? "Already claimed today" : walletUpdateFailed ? "Wallet update failed" : message;
 
     return res.status(status).json({
       success: false,

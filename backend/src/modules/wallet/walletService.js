@@ -23,6 +23,12 @@ const { dailyRewardForStreak, nexCoinEstimate } = require("../../utils/pointsCal
 const { ensureWalletIdentity, findUserByWalletIdentifier, serializeWalletIdentity, walletSettingsFor } = require("./walletIdentityService");
 
 const qrCache = new Map();
+const PRODUCTION_FRONTEND_URL = "https://vibe-book-kappa.vercel.app";
+
+const referralLinkFor = (referralCode = "") => {
+  const code = String(referralCode || "").trim();
+  return code ? `${PRODUCTION_FRONTEND_URL}/register?ref=${encodeURIComponent(code)}` : "";
+};
 
 const toDate = (value) => {
   const date = value ? new Date(value) : null;
@@ -82,7 +88,7 @@ const updateWalletSettings = async (userId, settings = {}) => {
   if (typeof settings.transferNotifications === "boolean") update["walletSettings.transferNotifications"] = settings.transferNotifications;
   if (allowedPrivacy.includes(settings.privacyMode)) update["walletSettings.privacyMode"] = settings.privacyMode;
 
-  const user = await User.findByIdAndUpdate(userId, { $set: update }, { new: true, runValidators: true });
+  const user = await User.findByIdAndUpdate(userId, { $set: update }, { returnDocument: "after", runValidators: true });
   const wallet = await getWallet(userId);
   return {
     user,
@@ -164,7 +170,7 @@ const addPoints = async (userId, amount, source, metadata = {}) => {
           lifetimeEarned: validatedAmount,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     // Update level if needed
@@ -233,7 +239,7 @@ const spendPoints = async (userId, amount, source, metadata = {}) => {
           lifetimeSpent: validatedAmount,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     if (updatedWallet) {
@@ -310,7 +316,7 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
           totalSent: validatedAmount,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     if (updatedSender) {
@@ -328,7 +334,7 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
           totalReceived: validatedAmount,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     if (updatedReceiver) {
@@ -423,7 +429,7 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
           totalSent: validatedAmount,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     if (updatedSender) {
@@ -441,7 +447,7 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
           totalReceived: validatedAmount,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     if (updatedReceiver) {
@@ -502,64 +508,127 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
  */
 const rewardDailyLogin = async (userId) => {
   validateUserId(userId);
+  await ensureWalletIdentity(userId);
 
-  const wallet = await getWallet(userId);
+  const session = await Wallet.startSession();
   const now = new Date();
 
-  const lastLogin = toDate(wallet.lastLoginDate);
-  if (lastLogin && now.getTime() - lastLogin.getTime() < DAILY_LOGIN_COOLDOWN_MS) {
-    const error = new Error("Daily reward already claimed");
-    error.code = "DAILY_REWARD_ALREADY_CLAIMED";
-    error.nextClaimTime = new Date(lastLogin.getTime() + DAILY_LOGIN_COOLDOWN_MS);
+  session.startTransaction();
+
+  try {
+    let wallet = await Wallet.findOne({ userId }).session(session);
+
+    if (!wallet) {
+      wallet = new Wallet({
+        userId,
+        balance: 0,
+        lifetimeEarned: 0,
+        lifetimeSpent: 0,
+        totalReceived: 0,
+        totalSent: 0,
+        streakCount: 0,
+        level: 1,
+        levelName: "Starter",
+      });
+
+      try {
+        await wallet.save({ session });
+      } catch (saveError) {
+        if (saveError?.code !== 11000) {
+          saveError.code = saveError.code || "WALLET_UPDATE_FAILED";
+          throw saveError;
+        }
+
+        wallet = await Wallet.findOne({ userId }).session(session);
+      }
+    }
+
+    if (!wallet) {
+      const error = new Error("Wallet update failed");
+      error.code = "WALLET_UPDATE_FAILED";
+      throw error;
+    }
+
+    const lastLogin = toDate(wallet.lastLoginDate);
+    if (lastLogin && now.getTime() - lastLogin.getTime() < DAILY_LOGIN_COOLDOWN_MS) {
+      const error = new Error("Daily reward already claimed");
+      error.code = "DAILY_REWARD_ALREADY_CLAIMED";
+      error.nextClaimTime = new Date(lastLogin.getTime() + DAILY_LOGIN_COOLDOWN_MS);
+      throw error;
+    }
+
+    const recentDailyTransaction = await WalletTransaction.findOne({
+      userId,
+      source: TRANSACTION_SOURCES.DAILY_LOGIN,
+      createdAt: { $gte: new Date(now.getTime() - DAILY_LOGIN_COOLDOWN_MS) },
+    }).session(session).lean();
+
+    if (recentDailyTransaction) {
+      const error = new Error("Daily reward already claimed");
+      error.code = "DAILY_REWARD_ALREADY_CLAIMED";
+      error.nextClaimTime = new Date(new Date(recentDailyTransaction.createdAt).getTime() + DAILY_LOGIN_COOLDOWN_MS);
+      throw error;
+    }
+
+    wallet.balance = Number(wallet.balance || 0);
+    wallet.lifetimeEarned = Number(wallet.lifetimeEarned || 0);
+    wallet.lifetimeSpent = Number(wallet.lifetimeSpent || 0);
+    wallet.totalReceived = Number(wallet.totalReceived || 0);
+    wallet.totalSent = Number(wallet.totalSent || 0);
+    wallet.streakCount = Number(wallet.streakCount || 0);
+
+    const reward = dailyRewardForStreak(wallet.streakCount);
+    const balanceBefore = wallet.balance;
+    const balanceAfter = balanceBefore + reward.amount;
+
+    wallet.balance = balanceAfter;
+    wallet.lifetimeEarned += reward.amount;
+    wallet.lastLoginDate = now;
+    wallet.streakCount = reward.nextStreak;
+    wallet.updateLevel();
+    wallet.updateTokenEstimate();
+
+    try {
+      await wallet.save({ session });
+    } catch (saveError) {
+      console.error("Wallet save failed", saveError);
+      saveError.code = saveError.code || "WALLET_UPDATE_FAILED";
+      throw saveError;
+    }
+
+    const transaction = await WalletTransaction.create([{
+      userId,
+      type: TRANSACTION_TYPES.EARN,
+      amount: reward.amount,
+      balanceBefore,
+      balanceAfter,
+      source: TRANSACTION_SOURCES.DAILY_LOGIN,
+      description: generateTransactionDescription(TRANSACTION_TYPES.EARN, TRANSACTION_SOURCES.DAILY_LOGIN),
+      metadata: sanitizeMetadata({
+        date: now.toISOString(),
+        streakDay: reward.streakDay,
+        nextStreak: reward.nextStreak,
+        conversionRate: process.env.NEX_POINTS_PER_COIN || 1000,
+        futureTokenReady: true,
+      }),
+      status: TRANSACTION_STATUS.COMPLETED,
+    }], { session });
+
+    await session.commitTransaction();
+
+    return {
+      wallet,
+      transaction: transaction[0],
+      rewardAmount: reward.amount,
+      streakDay: reward.streakDay,
+      nextClaimTime: new Date(now.getTime() + DAILY_LOGIN_COOLDOWN_MS),
+    };
+  } catch (error) {
+    await session.abortTransaction();
     throw error;
+  } finally {
+    session.endSession();
   }
-
-  const recentDailyTransaction = await WalletTransaction.findOne({
-    userId,
-    source: TRANSACTION_SOURCES.DAILY_LOGIN,
-    createdAt: { $gte: new Date(now.getTime() - DAILY_LOGIN_COOLDOWN_MS) },
-  }).lean();
-
-  if (recentDailyTransaction) {
-    const error = new Error("Daily reward already claimed");
-    error.code = "DAILY_REWARD_ALREADY_CLAIMED";
-    error.nextClaimTime = new Date(new Date(recentDailyTransaction.createdAt).getTime() + DAILY_LOGIN_COOLDOWN_MS);
-    throw error;
-  }
-
-  const reward = dailyRewardForStreak(wallet.streakCount);
-
-  const result = await addPoints(userId, reward.amount, TRANSACTION_SOURCES.DAILY_LOGIN, {
-    date: now.toISOString(),
-    streakDay: reward.streakDay,
-    nextStreak: reward.nextStreak,
-    conversionRate: process.env.NEX_POINTS_PER_COIN || 1000,
-    futureTokenReady: true,
-  });
-
-  // Update last login date and return the refreshed wallet so clients see the
-  // new streak immediately after a successful claim.
-  const updatedWallet = await Wallet.findByIdAndUpdate(
-    result.wallet._id,
-    {
-      lastLoginDate: now,
-      streakCount: reward.nextStreak,
-    },
-    { new: true }
-  );
-
-  if (updatedWallet) {
-    updatedWallet.updateLevel();
-    await syncTokenEstimate(updatedWallet);
-  }
-
-  return {
-    ...result,
-    wallet: updatedWallet || result.wallet,
-    rewardAmount: reward.amount,
-    streakDay: reward.streakDay,
-    nextClaimTime: new Date(now.getTime() + DAILY_LOGIN_COOLDOWN_MS),
-  };
 };
 
 const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) => {
@@ -757,9 +826,14 @@ const generateQr = async (userId, payload = {}) => {
     chain: "NEX",
     memo: String(payload.memo || "VibeBook NEX").slice(0, 120),
     referralCode: payload.referralCode || "",
+    referralLink: referralLinkFor(payload.referralCode),
     expiresAt: expiresAt.toISOString(),
     brand: "VibeBook NEX",
   };
+
+  const qrText = qrPayload.type === "referral_invite" && qrPayload.referralLink
+    ? qrPayload.referralLink
+    : Buffer.from(JSON.stringify(qrPayload)).toString("base64url");
 
   qrCache.set(qrId, qrPayload);
   setTimeout(() => qrCache.delete(qrId), 10 * 60 * 1000).unref?.();
@@ -769,7 +843,7 @@ const generateQr = async (userId, payload = {}) => {
     identity: serializeWalletIdentity(user, wallet),
     qrId,
     qrPayload,
-    qrText: Buffer.from(JSON.stringify(qrPayload)).toString("base64url"),
+    qrText,
     expiresAt,
   };
 };
@@ -847,6 +921,7 @@ const scanQr = async (scannerId, payload) => {
   return {
     action: "referral_invite",
     referralCode: qrPayload.referralCode || "",
+    referralLink: qrPayload.referralLink || referralLinkFor(qrPayload.referralCode),
     qrPayload,
   };
 };
@@ -887,7 +962,7 @@ const adminAdjustment = async (userId, amount, reason, adminId) => {
           lifetimeSpent: validatedAmount < 0 ? Math.abs(validatedAmount) : 0,
         },
       },
-      { new: true, session }
+      { returnDocument: "after", session }
     );
 
     const transaction = new WalletTransaction({

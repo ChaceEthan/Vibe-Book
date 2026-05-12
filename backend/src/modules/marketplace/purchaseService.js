@@ -79,7 +79,7 @@ const ensureCatalog = async () => {
             metadata: item.metadata || {},
           },
         },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: "after" }
       ).catch(() => null)
     )
   );
@@ -97,7 +97,7 @@ const ensureCatalog = async () => {
             tokens: item.metadata || {},
           },
         },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: "after" }
       ).catch(() => null)
     )
   );

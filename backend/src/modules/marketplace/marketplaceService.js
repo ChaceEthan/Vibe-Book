@@ -53,7 +53,7 @@ const adminUpsertItem = async (payload = {}, adminId) => {
   const item = await MarketplaceItem.findOneAndUpdate(
     { itemId },
     { $set: update },
-    { upsert: true, new: true, runValidators: true }
+    { upsert: true, returnDocument: "after", runValidators: true }
   );
 
   return purchaseService.publicItem(item);
@@ -72,7 +72,7 @@ const adminUpdateFeaturedStatus = async (featuredId, status, adminId, reason = "
         },
       },
     },
-    { new: true, runValidators: true }
+    { returnDocument: "after", runValidators: true }
   );
 
   if (!featured) {

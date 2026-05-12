@@ -27,10 +27,9 @@ const normalizeApiRoot = (value) => {
 const API_ROOT = normalizeApiRoot(rawApiRoot);
 const API_BASE_URL = `${API_ROOT.replace(/(?:\/api)+\/?$/i, "")}/api`;
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
-const APP_ROOT_URL = typeof window !== "undefined" ? window.location.origin : "";
-const rawFrontendUrl = import.meta.env.VITE_FRONTEND_URL || APP_ROOT_URL || "http://localhost:5174";
+const DEFAULT_FRONTEND_URL = "https://vibe-book-kappa.vercel.app";
 
-export const FRONTEND_BASE_URL = String(rawFrontendUrl || "http://localhost:5174").trim().replace(/\/+$/, "") || "http://localhost:5174";
+export const FRONTEND_BASE_URL = DEFAULT_FRONTEND_URL;
 export const referralUrlFor = (referralCode = "") => `${FRONTEND_BASE_URL}/register?ref=${encodeURIComponent(String(referralCode || "").trim())}`;
 
 const API = axios.create({

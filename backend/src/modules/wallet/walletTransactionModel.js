@@ -73,21 +73,38 @@ walletTransactionSchema.index({ source: 1 }); // For analytics
 walletTransactionSchema.index({ status: 1 }); // For filtering by status
 walletTransactionSchema.index({ createdAt: -1 }); // For pagination
 
-// Prevent updates to transactions (immutability)
-walletTransactionSchema.pre("findByIdAndUpdate", function (next) {
+const immutableTransactionError = () => {
   const error = new Error("Transactions are immutable and cannot be updated");
   error.code = "IMMUTABLE_TRANSACTION";
-  next(error);
+  return error;
+};
+
+// Prevent updates to transactions (immutability)
+walletTransactionSchema.pre("findOneAndUpdate", function () {
+  throw immutableTransactionError();
+});
+
+walletTransactionSchema.pre("updateOne", function () {
+  throw immutableTransactionError();
+});
+
+walletTransactionSchema.pre("updateMany", function () {
+  throw immutableTransactionError();
+});
+
+walletTransactionSchema.pre("replaceOne", function () {
+  throw immutableTransactionError();
+});
+
+walletTransactionSchema.pre("findOneAndReplace", function () {
+  throw immutableTransactionError();
 });
 
 // Prevent any save after creation
-walletTransactionSchema.pre("save", function (next) {
+walletTransactionSchema.pre("save", function () {
   if (!this.isNew) {
-    const error = new Error("Transactions are immutable and cannot be updated");
-    error.code = "IMMUTABLE_TRANSACTION";
-    next(error);
+    throw immutableTransactionError();
   }
-  next();
 });
 
 module.exports = mongoose.model("WalletTransaction", walletTransactionSchema);

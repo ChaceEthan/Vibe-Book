@@ -84,7 +84,6 @@ const walletSchema = new mongoose.Schema(
 );
 
 // Indexes for performance
-walletSchema.index({ userId: 1 });
 walletSchema.index({ balance: -1 }); // For leaderboards
 walletSchema.index({ lifetimeEarned: -1 }); // For leaderboards
 walletSchema.index({ createdAt: -1 });

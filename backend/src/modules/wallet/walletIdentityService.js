@@ -103,7 +103,7 @@ const ensureWalletIdentity = async (userOrId, options = {}) => {
           },
           $setOnInsert: {},
         },
-        { new: true, runValidators: true }
+        { returnDocument: "after", runValidators: true }
       );
 
       if (updated?.walletId && updated?.nexHandle) {

@@ -181,8 +181,7 @@ const getReferralLink = (referralCode) => {
     return "";
   }
 
-  const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5174").replace(/\/$/, "");
-  return `${frontendUrl}/register?ref=${referralCode}`;
+  return `https://vibe-book-kappa.vercel.app/register?ref=${encodeURIComponent(referralCode)}`;
 };
 
 const referralFingerprintFor = (req) => {
