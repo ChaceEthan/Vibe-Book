@@ -13,6 +13,7 @@ const {
 const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
 const { createNotification } = require("../utils/notifications");
+const { rewardEngagement } = require("../services/rewardEngine");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const {
   isCloudinarySecureUrl,
@@ -137,6 +138,14 @@ const sameId = (left, right) => {
 const queueNotification = (payload) => {
   createNotification(payload).catch((error) => {
     console.error(`[notification:user] ${error.message}`);
+  });
+};
+
+const queueEngagementReward = (payload) => {
+  rewardEngagement(payload).catch((error) => {
+    if (!["DUPLICATE_REWARD", "SELF_REWARD", "NO_REWARD_AMOUNT"].includes(error.code)) {
+      console.error(`[reward:user] ${error.message}`);
+    }
   });
 };
 
@@ -418,7 +427,12 @@ const profileResponse = (user, viewer = null, options = {}) => {
     postCount: Number(options.postCount ?? options.posts?.length ?? posts.length),
     bio: isUnlocked ? user.bio : "",
     website: user.website || user.socialLinks?.website || "",
-    profileTheme: user.profileTheme || "classic",
+    profileTheme: user.marketplace?.equippedTheme || user.profileTheme || "classic",
+    equippedFrame: user.marketplace?.equippedFrame || "",
+    equippedBadges: Array.isArray(user.marketplace?.equippedBadges) && user.marketplace.equippedBadges.length ? user.marketplace.equippedBadges : Array.isArray(user.creatorBadges) ? user.creatorBadges : [],
+    ownedReactions: options.includePrivate ? user.marketplace?.ownedReactions || [] : undefined,
+    creatorAura: user.marketplace?.creatorAura || "",
+    prestigeScore: Number(user.marketplace?.prestigeScore || 0),
     creatorCategory: user.creatorCategory || user.category || "",
     creatorSkills: Array.isArray(user.creatorSkills) ? user.creatorSkills : [],
     publicEmail: Boolean(user.publicEmail),
@@ -513,6 +527,13 @@ const getUserById = async (req, res, next) => {
           favoriteCreators: { $each: [user._id], $slice: -100 },
         },
       }).catch(() => null);
+      queueEngagementReward({
+        actorId: req.user._id,
+        recipientId: user._id,
+        actionType: "profile_visit",
+        targetId: user._id,
+        dedupeKey: `profile-visit:${user._id}:${req.user._id}:${Math.floor(Date.now() / (60 * 60 * 1000))}`,
+      });
     }
 
     return res.json({ user: profileResponse(user, req.user, { bookingStarted, posts, postCount: posts.length }) });
@@ -960,6 +981,16 @@ const likeProfile = async (req, res, next) => {
 
     if (!alreadyLiked) {
       await addMonetizationScore(user._id, "like");
+      if (user.likes > 0 && user.likes % 10 === 0) {
+        queueEngagementReward({
+          actorId: req.user._id,
+          recipientId: user._id,
+          actionType: "like",
+          targetId: user._id,
+          metrics: { count: user.likes },
+          dedupeKey: `profile-like-milestone:${user._id}:${user.likes / 10}`,
+        });
+      }
       queueNotification({
         userId: user._id,
         type: "like",
@@ -1047,6 +1078,13 @@ const followProfile = async (req, res, next) => {
         },
       }).catch(() => null);
       await addMonetizationScore(target._id, "follower");
+      queueEngagementReward({
+        actorId: req.user._id,
+        recipientId: target._id,
+        actionType: "follow",
+        targetId: target._id,
+        dedupeKey: `follow:${target._id}:${req.user._id}`,
+      });
       User.findByIdAndUpdate(req.user._id, {
         $push: {
           favoriteCreators: { $each: [target._id], $slice: -100 },
@@ -1115,6 +1153,13 @@ const followBackProfile = async (req, res, next) => {
 
     if (!alreadyFollowing) {
       await addMonetizationScore(target._id, "follower");
+      queueEngagementReward({
+        actorId: req.user._id,
+        recipientId: target._id,
+        actionType: "follow",
+        targetId: target._id,
+        dedupeKey: `follow:${target._id}:${req.user._id}`,
+      });
       User.findByIdAndUpdate(req.user._id, {
         $push: {
           favoriteCreators: { $each: [target._id], $slice: -100 },

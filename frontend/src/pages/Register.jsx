@@ -8,9 +8,11 @@ import {
   LockKeyhole,
   Mail,
   Phone,
+  QrCode,
   ShieldCheck,
   UserRound,
 } from "lucide-react";
+import { Html5QrcodeScanner } from "html5-qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -36,6 +38,7 @@ const initialForm = {
   country: "Rwanda",
   countryCode: "+250",
   phoneNumber: "",
+  referralCode: "",
 };
 
 const emptyAvailability = {
@@ -50,6 +53,17 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const usernamePattern = /^[a-z0-9_][a-z0-9_-]{2,29}$/;
 const isAbortError = (error) => error?.code === "ERR_CANCELED" || error?.name === "CanceledError" || error?.name === "AbortError";
 const today = () => new Date().toISOString().slice(0, 10);
+const extractReferralCode = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    const url = new URL(raw);
+    return String(url.searchParams.get("ref") || url.searchParams.get("referralCode") || "").trim();
+  } catch {
+    return raw.replace(/^ref=/i, "").trim();
+  }
+};
 
 const statusClass = (status) => {
   if (status === "available") return "text-green-700";
@@ -86,6 +100,7 @@ const Register = () => {
   const [availability, setAvailability] = useState(emptyAvailability);
   const [emailVerification, setEmailVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "" });
   const [phoneVerification, setPhoneVerification] = useState({ open: false, code: "", cooldown: 0, expiresAt: "", localCode: "", unavailable: false });
+  const [scannerOpen, setScannerOpen] = useState(false);
   const navigate = useNavigate();
 
   const selectedCountry = useMemo(
@@ -118,6 +133,39 @@ const Register = () => {
     contactAvailability.status !== "checking" &&
     contactAvailability.status !== "taken" &&
     contactAvailability.status !== "invalid";
+
+  useEffect(() => {
+    const ref = extractReferralCode(searchParams.get("ref") || searchParams.get("referralCode") || "");
+    if (ref) {
+      setForm((current) => ({ ...current, referralCode: ref }));
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!scannerOpen) return undefined;
+
+    const scanner = new Html5QrcodeScanner(
+      "referral-qr-reader",
+      { fps: 10, qrbox: { width: 220, height: 220 }, rememberLastUsedCamera: true },
+      false
+    );
+
+    scanner.render(
+      (decodedText) => {
+        const code = extractReferralCode(decodedText);
+        if (code) {
+          setForm((current) => ({ ...current, referralCode: code }));
+          setStatus("Referral code applied from QR.");
+          setScannerOpen(false);
+        }
+      },
+      () => undefined
+    );
+
+    return () => {
+      scanner.clear().catch(() => undefined);
+    };
+  }, [scannerOpen]);
 
   useEffect(() => {
     if (!emailVerification.open || emailVerification.cooldown <= 0) {
@@ -310,6 +358,10 @@ const Register = () => {
         return { ...current, phoneNumber: cleanPhone(value) };
       }
 
+      if (name === "referralCode") {
+        return { ...current, referralCode: extractReferralCode(value).replace(/\s+/g, "") };
+      }
+
       return { ...current, [name]: value };
     });
   };
@@ -421,7 +473,7 @@ const Register = () => {
         phoneNumber: usesPhone ? form.phoneNumber : "",
         phone: usesPhone && form.phoneNumber ? `${form.countryCode}${form.phoneNumber}` : "",
         acceptedTerms: true,
-        referralCode: searchParams.get("ref") || "",
+        referralCode: form.referralCode,
       });
 
       if (usesPhone) {
@@ -620,6 +672,24 @@ const Register = () => {
             <ValidationLine state={birthdayState} />
           </label>
 
+          <label className="space-y-2">
+            <span className="label">Referral code</span>
+            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <input
+                className="field"
+                name="referralCode"
+                value={form.referralCode}
+                onChange={(event) => updateField("referralCode", event.target.value)}
+                placeholder="Optional invite code"
+                autoComplete="off"
+              />
+              <button type="button" className="btn-secondary gap-2 py-3" onClick={() => setScannerOpen(true)}>
+                <QrCode className="h-4 w-4" />
+                Scan
+              </button>
+            </div>
+          </label>
+
           <button type="submit" className="btn-primary mt-2 w-full py-3.5" disabled={submitting || !canSubmit}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />}
             {submitting ? "Creating..." : "Create account"}
@@ -741,6 +811,23 @@ const Register = () => {
               {phoneVerification.cooldown > 0 ? `Resend in ${phoneVerification.cooldown}s` : "Resend code"}
             </button>
           </form>
+        </div>
+      )}
+
+      {scannerOpen && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/70 p-3 sm:items-center">
+          <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-navy">Scan referral QR</h2>
+                <p className="text-sm font-semibold text-slate-500">Allow camera access and point it at a VibeBook invite code.</p>
+              </div>
+              <button type="button" className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-black text-slate-600" onClick={() => setScannerOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div id="referral-qr-reader" className="overflow-hidden rounded-lg border border-slate-200" />
+          </div>
         </div>
       )}
     </section>

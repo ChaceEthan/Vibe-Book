@@ -5,6 +5,7 @@ const User = require("../models/User");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { addMonetizationScore } = require("../utils/monetization");
 const { createNotification } = require("../utils/notifications");
+const { rewardEngagement } = require("../services/rewardEngine");
 const {
   isCloudinarySecureUrl,
   normalizeStoredUploadPath,
@@ -23,7 +24,7 @@ const {
   uniqueTopics,
 } = require("../utils/feedRanking");
 
-const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt";
+const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt profileTheme creatorBadges marketplace creatorLevel creatorTier";
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 30;
 
@@ -81,6 +82,12 @@ const safeCount = (value, max = 1000) => {
 const queueNotification = (payload) => {
   createNotification(payload).catch((error) => {
     console.error(`[notification:feed] ${error.message}`);
+  });
+};
+
+const queueEngagementReward = (payload) => {
+  rewardEngagement(payload).catch((error) => {
+    console.error(`[wallet:engagement] ${error.message}`);
   });
 };
 
@@ -269,6 +276,12 @@ const buildProfile = (user, viewer = null) => {
     premiumBadge: user?.premiumBadge || user?.isPremium,
     isVerified: user?.isVerified,
     verified: user?.isVerified,
+    profileTheme: user?.marketplace?.equippedTheme || user?.profileTheme || "classic",
+    equippedFrame: user?.marketplace?.equippedFrame || "",
+    equippedBadges: Array.isArray(user?.marketplace?.equippedBadges) && user.marketplace.equippedBadges.length ? user.marketplace.equippedBadges : Array.isArray(user?.creatorBadges) ? user.creatorBadges : [],
+    creatorAura: user?.marketplace?.creatorAura || "",
+    creatorLevel: Number(user?.creatorLevel || 0),
+    creatorTier: user?.creatorTier || "none",
     province: user?.province || "",
     district: user?.district || "",
   };
@@ -575,6 +588,17 @@ const toggleFeedLike = async (req, res, next) => {
         updateViewerInterests(req.user, item, 8, { addLikedTopics: true }),
       ]);
 
+      if (Number(item.likes || 0) > 0 && Number(item.likes || 0) % 10 === 0) {
+        queueEngagementReward({
+          actorId: req.user._id,
+          recipientId: idOf(item.userId),
+          actionType: "like",
+          targetId: item._id,
+          metrics: { count: Number(item.likes || 0) },
+          dedupeKey: `like:${item._id}:${Math.floor(Number(item.likes || 0) / 10)}`,
+        });
+      }
+
       queueNotification({
         userId: idOf(item.userId),
         type: "like",
@@ -626,6 +650,15 @@ const addFeedComment = async (req, res, next) => {
 
     if (idOf(item.userId) !== idOf(req.user._id)) {
       const comment = item.comments[item.comments.length - 1];
+
+      queueEngagementReward({
+        actorId: idOf(item.userId),
+        recipientId: req.user._id,
+        actionType: "comment",
+        targetId: comment?._id || item._id,
+        metrics: { comment: validation.message },
+        dedupeKey: `comment:${item._id}:${req.user._id}:${comment?._id || Date.now()}`,
+      });
 
       queueNotification({
         userId: idOf(item.userId),
@@ -697,6 +730,28 @@ const incrementPostView = async (req, res, next) => {
       });
     }
 
+    if (Number(item.views || 0) > 0 && Number(item.views || 0) % 100 === 0) {
+      queueEngagementReward({
+        actorId: req.user?._id,
+        recipientId: idOf(item.userId),
+        actionType: "post_view",
+        targetId: item._id,
+        metrics: { count: Number(item.views || 0) },
+        dedupeKey: `post_view:${item._id}:${Math.floor(Number(item.views || 0) / 100)}`,
+      });
+    }
+
+    if (item.type === "video" && metrics.watchedSeconds >= 60 && idOf(item.userId) !== idOf(req.user?._id)) {
+      queueEngagementReward({
+        actorId: req.user?._id,
+        recipientId: idOf(item.userId),
+        actionType: "watch_time",
+        targetId: item._id,
+        metrics: { watchedSeconds: metrics.watchedSeconds },
+        dedupeKey: `watch_time:${item._id}:${req.user?._id || "anon"}:${Math.floor(Date.now() / 600000)}`,
+      });
+    }
+
     return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: "View counted" });
   } catch (error) {
     return next(error);
@@ -722,6 +777,16 @@ const sharePost = async (req, res, next) => {
 
     if (req.user?._id) {
       await updateViewerInterests(req.user, item, 12, { addLikedTopics: true, addFavoriteCreator: true });
+      if (idOf(item.userId) !== idOf(req.user._id)) {
+        queueEngagementReward({
+          actorId: req.user._id,
+          recipientId: idOf(item.userId),
+          actionType: "share",
+          targetId: item._id,
+          metrics: { count: Number(item.shareCount || 0) },
+          dedupeKey: `share:${item._id}:${req.user._id}:${Number(item.shareCount || 0)}`,
+        });
+      }
     }
 
     return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: "Share counted" });

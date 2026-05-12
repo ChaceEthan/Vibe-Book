@@ -4,6 +4,7 @@ import { Suspense, lazy } from "react";
 
 import Footer from "./components/Footer.jsx";
 import Navbar from "./components/Navbar.jsx";
+import WalletErrorBoundary from "./components/WalletErrorBoundary.jsx";
 import { useAuth } from "./context/AuthContext.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Bookings from "./pages/Bookings.jsx";
@@ -75,7 +76,7 @@ const App = () => {
           <Route path="/cookie-policy" element={<LegalPage page="cookie-policy" />} />
           <Route path="/copyright-policy" element={<LegalPage page="copyright-policy" />} />
           <Route
-            path="/wallet"
+            path="/wallet/*"
             element={
               <ProtectedRoute>
                 <Suspense
@@ -85,7 +86,9 @@ const App = () => {
                     </div>
                   }
                 >
-                  <Wallet />
+                  <WalletErrorBoundary title="NEX Wallet unavailable">
+                    <Wallet />
+                  </WalletErrorBoundary>
                 </Suspense>
               </ProtectedRoute>
             }

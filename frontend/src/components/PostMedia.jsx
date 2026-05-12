@@ -46,6 +46,8 @@ const PostMedia = ({
   const [likePulse, setLikePulse] = useState(false);
   const rawUrl = post?.url || "";
   const src = rawUrl ? mediaUrl(rawUrl) : "";
+  const looksLikeVideoUrl = /\.(mp4|mov|m4v|webm|avi|3gp|3g2|mpeg|mpg)(?:$|[?#])/i.test(rawUrl) || src.includes("/video/upload/");
+  const isVideo = post?.type === "video" || looksLikeVideoUrl;
 
   const metricsFor = (video, extra = {}) => {
     const duration = Number.isFinite(video?.duration) ? video.duration : Number(post?.duration || 0);
@@ -83,16 +85,16 @@ const PostMedia = ({
   }, [autoPlay, muted, post?._id, rawUrl]);
 
   useEffect(() => {
-    if (post?.type !== "video" || !mediaRef.current) {
+    if (!isVideo || !mediaRef.current) {
       return;
     }
 
     mediaRef.current.muted = isMuted;
     mediaRef.current.defaultMuted = isMuted;
-  }, [isMuted, post?.type, rawUrl]);
+  }, [isMuted, isVideo, rawUrl]);
 
   useEffect(() => {
-    if (!managedPlayback || post?.type !== "video" || !mediaRef.current) {
+    if (!managedPlayback || !isVideo || !mediaRef.current) {
       return;
     }
 
@@ -152,7 +154,7 @@ const PostMedia = ({
     return () => {
       canceled = true;
     };
-  }, [active, audioUnlockToken, autoPlay, managedPlayback, muted, onAutoplayBlocked, post?._id, post?.type, rawUrl, soundEnabled]);
+  }, [active, audioUnlockToken, autoPlay, isVideo, managedPlayback, muted, onAutoplayBlocked, post?._id, rawUrl, soundEnabled]);
 
   useEffect(() => {
     return () => {
@@ -232,7 +234,7 @@ const PostMedia = ({
   };
 
   const handleInteractiveTap = (event) => {
-    if (!interactive || post?.type !== "video" || controls) {
+    if (!interactive || !isVideo || controls) {
       return;
     }
 
@@ -272,7 +274,7 @@ const PostMedia = ({
   };
 
   const handlePointerDown = () => {
-    if (!interactive || post?.type !== "video" || controls) {
+    if (!interactive || !isVideo || controls) {
       return;
     }
 
@@ -309,7 +311,7 @@ const PostMedia = ({
   };
 
   useEffect(() => {
-    if (post?.type !== "video") {
+    if (!isVideo) {
       return undefined;
     }
 
@@ -343,10 +345,10 @@ const PostMedia = ({
 
     observer.observe(mediaRef.current);
     return () => observer.disconnect();
-  }, [autoPlay, failed, managedPlayback, post?._id, post?.type, rawUrl, src]);
+  }, [autoPlay, failed, isVideo, managedPlayback, post?._id, rawUrl, src]);
 
   useEffect(() => {
-    if (post?.type === "video" || !mediaRef.current || failed) {
+    if (isVideo || !mediaRef.current || failed) {
       return undefined;
     }
 
@@ -366,7 +368,7 @@ const PostMedia = ({
 
     observer.observe(mediaRef.current);
     return () => observer.disconnect();
-  }, [failed, post?.type, post?._id]);
+  }, [failed, isVideo, post?._id]);
 
   if (failed || !rawUrl) {
     return (
@@ -376,7 +378,7 @@ const PostMedia = ({
     );
   }
 
-  if (post.type === "video") {
+  if (isVideo) {
     return (
       <div
         className={`relative overflow-hidden bg-slate-950 ${className}`}

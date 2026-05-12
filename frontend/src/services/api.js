@@ -28,6 +28,10 @@ const API_ROOT = normalizeApiRoot(rawApiRoot);
 const API_BASE_URL = `${API_ROOT.replace(/(?:\/api)+\/?$/i, "")}/api`;
 const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
 const APP_ROOT_URL = typeof window !== "undefined" ? window.location.origin : "";
+const rawFrontendUrl = import.meta.env.VITE_FRONTEND_URL || APP_ROOT_URL || "http://localhost:5174";
+
+export const FRONTEND_BASE_URL = String(rawFrontendUrl || "http://localhost:5174").trim().replace(/\/+$/, "") || "http://localhost:5174";
+export const referralUrlFor = (referralCode = "") => `${FRONTEND_BASE_URL}/register?ref=${encodeURIComponent(String(referralCode || "").trim())}`;
 
 const API = axios.create({
   baseURL: API_BASE_URL,
@@ -212,9 +216,24 @@ export const walletApi = {
   get: () => API.get("/wallet"),
   history: (params = {}) => API.get("/wallet/history", { params }),
   claimDaily: () => API.post("/wallet/reward/daily"),
+  redeem: (payload = {}) => API.post("/wallet/reward/redeem", payload),
+  referral: (payload = {}) => API.post("/wallet/reward/referral", payload),
+  spend: (payload = {}) => API.post("/wallet/spend", payload),
+  generateQr: (payload = {}) => API.post("/wallet/qr/generate", payload),
+  scanQr: (payload = {}) => API.post("/wallet/qr/scan", payload),
   transfer: (payload = {}) => API.post("/wallet/transfer", payload),
   topEarners: (params = {}) => API.get("/wallet/leaderboard/earners", { params }),
   topSpenders: (params = {}) => API.get("/wallet/leaderboard/spenders", { params }),
+};
+
+export const marketplaceApi = {
+  items: (params = {}) => API.get("/marketplace/items", { params }),
+  inventory: () => API.get("/marketplace/inventory"),
+  purchase: (itemId, payload = {}) => API.post(`/marketplace/purchase/${itemId}`, payload),
+  equip: (itemId, action = "equip") => API.post(`/marketplace/inventory/${itemId}/${action === "unequip" ? "unequip" : "equip"}`, { action }),
+  adminOverview: () => API.get("/marketplace/admin/overview"),
+  adminSaveItem: (payload = {}) => API.post("/marketplace/admin/items", payload),
+  adminFeaturedStatus: (id, payload = {}) => API.patch(`/marketplace/admin/featured/${id}`, payload),
 };
 
 export const notificationApi = {

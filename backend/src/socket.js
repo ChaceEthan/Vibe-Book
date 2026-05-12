@@ -11,6 +11,8 @@ const User = require("./models/User");
 const VisitorStat = require("./models/VisitorStat");
 const { validateChatMessage } = require("./utils/chatModeration");
 const { createNotification } = require("./utils/notifications");
+const { initializeWalletSockets } = require("./modules/wallet/walletSocket");
+const purchaseService = require("./modules/marketplace/purchaseService");
 
 let ioInstance = null;
 const onlineUsers = new Map();
@@ -627,12 +629,65 @@ const initSocket = (server, corsOptions = {}) => {
       }
     });
 
+    socket.on("store:purchase", async (payload = {}, callback) => {
+      try {
+        const itemId = String(payload.itemId || "").trim().toLowerCase();
+        if (!itemId) {
+          callback?.({ success: false, message: "itemId is required" });
+          return;
+        }
+
+        const result = await purchaseService.purchaseItem(userId, itemId, { postId: payload.postId });
+        const response = {
+          success: true,
+          item: result.item,
+          wallet: result.wallet,
+          transaction: result.transaction,
+          inventory: result.inventory,
+          boost: result.boost,
+          featured: result.featured,
+        };
+        ioInstance.to(userId).emit("store:purchase", response);
+        ioInstance.to(userId).emit("inventory:update", { inventory: result.inventory });
+        if (result.boost) ioInstance.to(userId).emit("creator:boost", { boost: result.boost });
+        if (result.featured) ioInstance.to(userId).emit("featured:update", { featured: result.featured });
+        if (result.item?.category === "themes") ioInstance.to(userId).emit("profile:theme", { inventory: result.inventory });
+        callback?.(response);
+      } catch (error) {
+        callback?.({
+          success: false,
+          message: error.code === "INSUFFICIENT_BALANCE" ? "Not enough NEX Points for this purchase" : error.message || "Purchase failed",
+          code: error.code,
+          cooldownUntil: error.cooldownUntil,
+        });
+      }
+    });
+
+    socket.on("inventory:equip", async (payload = {}, callback) => {
+      try {
+        const inventory = await purchaseService.equipItem(userId, payload.itemId, payload.action || "equip");
+        ioInstance.to(userId).emit("inventory:update", { inventory });
+        ioInstance.to(userId).emit("profile:theme", { inventory });
+        callback?.({ success: true, inventory });
+      } catch (error) {
+        callback?.({ success: false, message: error.message || "Inventory update failed", code: error.code });
+      }
+    });
+
     socket.on("disconnect", async (reason) => {
       removeOnlineUser(userId, socket.id);
       console.log(`Socket disconnected: ${userId} (${reason})`);
       await emitStats();
     });
   });
+
+  // Initialize wallet socket events
+  try {
+    initializeWalletSockets(ioInstance, onlineUsers);
+    console.log("[socket] wallet sockets initialized");
+  } catch (error) {
+    console.error("[socket] failed to initialize wallet sockets:", error.message);
+  }
 
   return ioInstance;
 };

@@ -83,7 +83,8 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       return res.status(400).json({ success: false, error: "No file uploaded", message: "No file uploaded" });
     }
 
-    const type = file.mimetype.startsWith("video/") ? "video" : "image";
+    const effectiveMimeType = file.detected_mimetype || file.mimetype || "";
+    const type = effectiveMimeType.startsWith("video/") ? "video" : "image";
     const clientDuration = parseDuration(req.body.duration);
 
     if (expectedType && type !== expectedType) {
@@ -210,6 +211,8 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       success: true,
       url,
       public_id: publicId,
+      resource_type: file.resource_type,
+      thumbnail_url: file.thumbnail_url,
       feedItem: feedItem ? serializeFeedItem(feedItem, req.user, false, { req }) : undefined,
     });
   } catch (error) {

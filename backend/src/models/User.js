@@ -444,6 +444,11 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  referralFingerprint: {
+    type: String,
+    trim: true,
+    select: false,
+  },
   trialStartDate: {
     type: Date,
     default: Date.now,
@@ -631,6 +636,39 @@ const userSchema = new mongoose.Schema({
     trim: true,
     default: "classic",
     maxlength: 40,
+  },
+  marketplace: {
+    equippedFrame: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 60,
+    },
+    equippedTheme: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 60,
+    },
+    equippedBadges: {
+      type: [String],
+      default: [],
+    },
+    ownedReactions: {
+      type: [String],
+      default: [],
+    },
+    prestigeScore: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creatorAura: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 40,
+    },
   },
   creatorCategory: {
     type: String,

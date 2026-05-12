@@ -32,6 +32,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -129,6 +130,27 @@ const formatCompactNumber = (value = 0) =>
     notation: "compact",
     maximumFractionDigits: 1,
   }).format(Number(value || 0));
+
+const frameClassFor = (frame = "") => ({
+  frame_neon_glow: "from-emerald-300 via-cyan-300 to-lime-300",
+  frame_gold_elite: "from-yellow-200 via-amber-400 to-orange-500",
+  frame_fire_aura: "from-orange-400 via-red-500 to-rose-600",
+  frame_diamond_ring: "from-cyan-200 via-sky-400 to-violet-500",
+  frame_rwanda_pride: "from-sky-500 via-yellow-300 to-emerald-500",
+  frame_creator_legend: "from-fuchsia-400 via-amber-300 to-cyan-300",
+  frame_cyber_pulse: "from-blue-500 via-indigo-500 to-teal-300",
+}[frame] || "");
+
+const badgeLabel = (badge = "") =>
+  ({
+    badge_verified_creator: "Verified Creator",
+    badge_rising_star: "Rising Star",
+    badge_top_streamer: "Top Streamer",
+    badge_elite_creator: "Elite Creator",
+    badge_trend_king: "Trend King",
+    badge_og_creator: "OG Creator",
+    badge_founder: "Founder",
+  }[badge] || String(badge || "").replace(/^badge_/, "").replace(/_/g, " "));
 
 const normalizeExternalHref = (value = "") => {
   const trimmed = String(value || "").trim();
@@ -710,6 +732,9 @@ const Profile = () => {
   );
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
   const verified = Boolean(user?.isVerified || user?.verified);
+  const equippedFrame = user?.equippedFrame || user?.marketplace?.equippedFrame || "";
+  const equippedBadges = Array.isArray(user?.equippedBadges) ? user.equippedBadges : Array.isArray(user?.creatorBadges) ? user.creatorBadges : [];
+  const frameGradient = frameClassFor(equippedFrame);
   const skills = Array.isArray(user?.skills) ? user.skills.filter(Boolean) : [];
   const isOwnProfile = currentUser?._id && user?._id && currentUser._id === user._id;
   const isFollowing = Boolean(user?.isFollowing);
@@ -1402,8 +1427,9 @@ const Profile = () => {
         </div>
 
         <div className="px-4 pb-6 text-center sm:px-6">
-          <div className="relative mx-auto -mt-16 h-32 w-32 rounded-full border-4 border-white bg-slate-100 shadow-xl">
-            <img src={mediaUrl(profilePicture || activeImageUrl)} alt={user.name} className="h-full w-full rounded-full object-cover" />
+          <div className={`relative mx-auto -mt-16 h-32 w-32 rounded-full ${frameGradient ? `bg-gradient-to-br ${frameGradient} p-1 shadow-[0_0_32px_rgba(34,197,94,0.45)]` : "border-4 border-white bg-slate-100 shadow-xl"}`}>
+            {frameGradient && <motion.span className="absolute inset-[-7px] rounded-full bg-inherit opacity-40 blur-md" animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} />}
+            <img src={mediaUrl(profilePicture || activeImageUrl)} alt={user.name} className="relative h-full w-full rounded-full border-4 border-white object-cover" />
             {verified && <BadgeCheck className="absolute bottom-2 right-1 h-8 w-8 rounded-full fill-sky-500 text-white shadow" aria-label="Verified creator" />}
           </div>
 
@@ -1411,6 +1437,16 @@ const Profile = () => {
             <h1 className="text-3xl font-black text-navy sm:text-4xl">{user.name}</h1>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-500">{user.role || "Creator"}</span>
           </div>
+          {equippedBadges.length > 0 && (
+            <div className="mx-auto mt-3 flex max-w-2xl flex-wrap items-center justify-center gap-2">
+              {equippedBadges.slice(0, 5).map((badge) => (
+                <span key={badge} className="inline-flex items-center gap-1 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-black capitalize text-brand shadow">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {badgeLabel(badge)}
+                </span>
+              ))}
+            </div>
+          )}
           <p className="mt-1 text-sm font-bold text-slate-500">@{user.username || "creator"}</p>
 
           <div className="mx-auto mt-5 grid max-w-2xl grid-cols-4 gap-2 rounded-lg bg-slate-50 p-2">

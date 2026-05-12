@@ -8,14 +8,25 @@ const ProfileCard = ({ user }) => {
   const image = user?.profilePicture || user?.profileImage || user?.images?.[0] || user?.gallery?.[0] || "/logo.png";
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
   const verified = Boolean(user?.isVerified || user?.verified);
+  const frame = user?.equippedFrame || user?.marketplace?.equippedFrame || "";
+  const frameTone = {
+    frame_neon_glow: "from-emerald-300 to-cyan-400",
+    frame_gold_elite: "from-yellow-200 to-amber-500",
+    frame_fire_aura: "from-orange-400 to-rose-600",
+    frame_diamond_ring: "from-cyan-200 to-violet-500",
+    frame_rwanda_pride: "from-sky-500 via-yellow-300 to-emerald-500",
+    frame_creator_legend: "from-fuchsia-400 via-amber-300 to-cyan-300",
+    frame_cyber_pulse: "from-blue-500 to-teal-300",
+  }[frame];
+  const badges = Array.isArray(user?.equippedBadges) ? user.equippedBadges : Array.isArray(user?.creatorBadges) ? user.creatorBadges : [];
   const skills = Array.isArray(user?.skills) ? user.skills.filter(Boolean).slice(0, 4) : [];
   const displayLocation = user.location || user.district || user.province || "Rwanda";
   const handle = user?.username ? `@${user.username}` : "@creator";
 
   return (
     <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft transition hover:-translate-y-1 hover:shadow-lg">
-      <div className="aspect-[4/3] bg-slate-100">
-        <img src={mediaUrl(image)} alt={user.name} className="h-full w-full object-cover" loading="lazy" />
+      <div className={`aspect-[4/3] bg-slate-100 ${frameTone ? `bg-gradient-to-br ${frameTone} p-1` : ""}`}>
+        <img src={mediaUrl(image)} alt={user.name} className="h-full w-full rounded-md object-cover" loading="lazy" />
       </div>
       <div className="space-y-4 p-5">
         <div>
@@ -29,6 +40,11 @@ const ProfileCard = ({ user }) => {
                     Premium
                   </span>
                 )}
+                {badges.slice(0, 2).map((badge) => (
+                  <span key={badge} className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] font-bold capitalize text-brand">
+                    {String(badge).replace(/^badge_/, "").replace(/_/g, " ")}
+                  </span>
+                ))}
               </div>
               <p className="text-sm text-slate-500">{handle}</p>
             </div>

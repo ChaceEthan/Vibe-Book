@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 
 const User = require("../models/User");
 const { buildAccessState, syncTrialState } = require("../utils/accessControl");
@@ -9,6 +10,9 @@ const { sendVerificationEmail } = require("../utils/emailService");
 const { sendPhoneVerificationSms } = require("../utils/smsService");
 const { createNotification } = require("../utils/notifications");
 const { normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
+const walletService = require("../modules/wallet/walletService");
+const { getIo } = require("../socket");
+const { formatWalletResponse, formatTransactionResponse } = require("../modules/wallet/walletUtils");
 const {
   normalizeEmail,
   normalizeProfileFields,
@@ -177,8 +181,22 @@ const getReferralLink = (referralCode) => {
     return "";
   }
 
-  const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || "").replace(/\/$/, "");
+  const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5174").replace(/\/$/, "");
   return `${frontendUrl}/register?ref=${referralCode}`;
+};
+
+const referralFingerprintFor = (req) => {
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const ip = forwardedFor || req.ip || req.socket?.remoteAddress || "";
+  const userAgent = String(req.headers["user-agent"] || "").slice(0, 240);
+  return crypto.createHash("sha256").update(`${ip}|${userAgent}`).digest("hex");
+};
+
+const emitToUser = (userId, event, payload = {}) => {
+  const io = getIo?.();
+  if (io && userId) {
+    io.to(userId.toString()).emit(event, payload);
+  }
 };
 
 const userResponse = (user) => {
@@ -468,10 +486,18 @@ const register = async (req, res, next) => {
     }
 
     const refCode = typeof req.body.referralCode === "string" ? req.body.referralCode.trim() : "";
+    const referralFingerprint = referralFingerprintFor(req);
     const referrer = refCode ? await User.findOne({ referralCode: refCode }) : null;
+    const deviceReferralUsed = referrer
+      ? await User.exists({
+          referredBy: referrer._id,
+          referralFingerprint,
+        })
+      : null;
 
-    if (referrer) {
+    if (referrer && !deviceReferralUsed) {
       userData.referredBy = referrer._id;
+      userData.referralFingerprint = referralFingerprint;
     }
 
     const user = await User.create({
@@ -483,9 +509,31 @@ const register = async (req, res, next) => {
       password: hashedPassword,
     });
 
-    if (referrer) {
+    if (referrer && !deviceReferralUsed && referrer._id.toString() !== user._id.toString()) {
       await User.findByIdAndUpdate(referrer._id, { $inc: { referredUsers: 1 } });
+      walletService
+        .rewardReferral(referrer._id, user._id)
+        .then((result) => {
+          const payload = {
+            type: "referral",
+            amount: Number(result.transaction?.amount || 0),
+            wallet: formatWalletResponse(result.wallet),
+            transaction: formatTransactionResponse(result.transaction),
+            referredUserId: user._id,
+            message: "Referral signup bonus earned",
+          };
+          emitToUser(referrer._id, "wallet:update", payload.wallet);
+          emitToUser(referrer._id, "wallet:reward", payload);
+          emitToUser(referrer._id, "referral:success", payload);
+        })
+        .catch((error) => {
+          console.error("[wallet] referral reward failed:", error.message);
+        });
     }
+
+    walletService.createWallet(user._id).catch((error) => {
+      console.error("[wallet] signup initialization failed:", error.message);
+    });
 
     const isolatedUser = await applyAdminIsolation(user);
 
@@ -542,6 +590,9 @@ const login = async (req, res, next) => {
 
     await applyAdminIsolation(user);
     await syncTrialState(user);
+    walletService.createWallet(user._id).catch((error) => {
+      console.error("[wallet] login initialization failed:", error.message);
+    });
 
     return res.json({
       user: userResponse(user),
