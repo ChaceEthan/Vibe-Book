@@ -1,6 +1,8 @@
 // @ts-nocheck
 import axios from "axios";
 
+import { APP_ROOT_URL } from "../config/env";
+
 const DEFAULT_API_ROOT = "https://vibe-book-fri1.onrender.com";
 const rawApiRoot = import.meta.env.VITE_API_URL || DEFAULT_API_ROOT;
 
