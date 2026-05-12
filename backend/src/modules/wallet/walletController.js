@@ -72,6 +72,16 @@ const emitToUser = (userId, event, payload = {}) => {
   }
 };
 
+const emitDailyRewardEvents = (userId, wallet, payload) => {
+  try {
+    emitToUser(userId, "wallet:update", wallet);
+    emitToUser(userId, "wallet:reward", payload);
+    emitToUser(userId, "reward:claimed", payload);
+  } catch (error) {
+    console.error("[wallet] daily reward emit failed", error);
+  }
+};
+
 /**
  * GET /api/wallet
  * Get current user's wallet
@@ -210,9 +220,7 @@ const claimDailyReward = async (req, res, next) => {
       message: "Daily reward claimed successfully",
     };
 
-    emitToUser(userId, "wallet:update", wallet);
-    emitToUser(userId, "wallet:reward", payload);
-    emitToUser(userId, "reward:claimed", payload);
+    emitDailyRewardEvents(userId, wallet, payload);
 
     return walletSuccess(res, "Daily reward claimed successfully", {
       wallet,

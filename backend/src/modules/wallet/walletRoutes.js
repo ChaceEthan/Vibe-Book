@@ -84,7 +84,7 @@ router.get("/settings", authMiddleware, getWalletSettings);
 router.patch("/settings", authMiddleware, walletLimiter, updateWalletSettings);
 router.get("/history", authMiddleware, getTransactionHistory);
 router.post("/transfer", authMiddleware, walletLimiter, transferLimiter, transferPoints);
-router.post("/reward/daily", authMiddleware, walletLimiter, rewardLimiter, claimDailyReward);
+router.post("/reward/daily", authMiddleware, walletLimiter, rewardLimiter, (req, res, next) => claimDailyReward(req, res, next));
 router.post("/reward/redeem", authMiddleware, walletLimiter, rewardLimiter, redeemReward);
 router.post("/reward/referral", authMiddleware, walletLimiter, rewardLimiter, referralReward);
 router.post("/spend", authMiddleware, walletLimiter, spendPoints);
