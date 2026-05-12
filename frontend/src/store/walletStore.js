@@ -5,6 +5,7 @@ import { getApiErrorMessage, marketplaceApi, walletApi } from "../services/api";
 import { connectSocket } from "../services/socket";
 
 const HISTORY_LIMIT = 20;
+let dailyClaimRequestInFlight = false;
 
 const DEFAULT_WALLET = {
   userId: "",
@@ -230,9 +231,15 @@ export const useWalletStore = create((set, get) => ({
 
   pushNotification: (notification = {}) => {
     const id = notification.id || `${notification.type || "wallet"}-${Date.now()}-${Math.random()}`;
-    set((state) => ({
-      notifications: [{ id, createdAt: new Date().toISOString(), ...notification }, ...state.notifications].slice(0, 6),
-    }));
+    set((state) => {
+      if (state.notifications.some((item) => item.id === id)) {
+        return { notifications: state.notifications };
+      }
+
+      return {
+        notifications: [{ id, createdAt: new Date().toISOString(), ...notification }, ...state.notifications].slice(0, 6),
+      };
+    });
     window.setTimeout(() => {
       set((state) => ({ notifications: state.notifications.filter((item) => item.id !== id) }));
     }, notification.duration || 4200);
@@ -535,14 +542,19 @@ export const useWalletStore = create((set, get) => ({
   },
 
   claimDailyReward: async () => {
-    const { requestLocks, wallet, pushNotification } = get();
-    if (requestLocks.daily) return { ok: false, message: "Reward request already in progress." };
+    const { loading, requestLocks, wallet, pushNotification } = get();
+    if (loading || requestLocks.daily || dailyClaimRequestInFlight) {
+      return { ok: false, message: "Reward request already in progress." };
+    }
+
     const nextClaimMs = get().cooldowns?.daily ? new Date(get().cooldowns.daily).getTime() : 0;
     if (nextClaimMs > Date.now()) {
       const message = "Daily reward is still cooling down.";
-      pushNotification({ type: "warning", title: "Come back soon", message });
+      pushNotification({ id: "daily-reward-cooldown", type: "warning", title: "Come back soon", message });
       return { ok: false, message };
     }
+
+    dailyClaimRequestInFlight = true;
 
     const optimisticAmount = dailyRewardEstimate(wallet);
     const previousWallet = normalizeWallet(wallet);
@@ -583,7 +595,7 @@ export const useWalletStore = create((set, get) => ({
           : asArray(state.transactions).map((item) => (item._id === optimisticTransaction._id ? { ...item, status: "completed" } : item)),
         cooldowns: { ...state.cooldowns, daily: data?.nextClaimTime || dailyCooldownFromWallet(wallet) || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() },
       }));
-      pushNotification({ type: "reward", title: "Daily reward earned", amount: data?.rewardAmount || transaction?.amount || optimisticAmount, message: data?.message || "Daily reward claimed successfully" });
+      pushNotification({ id: `daily-reward-${transaction?._id || data?.nextClaimTime || "claimed"}`, type: "reward", title: "Daily reward earned", amount: data?.rewardAmount || transaction?.amount || optimisticAmount, message: data?.message || "Daily reward claimed successfully" });
       return { ok: true, data };
     } catch (error) {
       logWalletError(error);
@@ -596,9 +608,10 @@ export const useWalletStore = create((set, get) => ({
           : state.cooldowns,
         error: message,
       }));
-      pushNotification({ type: "warning", title: "Daily reward failed", message });
+      pushNotification({ id: "daily-reward-failed", type: "warning", title: "Daily reward failed", message });
       return { ok: false, message };
     } finally {
+      dailyClaimRequestInFlight = false;
       set((state) => ({ requestLocks: { ...state.requestLocks, daily: false } }));
     }
   },
@@ -744,7 +757,10 @@ export const useWalletStore = create((set, get) => ({
         transactions: prependTransaction(state.transactions, transaction),
         cooldowns: payload.nextClaimTime ? { ...state.cooldowns, daily: payload.nextClaimTime } : state.cooldowns,
       }));
-      get().pushNotification({ type: "reward", title: payload.message || "Reward earned", amount: payload.amount, message: payload.source || payload.type });
+      const notificationId = payload.type === "daily_login"
+        ? `daily-reward-${transaction?._id || payload.nextClaimTime || "claimed"}`
+        : undefined;
+      get().pushNotification({ id: notificationId, type: "reward", title: payload.message || "Reward earned", amount: payload.amount, message: payload.source || payload.type });
     };
     const handleGift = (payload = {}) => {
       if (!payload || typeof payload !== "object") return;

@@ -82,6 +82,8 @@ const emitDailyRewardEvents = (userId, wallet, payload) => {
   }
 };
 
+const dailyRewardClaimsInFlight = new Set();
+
 /**
  * GET /api/wallet
  * Get current user's wallet
@@ -193,16 +195,36 @@ const transferPoints = async (req, res, next) => {
  * POST /api/wallet/reward/daily
  * Claim daily login reward
  */
-const claimDailyReward = async (req, res, next) => {
-  try {
-    const userId = req.user?._id;
+const claimDailyReward = async (req, res) => {
+  let claimKey = "";
 
-    if (!userId) {
-      return walletFailure(res, 401, "Authentication required");
+  try {
+    const userId = req.user?._id || req.user?.id;
+    claimKey = userId?.toString?.() || "";
+
+    if (!claimKey || !claimKey.match(/^[0-9a-fA-F]{24}$/)) {
+      return walletFailure(res, 400, "Invalid wallet user");
     }
 
+    if (dailyRewardClaimsInFlight.has(claimKey)) {
+      return walletFailure(res, 409, "Daily reward claim already in progress", {
+        code: "DAILY_REWARD_CLAIM_IN_PROGRESS",
+      });
+    }
+
+    dailyRewardClaimsInFlight.add(claimKey);
+
     const result = await walletService.rewardDailyLogin(userId);
-    const wallet = formatWalletResponse(result.wallet);
+    if (!result?.wallet) {
+      return walletFailure(res, 400, "Invalid wallet state");
+    }
+
+    const wallet = {
+      balance: 0,
+      lifetimeEarned: 0,
+      streakCount: 0,
+      ...(formatWalletResponse(result.wallet) || {}),
+    };
     const transaction = formatTransactionResponse(result.transaction);
     const rewardAmount = Number(result.transaction?.amount || 0);
     const nextClaimTime = result.nextClaimTime ||
@@ -216,7 +238,7 @@ const claimDailyReward = async (req, res, next) => {
       wallet,
       transaction,
       nextClaimTime,
-      streakCount: wallet?.streakCount,
+      streakCount: Number(wallet?.streakCount ?? 0),
       message: "Daily reward claimed successfully",
     };
 
@@ -225,12 +247,37 @@ const claimDailyReward = async (req, res, next) => {
     return walletSuccess(res, "Daily reward claimed successfully", {
       wallet,
       transaction,
+      reward: rewardAmount,
       rewardAmount,
       nextClaimTime,
-      streakCount: wallet?.streakCount,
+      streak: Number(wallet?.streakCount ?? 0),
+      streakCount: Number(wallet?.streakCount ?? 0),
     });
   } catch (error) {
-    return handleWalletError(req, res, next, error);
+    console.error("[DAILY_REWARD_ERROR]", error);
+
+    if (res.headersSent) {
+      return undefined;
+    }
+
+    const message = error.message || "Daily reward failed";
+    const alreadyClaimed = error.code === "DAILY_REWARD_ALREADY_CLAIMED";
+    const invalidWallet = error.message === "Invalid user ID" || error.name === "CastError" || error.name === "ValidationError";
+    const status = alreadyClaimed ? 409 : invalidWallet ? 400 : statusForWalletError(error);
+    const responseMessage = alreadyClaimed ? "Already claimed today" : message;
+
+    return res.status(status).json({
+      success: false,
+      message: responseMessage,
+      data: null,
+      error: responseMessage,
+      ...(error.code ? { code: error.code } : {}),
+      ...(error.nextClaimTime ? { nextClaimTime: error.nextClaimTime } : {}),
+    });
+  } finally {
+    if (claimKey) {
+      dailyRewardClaimsInFlight.delete(claimKey);
+    }
   }
 };
 

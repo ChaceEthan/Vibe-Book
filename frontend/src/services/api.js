@@ -221,7 +221,12 @@ export const walletApi = {
   settings: () => API.get("/wallet/settings", { timeout: WALLET_REQUEST_TIMEOUT_MS }),
   updateSettings: (payload = {}) => API.patch("/wallet/settings", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
   history: (params = {}) => API.get("/wallet/history", { params, timeout: WALLET_REQUEST_TIMEOUT_MS }),
-  claimDaily: () => API.post("/wallet/reward/daily", {}, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  claimDaily: () => API.post("/wallet/reward/daily", {}, {
+    timeout: WALLET_REQUEST_TIMEOUT_MS,
+    headers: { "Cache-Control": "no-store" },
+    "axios-retry": { retries: 0 },
+    retry: false,
+  }),
   redeem: (payload = {}) => API.post("/wallet/reward/redeem", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
   referral: (payload = {}) => API.post("/wallet/reward/referral", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
   spend: (payload = {}) => API.post("/wallet/spend", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
