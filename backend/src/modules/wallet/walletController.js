@@ -16,7 +16,9 @@ const statusForWalletError = (error = {}) => {
   if (error.code === "DAILY_REWARD_ALREADY_CLAIMED") return 429;
   if (error.code === "REFERRAL_ALREADY_REWARDED") return 409;
   if (error.code === "INSUFFICIENT_BALANCE") return 402;
-  if (["SELF_REFERRAL", "SELF_TRANSFER", "INVALID_QR_PAYLOAD", "QR_EXPIRED", "SELF_QR_SCAN"].includes(error.code)) return 400;
+  if (error.code === "TRANSFER_COOLDOWN") return 429;
+  if (error.code === "RECIPIENT_NOT_FOUND") return 404;
+  if (["SELF_REFERRAL", "SELF_TRANSFER", "RECIPIENT_REQUIRED", "RECEIVE_DISABLED", "INVALID_QR_PAYLOAD", "QR_EXPIRED", "SELF_QR_SCAN"].includes(error.code)) return 400;
   if (error.name === "ValidationError" || error.name === "CastError") return 400;
 
   return 500;
@@ -82,9 +84,13 @@ const getWallet = async (req, res, next) => {
       return walletFailure(res, 401, "Authentication required");
     }
 
-    const wallet = await walletService.getWallet(userId);
+    const profile = await walletService.getWalletIdentityProfile(userId);
 
-    return walletSuccess(res, "Wallet loaded successfully", { wallet: formatWalletResponse(wallet) });
+    return walletSuccess(res, "Wallet loaded successfully", {
+      wallet: formatWalletResponse(profile.wallet),
+      identity: profile.identity,
+      settings: profile.settings,
+    });
   } catch (error) {
     return handleWalletError(req, res, next, error);
   }
@@ -126,25 +132,28 @@ const getTransactionHistory = async (req, res, next) => {
 const transferPoints = async (req, res, next) => {
   try {
     const senderId = req.user?._id;
-    const { receiverId, amount } = req.body;
+    const { receiverId, recipient, identifier, walletId, nexHandle, username, amount } = req.body || {};
 
     if (!senderId) {
       return walletFailure(res, 401, "Authentication required");
     }
 
-    if (!receiverId || !amount) {
-      return walletFailure(res, 400, "Missing required fields: receiverId, amount");
+    if (!(receiverId || recipient || identifier || walletId || nexHandle || username) || !amount) {
+      return walletFailure(res, 400, "Missing required fields: recipient and amount");
     }
 
-    const result = await walletService.transferPoints(senderId, receiverId, amount);
+    const result = await walletService.transferByIdentifier(senderId, req.body || {}, {
+      ipHash: req.ip,
+      userAgentHash: req.get?.("user-agent") || "",
+    });
     const senderWallet = formatWalletResponse(result.sender);
     const receiverWallet = formatWalletResponse(result.receiver);
     const sendTransaction = formatTransactionResponse(result.sendTransaction);
     const receiveTransaction = formatTransactionResponse(result.receiveTransaction);
 
     emitToUser(senderId, "wallet:update", senderWallet);
-    emitToUser(receiverId, "wallet:update", receiverWallet);
-    emitToUser(receiverId, "wallet:reward", {
+    emitToUser(result.receiverUser?._id || result.receiver?.userId, "wallet:update", receiverWallet);
+    emitToUser(result.receiverUser?._id || result.receiver?.userId, "wallet:reward", {
       type: "transfer_received",
       amount: result.receiveTransaction.amount,
       wallet: receiverWallet,
@@ -155,7 +164,15 @@ const transferPoints = async (req, res, next) => {
     return walletSuccess(res, "Transfer completed successfully", {
       sender: senderWallet,
       receiver: receiverWallet,
+      recipient: {
+        userId: result.receiverUser?._id,
+        username: result.receiverUser?.username,
+        name: result.receiverUser?.name,
+        walletId: result.receiverUser?.walletId,
+        nexHandle: result.receiverUser?.nexHandle,
+      },
       transaction: sendTransaction,
+      transfer: result.transfer,
     });
   } catch (error) {
     return handleWalletError(req, res, next, error);
@@ -314,6 +331,7 @@ const generateQr = async (req, res, next) => {
       qrPayload: result.qrPayload,
       qrText: result.qrText,
       expiresAt: result.expiresAt,
+      identity: result.identity,
     });
   } catch (error) {
     return handleWalletError(req, res, next, error);
@@ -342,6 +360,72 @@ const scanQr = async (req, res, next) => {
       receiver: result.receiver ? formatWalletResponse(result.receiver) : undefined,
       transaction: result.sendTransaction ? formatTransactionResponse(result.sendTransaction) : undefined,
       referralCode: result.referralCode,
+    });
+  } catch (error) {
+    return handleWalletError(req, res, next, error);
+  }
+};
+
+const getWalletIdentity = async (req, res, next) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return walletFailure(res, 401, "Authentication required");
+
+    const profile = await walletService.getWalletIdentityProfile(userId);
+    return walletSuccess(res, "Wallet identity loaded successfully", {
+      wallet: formatWalletResponse(profile.wallet),
+      identity: profile.identity,
+      settings: profile.settings,
+    });
+  } catch (error) {
+    return handleWalletError(req, res, next, error);
+  }
+};
+
+const getReceiveProfile = async (req, res, next) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return walletFailure(res, 401, "Authentication required");
+
+    const profile = await walletService.getWalletIdentityProfile(userId);
+    const qrPayload = profile.identity?.qrPayload;
+    return walletSuccess(res, "Receive profile loaded successfully", {
+      wallet: formatWalletResponse(profile.wallet),
+      identity: profile.identity,
+      qrPayload,
+      qrText: qrPayload ? Buffer.from(JSON.stringify(qrPayload)).toString("base64url") : "",
+      settings: profile.settings,
+    });
+  } catch (error) {
+    return handleWalletError(req, res, next, error);
+  }
+};
+
+const getWalletSettings = async (req, res, next) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return walletFailure(res, 401, "Authentication required");
+
+    const profile = await walletService.getWalletIdentityProfile(userId);
+    return walletSuccess(res, "Wallet settings loaded successfully", {
+      identity: profile.identity,
+      settings: profile.settings,
+    });
+  } catch (error) {
+    return handleWalletError(req, res, next, error);
+  }
+};
+
+const updateWalletSettings = async (req, res, next) => {
+  try {
+    const userId = req.user?._id;
+    if (!userId) return walletFailure(res, 401, "Authentication required");
+
+    const profile = await walletService.updateWalletSettings(userId, req.body || {});
+    return walletSuccess(res, "Wallet settings updated successfully", {
+      wallet: formatWalletResponse(profile.wallet),
+      identity: profile.identity,
+      settings: profile.settings,
     });
   } catch (error) {
     return handleWalletError(req, res, next, error);
@@ -417,6 +501,10 @@ const getTopSpenders = async (req, res, next) => {
 
 module.exports = {
   getWallet,
+  getWalletIdentity,
+  getReceiveProfile,
+  getWalletSettings,
+  updateWalletSettings,
   getTransactionHistory,
   transferPoints,
   claimDailyReward,

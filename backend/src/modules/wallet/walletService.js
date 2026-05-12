@@ -7,6 +7,7 @@
 
 const Wallet = require("./walletModel");
 const WalletTransaction = require("./walletTransactionModel");
+const WalletTransfer = require("./walletTransferModel");
 const User = require("../../models/User");
 const {
   TRANSACTION_TYPES,
@@ -14,10 +15,12 @@ const {
   TRANSACTION_STATUS,
   REWARD_AMOUNTS,
   DAILY_LOGIN_COOLDOWN_MS,
+  TRANSFER_COOLDOWN_MS,
   VIDEO_UPLOAD_COOLDOWN_MS,
 } = require("./walletConstants");
 const { validateAmount, validateUserId, sanitizeMetadata, calculateLevel, generateTransactionDescription } = require("./walletUtils");
 const { dailyRewardForStreak, nexCoinEstimate } = require("../../utils/pointsCalculator");
+const { ensureWalletIdentity, findUserByWalletIdentifier, serializeWalletIdentity, walletSettingsFor } = require("./walletIdentityService");
 
 const qrCache = new Map();
 
@@ -43,11 +46,58 @@ const syncTokenEstimate = async (wallet, session = null) => {
   return wallet.save({ ...(session ? { session } : {}) });
 };
 
+const identityMethodFor = (identifier = "") => {
+  const value = String(identifier || "").trim();
+  if (value.startsWith("VBX-") || value.startsWith("NEX-")) return "wallet_id";
+  if (value.startsWith("@") || value.toLowerCase().endsWith(".pay")) return "nex_handle";
+  if (value.match(/^[0-9a-fA-F]{24}$/)) return "user_id";
+  if (value) return "username";
+  return "unknown";
+};
+
+const getWalletIdentityProfile = async (userId) => {
+  validateUserId(userId);
+  const [wallet, user] = await Promise.all([
+    getWallet(userId),
+    ensureWalletIdentity(userId),
+  ]);
+  return {
+    wallet,
+    user,
+    identity: serializeWalletIdentity(user, wallet),
+    settings: walletSettingsFor(user),
+  };
+};
+
+const updateWalletSettings = async (userId, settings = {}) => {
+  validateUserId(userId);
+  await ensureWalletIdentity(userId);
+  const allowedPrivacy = ["public", "followers", "private"];
+  const update = {};
+
+  if (typeof settings.walletReceiveEnabled === "boolean") update.walletReceiveEnabled = settings.walletReceiveEnabled;
+  if (typeof settings.walletPinEnabled === "boolean") update.walletPinEnabled = settings.walletPinEnabled;
+  if (typeof settings.transferConfirmation === "boolean") update["walletSettings.transferConfirmation"] = settings.transferConfirmation;
+  if (typeof settings.receiveQrEnabled === "boolean") update["walletSettings.receiveQrEnabled"] = settings.receiveQrEnabled;
+  if (typeof settings.transferNotifications === "boolean") update["walletSettings.transferNotifications"] = settings.transferNotifications;
+  if (allowedPrivacy.includes(settings.privacyMode)) update["walletSettings.privacyMode"] = settings.privacyMode;
+
+  const user = await User.findByIdAndUpdate(userId, { $set: update }, { new: true, runValidators: true });
+  const wallet = await getWallet(userId);
+  return {
+    user,
+    wallet,
+    identity: serializeWalletIdentity(user, wallet),
+    settings: walletSettingsFor(user),
+  };
+};
+
 /**
  * Create wallet for user (auto-called on first access)
  */
 const createWallet = async (userId) => {
   validateUserId(userId);
+  await ensureWalletIdentity(userId);
 
   // Check if wallet already exists
   let wallet = await Wallet.findOne({ userId });
@@ -76,6 +126,7 @@ const createWallet = async (userId) => {
  */
 const getWallet = async (userId) => {
   validateUserId(userId);
+  await ensureWalletIdentity(userId);
 
   let wallet = await Wallet.findOne({ userId });
 
@@ -511,6 +562,102 @@ const rewardDailyLogin = async (userId) => {
   };
 };
 
+const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) => {
+  validateUserId(senderId);
+  const identifier = String(payload.receiverId || payload.recipient || payload.identifier || payload.walletId || payload.nexHandle || payload.username || "").trim();
+  const amount = validateAmount(payload.amount);
+
+  if (!identifier) {
+    const error = new Error("Choose a wallet ID, NEX handle, or username");
+    error.code = "RECIPIENT_REQUIRED";
+    throw error;
+  }
+
+  const [senderUser, receiverUser] = await Promise.all([
+    ensureWalletIdentity(senderId),
+    findUserByWalletIdentifier(identifier),
+  ]);
+
+  if (!receiverUser) {
+    const error = new Error("Recipient wallet was not found");
+    error.code = "RECIPIENT_NOT_FOUND";
+    throw error;
+  }
+
+  if (senderUser._id.toString() === receiverUser._id.toString()) {
+    const error = new Error("Cannot transfer to yourself");
+    error.code = "SELF_TRANSFER";
+    throw error;
+  }
+
+  if (receiverUser.walletReceiveEnabled === false) {
+    const error = new Error("This creator is not receiving NEX Points right now");
+    error.code = "RECEIVE_DISABLED";
+    throw error;
+  }
+
+  const recentTransfer = await WalletTransfer.findOne({
+    senderId,
+    status: { $in: ["pending", "completed"] },
+    createdAt: { $gte: new Date(Date.now() - TRANSFER_COOLDOWN_MS) },
+  }).lean();
+
+  if (recentTransfer) {
+    const error = new Error("Transfers are cooling down. Please wait a moment.");
+    error.code = "TRANSFER_COOLDOWN";
+    error.cooldownUntil = new Date(new Date(recentTransfer.createdAt).getTime() + TRANSFER_COOLDOWN_MS);
+    throw error;
+  }
+
+  const audit = await WalletTransfer.create({
+    senderId,
+    receiverId: receiverUser._id,
+    senderWalletId: senderUser.walletId,
+    receiverWalletId: receiverUser.walletId,
+    receiverIdentifier: identifier,
+    amount,
+    status: "pending",
+    method: identityMethodFor(identifier),
+    memo: String(payload.memo || "").slice(0, 180),
+    ipHash: requestMeta.ipHash,
+    userAgentHash: requestMeta.userAgentHash,
+    riskFlags: amount > 10000 ? ["large_transfer"] : [],
+  });
+
+  try {
+    const result = await transferPoints(senderId, receiverUser._id, amount, {
+      walletTransferId: audit._id.toString(),
+      receiverIdentifier: identifier,
+      receiverWalletId: receiverUser.walletId,
+      senderWalletId: senderUser.walletId,
+      nexHandle: receiverUser.nexHandle,
+      memo: payload.memo,
+      transferMethod: audit.method,
+    });
+
+    audit.status = "completed";
+    audit.sendTransactionId = result.sendTransaction?._id;
+    audit.receiveTransactionId = result.receiveTransaction?._id;
+    audit.completedAt = new Date();
+    await audit.save();
+
+    return {
+      ...result,
+      transfer: audit,
+      receiverUser,
+      senderUser,
+    };
+  } catch (error) {
+    await WalletTransfer.findByIdAndUpdate(audit._id, {
+      $set: {
+        status: "failed",
+        failureReason: error.message || "Transfer failed",
+      },
+    }).catch(() => null);
+    throw error;
+  }
+};
+
 /**
  * Reward video upload
  */
@@ -594,6 +741,7 @@ const spend = async (userId, payload = {}) => {
 const generateQr = async (userId, payload = {}) => {
   validateUserId(userId);
   const wallet = await getWallet(userId);
+  const user = await ensureWalletIdentity(userId);
   const amount = payload.amount ? validateAmount(payload.amount) : 0;
   const qrId = `nex_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -601,7 +749,12 @@ const generateQr = async (userId, payload = {}) => {
     type: payload.type || (amount ? "wallet_transfer" : "referral_invite"),
     qrId,
     recipientId: userId.toString(),
+    userId: userId.toString(),
+    walletId: user.walletId,
+    nexHandle: user.nexHandle,
+    username: user.username || user.name || "creator",
     amount,
+    chain: "NEX",
     memo: String(payload.memo || "VibeBook NEX").slice(0, 120),
     referralCode: payload.referralCode || "",
     expiresAt: expiresAt.toISOString(),
@@ -613,6 +766,7 @@ const generateQr = async (userId, payload = {}) => {
 
   return {
     wallet,
+    identity: serializeWalletIdentity(user, wallet),
     qrId,
     qrPayload,
     qrText: Buffer.from(JSON.stringify(qrPayload)).toString("base64url"),
@@ -874,6 +1028,7 @@ module.exports = {
   addPoints,
   spendPoints,
   transferPoints,
+  transferByIdentifier,
   sendGift,
   rewardDailyLogin,
   rewardVideoUpload,
@@ -889,4 +1044,6 @@ module.exports = {
   getTopEarners,
   getTopSpenders,
   verifyTransaction,
+  getWalletIdentityProfile,
+  updateWalletSettings,
 };

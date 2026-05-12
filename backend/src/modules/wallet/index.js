@@ -8,9 +8,11 @@ module.exports = {
   // Models
   Wallet: require("./walletModel"),
   WalletTransaction: require("./walletTransactionModel"),
+  WalletTransfer: require("./walletTransferModel"),
 
   // Service
   walletService: require("./walletService"),
+  walletIdentityService: require("./walletIdentityService"),
 
   // Controller
   walletController: require("./walletController"),

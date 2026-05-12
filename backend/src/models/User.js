@@ -449,6 +449,76 @@ const userSchema = new mongoose.Schema({
     trim: true,
     select: false,
   },
+  walletId: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    uppercase: true,
+    index: true,
+    maxlength: 32,
+  },
+  nexHandle: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    lowercase: true,
+    index: true,
+    maxlength: 42,
+  },
+  walletVerified: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  walletPinEnabled: {
+    type: Boolean,
+    default: false,
+  },
+  walletSecurityLevel: {
+    type: String,
+    enum: ["basic", "standard", "elevated", "locked"],
+    default: "basic",
+    index: true,
+  },
+  walletReceiveEnabled: {
+    type: Boolean,
+    default: true,
+  },
+  walletSettings: {
+    transferConfirmation: {
+      type: Boolean,
+      default: true,
+    },
+    receiveQrEnabled: {
+      type: Boolean,
+      default: true,
+    },
+    transferNotifications: {
+      type: Boolean,
+      default: true,
+    },
+    privacyMode: {
+      type: String,
+      enum: ["public", "followers", "private"],
+      default: "public",
+    },
+    linkedAccounts: {
+      mobileMoneyReady: { type: Boolean, default: false },
+      cryptoWalletReady: { type: Boolean, default: false },
+      bankAccountReady: { type: Boolean, default: false },
+      stablecoinReady: { type: Boolean, default: false },
+      nexCoinReady: { type: Boolean, default: true },
+    },
+    futureCashoutMethods: {
+      mobileMoney: { type: Boolean, default: false },
+      bank: { type: Boolean, default: false },
+      crypto: { type: Boolean, default: false },
+      stablecoin: { type: Boolean, default: false },
+      nexCoin: { type: Boolean, default: true },
+    },
+  },
   trialStartDate: {
     type: Date,
     default: Date.now,
@@ -748,6 +818,24 @@ userSchema.index(
     sparse: true,
     name: "uniq_user_email_normalized",
     partialFilterExpression: { emailNormalized: { $type: "string" } },
+  }
+);
+userSchema.index(
+  { walletId: 1 },
+  {
+    unique: true,
+    sparse: true,
+    name: "uniq_user_wallet_id",
+    partialFilterExpression: { walletId: { $type: "string" } },
+  }
+);
+userSchema.index(
+  { nexHandle: 1 },
+  {
+    unique: true,
+    sparse: true,
+    name: "uniq_user_nex_handle",
+    partialFilterExpression: { nexHandle: { $type: "string" } },
   }
 );
 const User = mongoose.model("User", userSchema);

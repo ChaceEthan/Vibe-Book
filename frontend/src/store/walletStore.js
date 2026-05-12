@@ -17,6 +17,8 @@ const DEFAULT_WALLET = {
   lastLoginDate: null,
   level: 1,
   levelName: "Starter",
+  identity: {},
+  tokenMigration: {},
   createdAt: null,
   updatedAt: null,
 };
@@ -76,7 +78,6 @@ const FALLBACK_STORE_ITEMS = [
     price: 150,
     rarity: "epic",
     levelRequired: 1,
-    preview: { emoji: "◇", gradient: "from-cyan-300 via-fuchsia-500 to-violet-700" },
     preview: { icon: "sparkles", gradient: "from-cyan-300 via-fuchsia-500 to-violet-700", frameStyle: "neon" },
     metadata: { frameStyle: "neon", collection: "Neon Creator Frames" },
   },
@@ -89,7 +90,6 @@ const FALLBACK_STORE_ITEMS = [
     rarity: "rare",
     levelRequired: 1,
     durationHours: 24,
-    preview: { emoji: "↗", gradient: "from-emerald-300 to-sky-600" },
     preview: { icon: "rocket", gradient: "from-emerald-300 to-sky-600" },
   },
   {
@@ -100,7 +100,6 @@ const FALLBACK_STORE_ITEMS = [
     price: 500,
     rarity: "legendary",
     levelRequired: 1,
-    preview: { emoji: "N", gradient: "from-amber-300 to-orange-700" },
   },
 ];
 
@@ -121,6 +120,9 @@ const normalizeWallet = (wallet = {}) => {
     lastLoginDate: source.lastLoginDate || null,
     level: Number(source.level ?? 1),
     levelName: source.levelName || "Starter",
+    identity: source.identity && typeof source.identity === "object" ? source.identity : {},
+    tokenMigration: source.tokenMigration && typeof source.tokenMigration === "object" ? source.tokenMigration : {},
+    tokenBalance: Number(source.tokenBalance ?? source.tokenMigration?.estimatedCoins ?? 0),
   };
 };
 
@@ -217,6 +219,9 @@ export const useWalletStore = create((set, get) => ({
   notifications: [],
   storeItems: [],
   inventory: { ownedFrames: [], ownedBadges: [], ownedReactions: [], ownedThemes: [], ownedBoosts: [], ownedFeatured: [], active: {} },
+  walletIdentity: {},
+  walletSettings: {},
+  receiveProfile: {},
   activeBoosts: [],
   featuredQueue: [],
   storeLoading: false,
@@ -240,7 +245,9 @@ export const useWalletStore = create((set, get) => ({
       const data = apiDataOrThrow(response, "Unable to load wallet.");
       const wallet = normalizeWallet(data?.wallet || get().wallet);
       set((state) => ({
-        wallet,
+        wallet: normalizeWallet({ ...wallet, identity: data?.identity || wallet.identity }),
+        walletIdentity: data?.identity || state.walletIdentity,
+        walletSettings: data?.settings || state.walletSettings,
         walletLoaded: true,
         cooldowns: dailyCooldownFromWallet(wallet) ? { ...state.cooldowns, daily: dailyCooldownFromWallet(wallet) } : state.cooldowns,
       }));
@@ -325,6 +332,94 @@ export const useWalletStore = create((set, get) => ({
       });
     } finally {
       set({ storeLoading: false });
+    }
+  },
+
+  loadWalletIdentity: async () => {
+    set((state) => ({ requestLocks: { ...state.requestLocks, identity: true }, error: "" }));
+    try {
+      const response = await walletApi.identity();
+      const data = apiDataOrThrow(response, "Unable to load wallet identity.");
+      set((state) => ({
+        wallet: normalizeWallet({ ...(data?.wallet || state.wallet), identity: data?.identity || state.walletIdentity }),
+        walletIdentity: data?.identity || state.walletIdentity,
+        walletSettings: data?.settings || state.walletSettings,
+        walletLoaded: true,
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      logWalletError(error);
+      const message = getApiErrorMessage(error, "Unable to load wallet identity.");
+      set({ error: message });
+      return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, identity: false } }));
+    }
+  },
+
+  loadReceiveProfile: async () => {
+    set((state) => ({ requestLocks: { ...state.requestLocks, receive: true }, error: "" }));
+    try {
+      const response = await walletApi.receive();
+      const data = apiDataOrThrow(response, "Unable to load receive profile.");
+      set((state) => ({
+        wallet: normalizeWallet({ ...(data?.wallet || state.wallet), identity: data?.identity || state.walletIdentity }),
+        walletIdentity: data?.identity || state.walletIdentity,
+        walletSettings: data?.settings || state.walletSettings,
+        receiveProfile: data,
+        walletLoaded: true,
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      logWalletError(error);
+      const message = getApiErrorMessage(error, "Unable to load receive profile.");
+      set({ error: message });
+      return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, receive: false } }));
+    }
+  },
+
+  loadWalletSettings: async () => {
+    set((state) => ({ requestLocks: { ...state.requestLocks, settings: true }, error: "" }));
+    try {
+      const response = await walletApi.settings();
+      const data = apiDataOrThrow(response, "Unable to load wallet settings.");
+      set((state) => ({
+        walletIdentity: data?.identity || state.walletIdentity,
+        walletSettings: data?.settings || state.walletSettings,
+      }));
+      return { ok: true, data };
+    } catch (error) {
+      logWalletError(error);
+      const message = getApiErrorMessage(error, "Unable to load wallet settings.");
+      set({ error: message });
+      return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, settings: false } }));
+    }
+  },
+
+  updateWalletSettings: async (payload = {}) => {
+    set((state) => ({ requestLocks: { ...state.requestLocks, settingsSave: true }, error: "" }));
+    try {
+      const response = await walletApi.updateSettings(payload);
+      const data = apiDataOrThrow(response, "Unable to update wallet settings.");
+      set((state) => ({
+        wallet: data?.wallet ? normalizeWallet({ ...data.wallet, identity: data?.identity || state.walletIdentity }) : state.wallet,
+        walletIdentity: data?.identity || state.walletIdentity,
+        walletSettings: data?.settings || state.walletSettings,
+      }));
+      get().pushNotification({ type: "settings", title: "Wallet settings saved", message: data?.message || "Security preferences updated." });
+      return { ok: true, data };
+    } catch (error) {
+      logWalletError(error);
+      const message = getApiErrorMessage(error, "Unable to update wallet settings.");
+      set({ error: message });
+      get().pushNotification({ type: "warning", title: "Settings failed", message });
+      return { ok: false, message };
+    } finally {
+      set((state) => ({ requestLocks: { ...state.requestLocks, settingsSave: false } }));
     }
   },
 
@@ -586,8 +681,9 @@ export const useWalletStore = create((set, get) => ({
     if (requestLocks.transfer) return { ok: false, message: "Transfer already in progress." };
 
     const amount = Number(payload.amount || 0);
-    if (!payload.receiverId || !amount || amount < 1) {
-      return { ok: false, message: "Enter a valid creator ID and amount." };
+    const recipient = payload.receiverId || payload.recipient || payload.walletId || payload.nexHandle || payload.username;
+    if (!recipient || !amount || amount < 1) {
+      return { ok: false, message: "Enter a valid wallet ID, NEX handle, username, and amount." };
     }
 
     set((state) => ({

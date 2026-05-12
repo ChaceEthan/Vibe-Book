@@ -216,6 +216,10 @@ export const creatorApi = {
 
 export const walletApi = {
   get: () => API.get("/wallet", { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  identity: () => API.get("/wallet/identity", { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  receive: () => API.get("/wallet/receive", { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  settings: () => API.get("/wallet/settings", { timeout: WALLET_REQUEST_TIMEOUT_MS }),
+  updateSettings: (payload = {}) => API.patch("/wallet/settings", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
   history: (params = {}) => API.get("/wallet/history", { params, timeout: WALLET_REQUEST_TIMEOUT_MS }),
   claimDaily: () => API.post("/wallet/reward/daily", {}, { timeout: WALLET_REQUEST_TIMEOUT_MS }),
   redeem: (payload = {}) => API.post("/wallet/reward/redeem", payload, { timeout: WALLET_REQUEST_TIMEOUT_MS }),

@@ -11,6 +11,10 @@ const rateLimit = require("express-rate-limit");
 
 const {
   getWallet,
+  getWalletIdentity,
+  getReceiveProfile,
+  getWalletSettings,
+  updateWalletSettings,
   getTransactionHistory,
   transferPoints,
   claimDailyReward,
@@ -74,6 +78,10 @@ router.get("/leaderboard/spenders", getTopSpenders);
 
 // Protected routes (require authentication)
 router.get("/", authMiddleware, getWallet);
+router.get("/identity", authMiddleware, getWalletIdentity);
+router.get("/receive", authMiddleware, getReceiveProfile);
+router.get("/settings", authMiddleware, getWalletSettings);
+router.patch("/settings", authMiddleware, walletLimiter, updateWalletSettings);
 router.get("/history", authMiddleware, getTransactionHistory);
 router.post("/transfer", authMiddleware, walletLimiter, transferLimiter, transferPoints);
 router.post("/reward/daily", authMiddleware, walletLimiter, rewardLimiter, claimDailyReward);

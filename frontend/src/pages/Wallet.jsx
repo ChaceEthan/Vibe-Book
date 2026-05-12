@@ -60,11 +60,13 @@ const GIFTS = [
 
 const NAV = [
   { to: "/wallet", label: "Wallet", icon: WalletIcon },
+  { to: "/wallet/receive", label: "Receive", icon: QrCode },
+  { to: "/wallet/transfer", label: "Transfer", icon: Send },
   { to: "/wallet/referrals", label: "Invite", icon: UserPlus },
   { to: "/wallet/leaderboard", label: "Ranks", icon: Trophy },
   { to: "/wallet/transactions", label: "History", icon: History },
-  { to: "/wallet/rewards", label: "Rewards", icon: Store },
   { to: "/wallet/store", label: "Store", icon: Crown },
+  { to: "/wallet/settings", label: "Settings", icon: ShieldCheck },
 ];
 
 const formatNumber = (value = 0) => new Intl.NumberFormat("en").format(Number(value || 0));
@@ -76,6 +78,7 @@ const itemIdOf = (value) => {
   if (typeof value === "string") return value.trim();
   return String(value?.itemId || value?._id || value?.id || "").trim();
 };
+const walletIdentityOf = (wallet = {}, identity = {}) => safeObject(identity?.walletId ? identity : wallet?.identity);
 
 const getLevelMeta = (wallet = {}) => {
   const earned = Number(wallet?.lifetimeEarned || 0);
@@ -192,7 +195,7 @@ const StatCard = ({ icon: Icon, label, value, detail }) => (
 
 const WalletTopNav = ({ section }) => (
   <div className="sticky top-16 z-30 -mx-3 mb-3 border-y border-slate-200 bg-slate-100/95 px-3 py-2 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0">
-    <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+    <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
       {NAV.map((item) => {
         const Icon = item.icon;
         const active = item.to === "/wallet" ? section === "dashboard" : item.to.endsWith(section);
@@ -213,7 +216,9 @@ const BalanceHero = ({ user, wallet, socketConnected }) => {
   const LevelIcon = current?.icon || Star;
   const points = Number(wallet?.balance || 0);
   const futureToken = Number(wallet?.tokenBalance || wallet?.futureTokenBalance || 0);
-  const walletId = idOf(wallet?.userId || user?._id);
+  const identity = walletIdentityOf(wallet);
+  const walletId = identity?.walletId || idOf(wallet?.userId || user?._id);
+  const nexHandle = identity?.nexHandle || `@${user?.username || "creator"}.pay`;
 
   const copyWalletId = async () => {
     if (!walletId) return;
@@ -251,8 +256,13 @@ const BalanceHero = ({ user, wallet, socketConnected }) => {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" onClick={copyWalletId} className="inline-flex max-w-full items-center gap-2 rounded-lg border border-white/10 bg-white/10 px-3 py-2 text-xs font-black text-white/80 backdrop-blur transition hover:bg-white/15">
             <Copy className="h-3.5 w-3.5 shrink-0" />
-            <span className="truncate">Wallet ID: {walletId ? `${walletId.slice(0, 8)}...${walletId.slice(-4)}` : "Pending"}</span>
+            <span className="truncate">Wallet ID: {walletId || "Pending"}</span>
           </button>
+          <Link to="/wallet/receive" className="inline-flex max-w-full items-center gap-2 rounded-lg border border-brand/20 bg-brand/10 px-3 py-2 text-xs font-black text-brand backdrop-blur transition hover:bg-brand/15">
+            <QrCode className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{nexHandle}</span>
+          </Link>
+          {identity?.walletVerified && <span className="inline-flex items-center gap-1 rounded-full bg-sky-400/15 px-2 py-1 text-[11px] font-black text-sky-200"><BadgeCheck className="h-3.5 w-3.5" /> Verified</span>}
           {copiedWalletId && <span className="rounded-full bg-brand/15 px-2 py-1 text-[11px] font-black text-brand">Copied</span>}
         </div>
 
@@ -609,58 +619,267 @@ const TransactionsPage = ({ transactions, pagination, loading, onLoadMore }) => 
   );
 };
 
-const TransferPage = ({ wallet, user, transferPoints }) => {
-  const [form, setForm] = useState({ receiverId: "", amount: "" });
+const TransferPage = ({ wallet, user, transferPoints, walletIdentity }) => {
+  const [form, setForm] = useState({ recipient: "", amount: "", memo: "" });
+  const [confirming, setConfirming] = useState(false);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const locks = useWalletStore((state) => state.requestLocks);
   const busy = Boolean(locks?.transfer || submitting);
 
-  const submit = async (event) => {
-    event.preventDefault();
+  const submitTransfer = async () => {
     setMessage("");
     const amount = Number(form.amount);
+    const recipient = form.recipient.trim();
+    const selfIds = [user?._id, walletIdentity?.walletId, walletIdentity?.nexHandle, user?.username].filter(Boolean).map((item) => String(item).toLowerCase());
 
-    if (form.receiverId.trim() === user?._id) {
+    if (selfIds.includes(recipient.toLowerCase())) {
       setMessage("Self-transfer blocked to protect wallet integrity.");
       return;
     }
 
-    if (!form.receiverId.trim() || !amount || amount < 1) {
-      setMessage("Enter a valid creator ID and amount.");
+    if (!recipient || !amount || amount < 1) {
+      setMessage("Enter a valid wallet ID, NEX handle, username, and amount.");
       return;
     }
 
     setSubmitting(true);
     try {
-      const result = await transferPoints({ receiverId: form.receiverId.trim(), amount });
+      const result = await transferPoints({ receiverId: recipient, recipient, amount, memo: form.memo.trim() });
       setMessage(result?.ok ? "Transfer sent. NEX Points moved instantly." : result?.message || "Transfer failed.");
-      if (result?.ok) setForm({ receiverId: "", amount: "" });
+      if (result?.ok) setForm({ recipient: "", amount: "", memo: "" });
     } catch (error) {
       console.error("Wallet Error:", error);
       setMessage("Transfer failed. Your balance was restored.");
     } finally {
       setSubmitting(false);
+      setConfirming(false);
+    }
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    await submitTransfer();
+  };
+
+  return (
+    <div className="space-y-4">
+      <PageHeader title="Transfer Funds" detail="Send NEX Points by Wallet ID, username, or NEX handle." />
+      <section className="relative overflow-hidden rounded-lg bg-slate-950 p-4 text-white shadow-2xl">
+        <div className="absolute inset-0 wallet-grid opacity-25" />
+        <div className="relative z-10 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.22em] text-brand">Instant creator finance</p>
+            <p className="mt-2 text-4xl font-black">{formatNumber(wallet?.balance || 0)} NEX</p>
+            <p className="mt-2 text-sm font-semibold text-white/60">Protected by anti-self-transfer checks, balance validation, cooldowns, and immutable transaction logs.</p>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-white/10 p-3 text-xs font-black text-white/70">
+            Sender<br /><span className="text-brand">{walletIdentity?.walletId || "Wallet syncing"}</span>
+          </div>
+        </div>
+      </section>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <form onSubmit={submit} className="grid gap-3">
+          <input className="field" placeholder="Wallet ID, @handle.pay, or username" value={form.recipient} onChange={(event) => { setConfirming(false); setForm((current) => ({ ...current, recipient: event.target.value })); }} />
+          <input className="field" placeholder="Amount" inputMode="numeric" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value.replace(/[^\d]/g, "") }))} />
+          <input className="field" placeholder="Memo (optional)" value={form.memo} maxLength={120} onChange={(event) => setForm((current) => ({ ...current, memo: event.target.value }))} />
+          {confirming && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm font-bold text-amber-900">
+              Confirm transfer of {formatNumber(form.amount || 0)} NEX to {form.recipient || "recipient"}.
+            </div>
+          )}
+          <button type="submit" className="btn-primary sticky bottom-24 z-20 gap-2 sm:static" disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {confirming ? "Confirm Transfer" : "Review Transfer"}
+          </button>
+        </form>
+        {message && <p className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"><AlertTriangle className="h-4 w-4" />{message}</p>}
+      </section>
+    </div>
+  );
+};
+
+const ReceivePage = ({ wallet, user, walletIdentity, receiveProfile, requestLocks, loadReceiveProfile, pushNotification }) => {
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const identity = walletIdentityOf(wallet, walletIdentity);
+  const qrPayload = receiveProfile?.qrPayload || identity?.qrPayload || {
+    walletId: identity?.walletId,
+    username: user?.username || user?.name || "creator",
+    userId: idOf(user),
+    chain: "NEX",
+  };
+  const walletLink = `${window.location.origin}/wallet/receive?to=${encodeURIComponent(identity?.walletId || "")}`;
+
+  useEffect(() => {
+    loadReceiveProfile?.();
+  }, [loadReceiveProfile]);
+
+  useEffect(() => {
+    let canceled = false;
+    QRCode.toDataURL(JSON.stringify(qrPayload || {}), { width: 360, margin: 1, errorCorrectionLevel: "M", color: { dark: "#0f172a", light: "#ffffff" } })
+      .then((dataUrl) => {
+        if (!canceled) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!canceled) setQrDataUrl("");
+      });
+    return () => {
+      canceled = true;
+    };
+  }, [qrPayload?.walletId, qrPayload?.userId]);
+
+  const copyValue = async (label, value) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard?.writeText(value);
+      pushNotification?.({ type: "copy", title: `${label} copied`, message: value });
+    } catch (error) {
+      console.error("Wallet Error:", error);
+    }
+  };
+
+  const downloadQr = () => {
+    if (!qrDataUrl) return;
+    const link = document.createElement("a");
+    link.href = qrDataUrl;
+    link.download = `${identity?.walletId || "vibebook-wallet"}-receive-qr.png`;
+    link.click();
+  };
+
+  const shareWallet = async () => {
+    const text = `Send me NEX on VibeBook: ${identity?.walletId} ${identity?.nexHandle}`;
+    if (navigator.share) {
+      await navigator.share({ title: "VibeBook NEX Wallet", text, url: walletLink }).catch(() => null);
+    } else {
+      await copyValue("Wallet link", walletLink);
     }
   };
 
   return (
     <div className="space-y-4">
-      <PageHeader title="Transfer Points" detail="Move usable NEX Points to another creator wallet." />
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 rounded-lg bg-slate-950 p-4 text-white">
-          <p className="text-xs font-black uppercase text-white/45">Available NEX Points</p>
-          <p className="mt-1 text-3xl font-black">{formatNumber(wallet?.balance || 0)}</p>
+      <PageHeader title="Receive Funds" detail="Your creator financial identity for NEX Points now and NEX COIN later." />
+      <section className="relative overflow-hidden rounded-lg bg-slate-950 p-4 text-white shadow-2xl sm:p-5">
+        <div className="absolute inset-0 wallet-grid opacity-25" />
+        <motion.div className="absolute -right-20 top-10 h-56 w-56 rounded-full bg-cyan-400/25 blur-3xl" animate={{ scale: [1, 1.12, 1], opacity: [0.35, 0.6, 0.35] }} transition={{ duration: 3.2, repeat: Infinity }} />
+        <div className="relative z-10 grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-center">
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.24em] text-brand">VibeBook creator finance ID</p>
+            <h1 className="mt-3 text-3xl font-black sm:text-5xl">{identity?.walletId || "Wallet syncing"}</h1>
+            <p className="mt-2 text-xl font-black text-cyan-200">{identity?.nexHandle || "@creator.pay"}</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <button type="button" className="btn-secondary gap-2 bg-white/95" onClick={() => copyValue("Wallet ID", identity?.walletId)}><Copy className="h-4 w-4" /> Wallet ID</button>
+              <button type="button" className="btn-secondary gap-2 bg-white/95" onClick={() => copyValue("NEX handle", identity?.nexHandle)}><Copy className="h-4 w-4" /> NEX handle</button>
+              <button type="button" className="btn-primary gap-2" onClick={shareWallet}><ArrowUpRight className="h-4 w-4" /> Share</button>
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/15 bg-white/10 p-4 text-center backdrop-blur">
+            <div className="mx-auto grid aspect-square max-w-[18rem] place-items-center rounded-lg bg-white p-3 shadow-[0_0_44px_rgba(34,211,238,0.35)]">
+              {requestLocks?.receive ? <Loader2 className="h-8 w-8 animate-spin text-slate-950" /> : qrDataUrl ? <img src={qrDataUrl} alt="Receive wallet QR" className="h-full w-full rounded object-contain" /> : <QrCode className="h-20 w-20 text-slate-950" />}
+            </div>
+            <button type="button" className="btn-secondary mt-3 w-full gap-2 bg-white" onClick={downloadQr} disabled={!qrDataUrl}>
+              <Download className="h-4 w-4" />
+              Download QR
+            </button>
+          </div>
         </div>
-        <form onSubmit={submit} className="grid gap-3">
-          <input className="field" placeholder="Creator user ID" value={form.receiverId} onChange={(event) => setForm((current) => ({ ...current, receiverId: event.target.value }))} />
-          <input className="field" placeholder="Amount" inputMode="numeric" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value.replace(/[^\d]/g, "") }))} />
-          <button type="submit" className="btn-primary sticky bottom-24 z-20 gap-2 sm:static" disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            Send Points
-          </button>
-        </form>
-        {message && <p className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"><AlertTriangle className="h-4 w-4" />{message}</p>}
+      </section>
+      <section className="grid gap-3 sm:grid-cols-3">
+        <StatCard icon={BadgeCheck} label="Wallet verification" value={identity?.walletVerified ? "Verified" : "Prepared"} detail="Identity-ready wallet profile" />
+        <StatCard icon={Coins} label="NEX COIN estimate" value={formatNumber(identity?.tokenMigration?.estimatedCoins || wallet?.tokenBalance || 0)} detail={`${identity?.tokenMigration?.pointsPerCoin || 1000} points per coin`} />
+        <StatCard icon={ShieldCheck} label="Receive status" value={identity?.walletReceiveEnabled === false ? "Paused" : "Enabled"} detail="QR and handle receiving" />
+      </section>
+    </div>
+  );
+};
+
+const WalletSettingsPage = ({ walletIdentity, walletSettings, requestLocks, loadWalletSettings, updateWalletSettings }) => {
+  const [local, setLocal] = useState({});
+
+  useEffect(() => {
+    loadWalletSettings?.();
+  }, [loadWalletSettings]);
+
+  useEffect(() => {
+    setLocal({
+      walletReceiveEnabled: walletSettings?.walletProfile?.walletReceiveEnabled !== false,
+      receiveQrEnabled: walletSettings?.receive?.receiveQrEnabled !== false,
+      transferConfirmation: walletSettings?.security?.transferConfirmation !== false,
+      transferNotifications: walletSettings?.notifications?.transferNotifications !== false,
+      privacyMode: walletSettings?.privacy?.privacyMode || "public",
+      walletPinEnabled: Boolean(walletSettings?.security?.walletPinEnabled),
+    });
+  }, [walletSettings]);
+
+  const toggle = (key) => setLocal((current) => ({ ...current, [key]: !current[key] }));
+  const save = () => updateWalletSettings?.(local);
+  const saving = Boolean(requestLocks?.settingsSave);
+
+  return (
+    <div className="space-y-4">
+      <PageHeader title="Wallet Settings" detail="Security, identity, receive controls, and future payout architecture." />
+      <section className="rounded-lg bg-slate-950 p-4 text-white shadow-2xl">
+        <p className="text-[11px] font-black uppercase tracking-[0.22em] text-brand">Wallet profile</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-white/10 bg-white/10 p-3">
+            <p className="text-xs font-black uppercase text-white/45">Wallet ID</p>
+            <p className="mt-1 break-all text-lg font-black">{walletIdentity?.walletId || "Syncing"}</p>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-white/10 p-3">
+            <p className="text-xs font-black uppercase text-white/45">NEX handle</p>
+            <p className="mt-1 break-all text-lg font-black text-cyan-200">{walletIdentity?.nexHandle || "@creator.pay"}</p>
+          </div>
+        </div>
+      </section>
+      <section className="grid gap-3 lg:grid-cols-2">
+        {[
+          ["Wallet Identity", "Immutable Wallet ID and creator payment handle are generated automatically.", BadgeCheck],
+          ["QR Receive Settings", "Control QR and handle-based receiving for NEX Points.", QrCode],
+          ["Security", "PIN architecture, confirmations, device awareness, and anti-fraud validation.", ShieldCheck],
+          ["Notifications", "Transfer and wallet activity notifications for creator finance events.", Radio],
+          ["Linked Accounts", "Prepared placeholders for Mobile Money, banks, crypto wallets, stablecoins, and NEX COIN.", WalletIcon],
+          ["Future Cashout Methods", "Real payouts stay disabled while architecture stays migration-ready.", Download],
+          ["Privacy Controls", "Choose how visible your wallet receive identity should be.", X],
+          ["NEX COIN Migration", "Configurable 1000 NEX Points to 1 NEX COIN preparation layer.", Coins],
+        ].map(([title, detail, Icon]) => (
+          <article key={title} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-brand"><Icon className="h-5 w-5" /></span>
+              <div>
+                <p className="text-sm font-black text-navy">{title}</p>
+                <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">{detail}</p>
+              </div>
+            </div>
+          </article>
+        ))}
+      </section>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[
+            ["walletReceiveEnabled", "Receive NEX Points"],
+            ["receiveQrEnabled", "QR receive card"],
+            ["transferConfirmation", "Transfer confirmation"],
+            ["transferNotifications", "Transfer notifications"],
+            ["walletPinEnabled", "Transfer PIN prepared"],
+          ].map(([key, label]) => (
+            <button key={key} type="button" onClick={() => toggle(key)} className={`flex items-center justify-between rounded-lg border p-3 text-left text-sm font-black ${local[key] ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+              {label}
+              <span className={`h-6 w-11 rounded-full p-1 ${local[key] ? "bg-emerald-500" : "bg-slate-300"}`}><span className={`block h-4 w-4 rounded-full bg-white transition ${local[key] ? "translate-x-5" : ""}`} /></span>
+            </button>
+          ))}
+          <select className="field sm:col-span-2" value={local.privacyMode || "public"} onChange={(event) => setLocal((current) => ({ ...current, privacyMode: event.target.value }))}>
+            <option value="public">Public wallet identity</option>
+            <option value="followers">Followers only wallet identity</option>
+            <option value="private">Private wallet identity</option>
+          </select>
+        </div>
+        <button type="button" className="btn-primary mt-4 w-full gap-2" onClick={save} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+          Save wallet settings
+        </button>
       </section>
     </div>
   );
@@ -1000,11 +1219,11 @@ const PageHeader = ({ title, detail }) => {
   );
 };
 
-const Dashboard = ({ user, wallet, stats, claimDailyReward, requestLocks, cooldowns, transactions, pagination, historyLoading, loadHistory, socketConnected }) => (
+const Dashboard = ({ user, wallet, walletIdentity, stats, claimDailyReward, requestLocks, cooldowns, transactions, pagination, historyLoading, loadHistory, socketConnected }) => (
   <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
     <div className="space-y-4">
       <WalletErrorBoundary title="Balance temporarily unavailable">
-        <BalanceHero user={user} wallet={wallet} socketConnected={socketConnected} />
+        <BalanceHero user={user} wallet={{ ...wallet, identity: walletIdentity }} socketConnected={socketConnected} />
       </WalletErrorBoundary>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard icon={Sparkles} label="Lifetime earned" value={formatNumber(wallet?.lifetimeEarned || 0)} detail="Creator XP" />
@@ -1017,7 +1236,7 @@ const Dashboard = ({ user, wallet, stats, claimDailyReward, requestLocks, cooldo
         <QuickAction icon={QrCode} label="Receive" to="/wallet/referrals" />
         <QuickAction icon={UserPlus} label="Invite Friends" to="/wallet/referrals" />
         <QuickAction icon={Sparkles} label="Claim Daily Reward" onClick={claimDailyReward} disabled={requestLocks.daily} />
-        <QuickAction icon={ShieldCheck} label="Wallet Settings" to="/settings" />
+        <QuickAction icon={ShieldCheck} label="Wallet Settings" to="/wallet/settings" />
       </section>
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
@@ -1070,6 +1289,9 @@ const Wallet = () => {
     requestLocks,
     cooldowns,
     notifications,
+    walletIdentity,
+    walletSettings,
+    receiveProfile,
     storeItems,
     inventory,
     activeBoosts,
@@ -1078,6 +1300,10 @@ const Wallet = () => {
     loadWallet,
     loadHistory,
     loadLeaderboards,
+    loadWalletIdentity,
+    loadReceiveProfile,
+    loadWalletSettings,
+    updateWalletSettings,
     loadStore,
     claimDailyReward,
     transferPoints,
@@ -1085,14 +1311,16 @@ const Wallet = () => {
     scanWalletQr,
     purchaseStoreItem,
     equipStoreItem,
+    pushNotification,
     bindSocket,
   } = useWalletStore();
 
   useEffect(() => {
     loadWallet();
+    loadWalletIdentity();
     loadHistory({ reset: true });
     loadLeaderboards();
-  }, [loadWallet, loadHistory, loadLeaderboards]);
+  }, [loadWallet, loadWalletIdentity, loadHistory, loadLeaderboards]);
 
   useEffect(() => bindSocket(token, user?._id), [bindSocket, token, user?._id]);
 
@@ -1122,7 +1350,14 @@ const Wallet = () => {
     requestLocks: safeObject(requestLocks),
     cooldowns: safeObject(cooldowns),
     socketConnected,
+    walletIdentity: safeObject(walletIdentity),
+    walletSettings: safeObject(walletSettings),
+    receiveProfile: safeObject(receiveProfile),
     loadHistory: () => loadHistory(),
+    loadReceiveProfile,
+    loadWalletSettings,
+    updateWalletSettings,
+    pushNotification,
     claimDailyReward,
     transferPoints,
     generateWalletQr,
@@ -1143,7 +1378,9 @@ const Wallet = () => {
     if (section === "leaderboard") return <LeaderboardPage leaderboards={leaderboards} loading={leaderboardLoading} user={user} loadLeaderboards={loadLeaderboards} />;
     if (section === "transactions") return <TransactionsPage transactions={safeTransactions} pagination={pagination} loading={historyLoading} onLoadMore={() => loadHistory()} />;
     if (section === "rewards") return <RewardsPage {...pageProps} />;
-    if (section === "transfer") return <TransferPage wallet={safeWallet} user={user} transferPoints={transferPoints} />;
+    if (section === "receive") return <ReceivePage {...pageProps} />;
+    if (section === "transfer") return <TransferPage wallet={safeWallet} user={user} walletIdentity={pageProps.walletIdentity} transferPoints={transferPoints} />;
+    if (section === "settings") return <WalletSettingsPage {...pageProps} />;
     if (section === "store") return <NexStorePage {...pageProps} section={storeSection} />;
     return <Navigate to="/wallet" replace />;
   };

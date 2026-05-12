@@ -98,6 +98,13 @@ const sanitizeMetadata = (metadata) => {
     "redemptionId",
     "conversionRate",
     "nexCoinEstimate",
+    "walletTransferId",
+    "receiverIdentifier",
+    "receiverWalletId",
+    "senderWalletId",
+    "nexHandle",
+    "memo",
+    "transferMethod",
   ];
 
   for (const key of allowedKeys) {
