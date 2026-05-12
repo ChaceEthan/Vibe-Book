@@ -574,6 +574,10 @@ const Home = () => {
   );
 
   const activeCommentPost = useMemo(() => visibleFeed.find((item) => item._id === commentOpen), [commentOpen, visibleFeed]);
+  const nextVideoPreloadUrl = useMemo(() => {
+    const nextVideo = visibleFeed.find((item) => item?.type === "video" && item.url && (item._id || item.url) !== activePostId);
+    return nextVideo?.url ? mediaUrl(nextVideo.url) : "";
+  }, [activePostId, visibleFeed]);
 
   useEffect(() => {
     const firstId = visibleFeed[0]?._id || visibleFeed[0]?.url || "";
@@ -696,26 +700,22 @@ const Home = () => {
   }, [hasMore, loadFeed, loading, loadingMore, page]);
 
   useEffect(() => {
-    const preloaders = visibleFeed
-      .filter((item) => item?.type === "video" && item.url)
-      .slice(1, 2)
-      .map((item) => {
-        const video = document.createElement("video");
-        video.preload = "auto";
-        video.muted = true;
-        video.playsInline = true;
-        video.src = mediaUrl(item.url);
-        video.load();
-        return video;
-      });
+    if (!nextVideoPreloadUrl) {
+      return undefined;
+    }
+
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = nextVideoPreloadUrl;
+    video.load();
 
     return () => {
-      preloaders.forEach((video) => {
-        video.removeAttribute("src");
-        video.load?.();
-      });
+      video.pause?.();
+      video.removeAttribute("src");
     };
-  }, [visibleFeed]);
+  }, [nextVideoPreloadUrl]);
 
   const handleLike = useCallback(async (item) => {
     if (!isAuthenticated) {

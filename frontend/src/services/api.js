@@ -223,7 +223,6 @@ export const walletApi = {
   history: (params = {}) => API.get("/wallet/history", { params, timeout: WALLET_REQUEST_TIMEOUT_MS }),
   claimDaily: () => API.post("/wallet/reward/daily", {}, {
     timeout: WALLET_REQUEST_TIMEOUT_MS,
-    headers: { "Cache-Control": "no-store" },
     "axios-retry": { retries: 0 },
     retry: false,
   }),

@@ -143,7 +143,7 @@ const corsOptions = {
   origin: corsOriginDelegate,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma", "Expires", "X-Requested-With", "Accept", "Origin"],
   exposedHeaders: ["Content-Length"],
   maxAge: 86400,
   optionsSuccessStatus: 204,
