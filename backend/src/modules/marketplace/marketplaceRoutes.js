@@ -26,7 +26,7 @@ const adminLimiter = rateLimit({
 
 router.get("/items", authMiddleware, controller.listStore);
 router.get("/inventory", authMiddleware, controller.getInventory);
-router.post("/purchase/:itemId", authMiddleware, purchaseLimiter, controller.purchaseItem);
+router.post("/purchase/:id", authMiddleware, purchaseLimiter, controller.purchaseItem);
 router.post("/inventory/:itemId/equip", authMiddleware, purchaseLimiter, controller.equipItem);
 router.post("/inventory/:itemId/unequip", authMiddleware, purchaseLimiter, (req, res, next) => {
   req.body.action = "unequip";

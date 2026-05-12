@@ -67,8 +67,18 @@ const getInventory = async (req, res, next) => {
 
 const purchaseItem = async (req, res, next) => {
   try {
-    const userId = req.user._id;
-    const result = await purchaseService.purchaseItem(userId, req.params.itemId || req.body.itemId, {
+    const userId = req.user?._id;
+    const itemId = req.params.id || req.body.itemId;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Authentication required", data: null });
+    }
+
+    if (!itemId) {
+      return res.status(400).json({ success: false, message: "Marketplace item is required", data: null, code: "ITEM_REQUIRED" });
+    }
+
+    const result = await purchaseService.purchaseItem(userId, itemId, {
       postId: req.body.postId,
       source: req.body.source,
     });
@@ -88,7 +98,11 @@ const purchaseItem = async (req, res, next) => {
     if (result.featured) emitToUser(userId, "featured:update", { featured: result.featured });
     if (result.item.category === "themes") emitToUser(userId, "profile:theme", { inventory: result.inventory });
 
-    return marketplaceSuccess(res, payload.message, payload, 201);
+    return res.json({
+      success: true,
+      message: payload.message,
+      data: payload,
+    });
   } catch (error) {
     logMarketplaceError(error);
 
@@ -96,8 +110,9 @@ const purchaseItem = async (req, res, next) => {
       return res.status(402).json({ success: false, message: "Not enough NEX Points for this purchase", data: null, code: error.code });
     }
 
-    if (["ALREADY_OWNED", "LEVEL_REQUIRED", "ITEM_UNAVAILABLE", "BOOST_COOLDOWN", "POST_REQUIRED", "POST_NOT_FOUND", "FEATURED_DUPLICATE", "PURCHASE_LOCKED"].includes(error.code)) {
-      return res.status(error.code === "BOOST_COOLDOWN" || error.code === "PURCHASE_LOCKED" ? 429 : 400).json({
+    if (["ALREADY_OWNED", "LEVEL_REQUIRED", "ITEM_NOT_FOUND", "ITEM_UNAVAILABLE", "INVALID_ITEM_PRICE", "BOOST_COOLDOWN", "POST_REQUIRED", "POST_NOT_FOUND", "FEATURED_DUPLICATE", "PURCHASE_LOCKED"].includes(error.code)) {
+      const status = error.statusCode || error.status || (error.code === "ITEM_NOT_FOUND" ? 404 : error.code === "BOOST_COOLDOWN" || error.code === "PURCHASE_LOCKED" ? 429 : 400);
+      return res.status(status).json({
         success: false,
         message: error.message,
         data: null,

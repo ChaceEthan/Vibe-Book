@@ -443,8 +443,22 @@ export const useWalletStore = create((set, get) => ({
     const lockKey = purchaseLockKey(safeItemId);
     if (requestLocks?.[lockKey]) return { ok: false, message: "Purchase already in progress." };
 
-    const storeItem = asArray(get().storeItems).find((entry) => itemIdOf(entry) === safeItemId) || {};
-    const amount = Number(payload?.amount || storeItem?.price || 0);
+    const storeItem = asArray(get().storeItems).find((entry) => itemIdOf(entry) === safeItemId);
+    if (!storeItem?.price) {
+      const error = new Error("Invalid item price");
+      console.error("Purchase failed:", error.message);
+      pushNotification({ type: "warning", title: "Purchase failed", message: error.message });
+      throw error;
+    }
+
+    const amount = Number(storeItem.price);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      const error = new Error("Invalid item price");
+      console.error("Purchase failed:", error.message);
+      pushNotification({ type: "warning", title: "Purchase failed", message: error.message });
+      throw error;
+    }
+
     const previousWallet = normalizeWallet(get().wallet);
 
     set((state) => ({
@@ -471,40 +485,16 @@ export const useWalletStore = create((set, get) => ({
       pushNotification({ type: "purchase", title: data?.item?.name || "Store item unlocked", message: data?.message || "Inventory updated." });
       return { ok: true, data };
     } catch (error) {
-      let finalError = error;
-
-      if (error?.response?.status === 404 || error?.response?.status === 405) {
-        const item = asArray(get().storeItems).find((entry) => itemIdOf(entry) === safeItemId) || {};
-        try {
-          const response = await walletApi.redeem({
-            itemId: safeItemId,
-            rewardId: safeItemId,
-            name: item.name,
-            category: item.category || "marketplace",
-            amount: item.price || payload.amount,
-          });
-          const data = apiDataOrThrow(response, "Reward redeem failed.");
-          const transaction = data?.transaction ? normalizeTransaction(data.transaction) : null;
-          set((state) => ({
-            wallet: normalizeWallet(data?.wallet || state.wallet),
-            walletLoaded: true,
-            transactions: prependTransaction(state.transactions, transaction),
-          }));
-          pushNotification({ type: "purchase", title: item.name || "Reward redeemed", message: data?.message || "NEX Points redeemed." });
-          return { ok: true, data };
-        } catch (redeemError) {
-          finalError = redeemError;
-        }
-      }
-      logWalletError(finalError);
-      const message = getApiErrorMessage(finalError, "Purchase failed.");
+      console.error("Purchase failed:", error?.response?.data || error.message);
+      logWalletError(error);
+      const message = getApiErrorMessage(error, "Purchase failed.");
       set((state) => ({
         wallet: previousWallet,
-        cooldowns: finalError?.response?.data?.cooldownUntil ? { ...state.cooldowns, [`store:${safeItemId}`]: finalError.response.data.cooldownUntil } : state.cooldowns,
+        cooldowns: error?.response?.data?.cooldownUntil ? { ...state.cooldowns, [`store:${safeItemId}`]: error.response.data.cooldownUntil } : state.cooldowns,
         error: message,
       }));
       pushNotification({ type: "warning", title: "Purchase failed", message });
-      return { ok: false, message };
+      throw error;
     } finally {
       set((state) => ({ requestLocks: { ...state.requestLocks, [lockKey]: false } }));
     }
