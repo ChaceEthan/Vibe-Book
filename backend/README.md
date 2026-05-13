@@ -68,10 +68,11 @@ npm run dev
 | `JWT_SECRET` | Yes | Secret key used to sign JWT tokens |
 | `PORT` | No | Server port. Defaults to `5000` when not provided |
 | `CLIENT_URL` | Recommended | Frontend URL used in verification emails |
-| `SMTP_EMAIL` | Email OTP | Gmail address used to send verification codes |
-| `SMTP_PASSWORD` | Email OTP | Gmail App Password. Do not use your regular Gmail password |
-| `SMTP_FROM` | Email OTP | Sender label, for example `VibeBook <your-address@gmail.com>` |
-| `OTP_EXPIRES_MINUTES` | No | OTP lifetime in minutes. Defaults to `10` |
+| `EMAIL_USER` / `SMTP_EMAIL` | Email OTP | Gmail or SMTP username used to send verification codes |
+| `EMAIL_PASS` / `SMTP_PASSWORD` | Email OTP | Gmail App Password. Do not use your regular Gmail password |
+| `FROM_EMAIL` / `SMTP_FROM` | Email OTP | Sender label, for example `VibeBook <your-address@gmail.com>` |
+| `OTP_EXPIRES_MINUTES` | No | OTP lifetime in minutes. Defaults to `5` |
+| `PHONE_AUTH_STATUS` | No | Phone login status marker. Keep as `COMING_SOON` |
 | `SMS_PROVIDER` | Phone OTP | Optional phone provider: `twilio`, `vonage`, or `africastalking` |
 
 ### Gmail Email OTP
@@ -79,11 +80,15 @@ npm run dev
 VibeBook sends verification codes through Nodemailer. For Gmail, enable 2-Step Verification on the Gmail account, create an App Password, then set:
 
 ```env
-SMTP_EMAIL=your-address@gmail.com
-SMTP_PASSWORD=your-google-app-password
-SMTP_FROM="VibeBook <your-address@gmail.com>"
+EMAIL_USER=your-address@gmail.com
+EMAIL_PASS=your-google-app-password
+FROM_EMAIL="VibeBook <your-address@gmail.com>"
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
 CLIENT_URL=https://your-frontend-domain.com
-OTP_EXPIRES_MINUTES=10
+OTP_EXPIRES_MINUTES=5
+PHONE_AUTH_STATUS=COMING_SOON
 ```
 
 If Gmail credentials are missing or invalid, the API returns a clean temporary-unavailable message and does not crash the server.

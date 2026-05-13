@@ -51,6 +51,8 @@ if (!process.env.JWT_SECRET) {
 }
 
 const smsConfigStatus = getSmsConfigStatus();
+const phoneAuthStatus = process.env.PHONE_AUTH_STATUS || "COMING_SOON";
+console.log(`[startup] Phone authentication status: ${phoneAuthStatus}`);
 if (!smsConfigStatus.configured) {
   console.warn(`[startup] Phone OTP delivery is not fully configured. Provider: ${smsConfigStatus.provider}. Missing: ${smsConfigStatus.missing.join(", ") || "unknown"}`);
 } else {

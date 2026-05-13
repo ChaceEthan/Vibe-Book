@@ -158,7 +158,25 @@ const freshnessBoostFor = (createdAt, now = Date.now()) => {
   }
 
   const ageHours = Math.max(0, (now - created) / 36e5);
-  return roundScore(Math.max(0, 48 - ageHours * 1.4));
+  return roundScore(Math.max(0, 90 - ageHours * 2.2));
+};
+
+const newestFirstBoostFor = (post, now = Date.now()) => {
+  const created = new Date(post?.createdAt || 0).getTime();
+
+  if (!created) {
+    return 0;
+  }
+
+  const ageHours = Math.max(0, (now - created) / 36e5);
+  const isVideo = post?.type === "video" || String(post?.mediaUrl || "").includes("/video/upload/");
+  const windowHours = isVideo ? 12 : 4;
+
+  if (ageHours > windowHours) {
+    return 0;
+  }
+
+  return roundScore((windowHours - ageHours) * (isVideo ? 24 : 8));
 };
 
 const velocityScoreFor = (post, now = Date.now()) => {
@@ -194,7 +212,8 @@ const emotionBoostFor = (post) => {
 
 const activeBoostScoreFor = (post) => {
   const boostActive = post?.boostedUntil && new Date(post.boostedUntil).getTime() > Date.now();
-  return boostActive ? safeNumber(post?.boostScore) : 0;
+  const rawBoost = boostActive ? safeNumber(post?.boostScore) : 0;
+  return rawBoost ? Math.max(75, roundScore(rawBoost * 1.35)) : 0;
 };
 
 const premiumBoostFor = (post) => (post?.userId?.isPremium || post?.userId?.premiumBadge ? 15 : 0);
@@ -349,6 +368,7 @@ const scorePostForViewer = (post, viewer = null, options = {}) => {
   const trendScore = options.trendMap ? trendScoreFor(post, options.trendMap) : safeNumber(post?.trendScore) || trendScoreFor(post, options.trendMap);
   const interestMatchScore = interestMatchScoreFor(post, viewer);
   const freshnessBoost = freshnessBoostFor(post?.createdAt, options.now);
+  const newestFirstBoost = newestFirstBoostFor(post, options.now);
   const velocityScore = safeNumber(post?.engagementVelocity) || velocityScoreFor(post, options.now);
   const creatorBoost = smallCreatorBoostFor(post);
   const emotionBoost = emotionBoostFor(post);
@@ -360,6 +380,7 @@ const scorePostForViewer = (post, viewer = null, options = {}) => {
     viralScore +
     interestMatchScore +
     freshnessBoost +
+    newestFirstBoost +
     velocityScore +
     creatorBoost +
     trendScore +
@@ -374,6 +395,7 @@ const scorePostForViewer = (post, viewer = null, options = {}) => {
     viralScore: roundScore(viralScore),
     interestMatchScore: roundScore(interestMatchScore),
     freshnessBoost,
+    newestFirstBoost,
     velocityScore,
     creatorBoost,
     trendScore: roundScore(trendScore),
@@ -399,6 +421,17 @@ const rankFeedItems = (items = [], viewer = null, options = {}) => {
       };
     })
     .sort((left, right) => {
+      if (options.newestFirst) {
+        const leftCreated = new Date(left.post?.createdAt || 0).getTime();
+        const rightCreated = new Date(right.post?.createdAt || 0).getTime();
+        const leftRecent = now - leftCreated <= 12 * 60 * 60 * 1000;
+        const rightRecent = now - rightCreated <= 12 * 60 * 60 * 1000;
+
+        if (leftRecent || rightRecent) {
+          return rightCreated - leftCreated;
+        }
+      }
+
       const scoreDelta = right.sortScore - left.sortScore;
       return scoreDelta || new Date(right.post?.createdAt || 0) - new Date(left.post?.createdAt || 0);
     });
@@ -416,6 +449,17 @@ const rankFeedItems = (items = [], viewer = null, options = {}) => {
       };
     })
     .sort((left, right) => {
+      if (options.newestFirst) {
+        const leftCreated = new Date(left.post?.createdAt || 0).getTime();
+        const rightCreated = new Date(right.post?.createdAt || 0).getTime();
+        const leftRecent = now - leftCreated <= 12 * 60 * 60 * 1000;
+        const rightRecent = now - rightCreated <= 12 * 60 * 60 * 1000;
+
+        if (leftRecent || rightRecent) {
+          return rightCreated - leftCreated;
+        }
+      }
+
       const scoreDelta = right.sortScore - left.sortScore;
       return scoreDelta || new Date(right.post?.createdAt || 0) - new Date(left.post?.createdAt || 0);
     });

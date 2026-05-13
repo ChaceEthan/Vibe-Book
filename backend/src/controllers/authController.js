@@ -21,7 +21,7 @@ const {
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const usernamePattern = /^[a-z0-9_][a-z0-9_-]{2,29}$/;
 const otpCooldownMs = 60 * 1000;
-const otpExpiryMinutes = Math.min(Math.max(Number(process.env.OTP_EXPIRES_MINUTES) || 10, 1), 60);
+const otpExpiryMinutes = Math.min(Math.max(Number(process.env.OTP_EXPIRES_MINUTES) || 5, 1), 60);
 const otpExpiryMs = otpExpiryMinutes * 60 * 1000;
 const supportedPhoneCountries = [
   { country: "Rwanda", countryCode: "+250" },
@@ -778,6 +778,7 @@ const verifyEmailCode = async (req, res, next) => {
 
     return res.json({
       user: userResponse(user),
+      token: generateToken(user._id),
       message: "Email verified",
     });
   } catch (error) {

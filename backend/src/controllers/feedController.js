@@ -451,11 +451,12 @@ const getFeed = async (req, res, next) => {
     };
     const feedDocs = await Feed.find(query)
       .populate("userId", userSelect)
-      .sort({ viralScore: -1, engagementVelocity: -1, createdAt: -1 })
+      .sort({ createdAt: -1 })
       .limit(1000);
     const rankedFeedEntries = rankFeedItems(
       feedDocs.filter((item) => item.userId && hasMediaUrl(item.mediaUrl)),
-      req.user
+      req.user,
+      { newestFirst: true }
     );
     const total = rankedFeedEntries.length;
     const start = (page - 1) * limit;
@@ -481,7 +482,7 @@ const getFeed = async (req, res, next) => {
       total,
       hasMore: start + filteredFeedItems.length < total,
       ranking: {
-        formula: "viralScore + interestMatchScore + freshnessBoost + velocityScore + creatorBoost + trendScore + emotionBoost",
+        formula: "newestFirstBoost + viralScore + interestMatchScore + freshnessBoost + velocityScore + creatorBoost + trendScore + emotionBoost + boostScore",
         smallCreatorBoost: 25,
       },
     });

@@ -123,7 +123,11 @@ export const AuthProvider = ({ children }) => {
   const verifyEmailCode = async (payload = {}) => {
     const { data } = await authApi.verifyEmailCode(payload);
     if (data.user) {
-      syncUser(data.user);
+      if (data.token) {
+        saveSession(data.user, data.token);
+      } else {
+        syncUser(data.user);
+      }
     }
     return data;
   };

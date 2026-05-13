@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Heart, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Heart, Volume2, VolumeX } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../services/api";
@@ -36,13 +36,9 @@ const PostMedia = ({
   const replaysRef = useRef(0);
   const lastTapRef = useRef(0);
   const tapTimerRef = useRef(null);
-  const holdTimerRef = useRef(null);
   const likeTimerRef = useRef(null);
-  const heldToPauseRef = useRef(false);
-  const resumeAfterHoldRef = useRef(false);
   const [failed, setFailed] = useState(false);
   const [isMuted, setIsMuted] = useState(Boolean(muted));
-  const [isPaused, setIsPaused] = useState(!autoPlay);
   const [progress, setProgress] = useState(0);
   const [likePulse, setLikePulse] = useState(false);
   const rawUrl = post?.url || "";
@@ -81,7 +77,6 @@ const PostMedia = ({
     replaysRef.current = 0;
     setFailed(false);
     setIsMuted(Boolean(muted));
-    setIsPaused(!autoPlay);
     setProgress(0);
   }, [autoPlay, muted, post?._id, rawUrl]);
 
@@ -107,7 +102,6 @@ const PostMedia = ({
       video.defaultMuted = true;
       setIsMuted(true);
       video.pause?.();
-      setIsPaused(true);
       return;
     }
 
@@ -121,14 +115,8 @@ const PostMedia = ({
 
       try {
         await video.play?.();
-        if (!canceled) {
-          setIsPaused(false);
-        }
       } catch {
         if (!preferSound || canceled) {
-          if (!canceled) {
-            setIsPaused(true);
-          }
           return;
         }
 
@@ -139,13 +127,8 @@ const PostMedia = ({
 
         try {
           await video.play?.();
-          if (!canceled) {
-            setIsPaused(false);
-          }
         } catch {
-          if (!canceled) {
-            setIsPaused(true);
-          }
+          return;
         }
       }
     };
@@ -161,10 +144,6 @@ const PostMedia = ({
     return () => {
       if (tapTimerRef.current) {
         window.clearTimeout(tapTimerRef.current);
-      }
-
-      if (holdTimerRef.current) {
-        window.clearTimeout(holdTimerRef.current);
       }
 
       if (likeTimerRef.current) {
@@ -218,22 +197,6 @@ const PostMedia = ({
     video.defaultPlaybackRate = 1;
   };
 
-  const togglePlayback = () => {
-    const video = mediaRef.current;
-
-    if (!video) {
-      return;
-    }
-
-    if (video.paused) {
-      video.play?.().catch(() => undefined);
-      setIsPaused(false);
-    } else {
-      video.pause?.();
-      setIsPaused(true);
-    }
-  };
-
   const handleInteractiveTap = (event) => {
     if (!interactive || !isVideo || controls) {
       return;
@@ -241,11 +204,6 @@ const PostMedia = ({
 
     event.preventDefault();
     event.stopPropagation();
-
-    if (heldToPauseRef.current) {
-      heldToPauseRef.current = false;
-      return;
-    }
 
     const now = Date.now();
 
@@ -269,46 +227,8 @@ const PostMedia = ({
 
     lastTapRef.current = now;
     tapTimerRef.current = window.setTimeout(() => {
-      togglePlayback();
       lastTapRef.current = 0;
     }, 220);
-  };
-
-  const handlePointerDown = () => {
-    if (!interactive || !isVideo || controls) {
-      return;
-    }
-
-    if (holdTimerRef.current) {
-      window.clearTimeout(holdTimerRef.current);
-    }
-
-    holdTimerRef.current = window.setTimeout(() => {
-      const video = mediaRef.current;
-      if (!video || video.paused) {
-        resumeAfterHoldRef.current = false;
-        return;
-      }
-
-      resumeAfterHoldRef.current = true;
-      heldToPauseRef.current = true;
-      video.pause?.();
-      setIsPaused(true);
-    }, 360);
-  };
-
-  const handlePointerUp = () => {
-    if (holdTimerRef.current) {
-      window.clearTimeout(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-
-    if (resumeAfterHoldRef.current && mediaRef.current) {
-      mediaRef.current.play?.().catch(() => undefined);
-      setIsPaused(false);
-    }
-
-    resumeAfterHoldRef.current = false;
   };
 
   useEffect(() => {
@@ -384,10 +304,6 @@ const PostMedia = ({
       <div
         className={`relative overflow-hidden bg-slate-950 ${className}`}
         onClick={handleInteractiveTap}
-        onPointerDown={handlePointerDown}
-        onPointerCancel={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        onPointerUp={handlePointerUp}
       >
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.18),rgba(15,23,42,0.92)_58%,#020617_100%)]" />
         {!minimal && (
@@ -407,13 +323,10 @@ const PostMedia = ({
           onLoadedMetadata={(event) => {
             prepareVideo(event.currentTarget);
             setIsMuted(event.currentTarget.muted);
-            setIsPaused(event.currentTarget.paused);
           }}
           onPlay={(event) => {
             prepareVideo(event.currentTarget);
-            setIsPaused(false);
           }}
-          onPause={() => setIsPaused(true)}
           onVolumeChange={(event) => setIsMuted(event.currentTarget.muted)}
           onTimeUpdate={(event) => {
             const video = event.currentTarget;
@@ -437,23 +350,9 @@ const PostMedia = ({
           onEnded={(event) => markViewed(metricsFor(event.currentTarget, { completionRate: 1 }))}
         />
 
-        {interactive && !controls && isPaused && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-            <span className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-950/55 text-white backdrop-blur">
-              <Play className="h-8 w-8 fill-white" />
-            </span>
-          </div>
-        )}
-
         {interactive && !controls && likePulse && (
           <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
             <Heart className="h-24 w-24 animate-ping fill-red-500 text-red-500 drop-shadow-2xl" />
-          </div>
-        )}
-
-        {interactive && !controls && !isPaused && (
-          <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-full bg-slate-950/40 p-2 text-white opacity-0 transition group-hover:opacity-100">
-            <Pause className="h-4 w-4" />
           </div>
         )}
 

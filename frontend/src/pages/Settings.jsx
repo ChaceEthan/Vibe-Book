@@ -1704,7 +1704,7 @@ const Settings = () => {
                   <label className="block space-y-2">
                     <span className="label">Verification code</span>
                     <input className="field text-center text-lg font-black tracking-[0.35em]" inputMode="numeric" value={emailFlow.code} onChange={(event) => setEmailFlow((current) => ({ ...current, code: event.target.value.replace(/[^\d]/g, "").slice(0, 6) }))} placeholder="000000" autoFocus required />
-                    <span className="block text-xs font-semibold text-slate-500">Enter the 6-digit code sent to {emailFlow.newEmail}. Codes expire after 10 minutes.</span>
+                    <span className="block text-xs font-semibold text-slate-500">Enter the 6-digit code sent to {emailFlow.newEmail}. Codes expire after 5 minutes.</span>
                   </label>
                   <button
                     type="button"
