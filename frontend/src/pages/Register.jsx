@@ -59,9 +59,9 @@ const extractReferralCode = (value = "") => {
 
   try {
     const url = new URL(raw);
-    return String(url.searchParams.get("ref") || url.searchParams.get("referralCode") || "").trim();
+    return String(url.searchParams.get("ref") || url.searchParams.get("referralCode") || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
   } catch {
-    return raw.replace(/^ref=/i, "").trim();
+    return raw.replace(/^ref=/i, "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
   }
 };
 
@@ -76,10 +76,10 @@ const verificationErrorMessage = (requestError, fallback = "Verification is temp
   const reason = requestError?.response?.data?.reason || "";
   const message = requestError?.response?.data?.message || requestError?.message || "";
 
-  if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Phone verification coming soon.";
-  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is not configured. Please contact support.";
-  if (reason === "SMTP_AUTH_FAILED") return "Email delivery is unavailable. Please contact support.";
-  if (reason === "SMTP_CONNECTION_FAILED") return "Email delivery is unavailable due to a temporary connection issue. Please try again later.";
+  if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "SMTP_NOT_CONFIGURED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "SMTP_AUTH_FAILED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "SMTP_CONNECTION_FAILED") return "Verification service temporarily unavailable. Please try again.";
   if (message) return message;
   return fallback;
 };
@@ -333,7 +333,7 @@ const Register = () => {
     };
   }, [form.contactMethod, form.country, form.countryCode, form.phoneNumber]);
 
-  const isPendingAccount = Boolean(isAuthenticated && user?.accountStatus === "pending_verification");
+  const isPendingAccount = Boolean(isAuthenticated && user?.verificationRequired === true && user?.accountStatus === "pending_verification");
 
   if (isAuthenticated && !isPendingAccount && !phoneVerification.open && !emailVerification.open) {
     return <Navigate to="/dashboard" replace />;

@@ -45,7 +45,7 @@ const authMiddleware = async (req, res, next) => {
       return res.status(403).json({ message: "Your account is blocked" });
     }
 
-    if (user.accountStatus === "pending_verification" && !pendingVerificationAllowed(req)) {
+    if (user.verificationRequired === true && user.accountStatus === "pending_verification" && !pendingVerificationAllowed(req)) {
       return res.status(403).json({
         message: "Please verify your email or phone number to continue.",
         requiresVerification: true,

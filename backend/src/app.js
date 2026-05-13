@@ -33,9 +33,19 @@ const responseMiddleware = require("./middleware/responseMiddleware");
 const errorMiddleware = require("./middleware/errorMiddleware");
 const { visitorMiddleware } = require("./middleware/visitorMiddleware");
 const { corsOptions, isOriginAllowed, logRejectedOrigin } = require("./config/cors");
+const { getEmailConfigStatus } = require("./utils/emailService");
 
 const app = express();
 app.set("trust proxy", 1);
+
+const emailConfigStatus = getEmailConfigStatus();
+if (!emailConfigStatus.configured) {
+  console.warn(`[startup] Email verification delivery is not fully configured. Missing: ${emailConfigStatus.missing.join(", ") || "unknown"}`);
+}
+
+if (!process.env.JWT_SECRET) {
+  console.warn("[startup] JWT_SECRET is missing. Authentication tokens will fail until it is configured.");
+}
 
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

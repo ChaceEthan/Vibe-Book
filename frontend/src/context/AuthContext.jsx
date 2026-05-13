@@ -70,7 +70,7 @@ export const AuthProvider = ({ children }) => {
         }
       } catch (requestError) {
         if (requestError.response?.status === 403 && requestError.response?.data?.requiresVerification && readStoredUser()) {
-          syncUser({ ...readStoredUser(), accountStatus: "pending_verification" });
+          syncUser({ ...readStoredUser(), accountStatus: "pending_verification", verificationRequired: true });
         } else if (isRetryableApiError(requestError) && readStoredUser()) {
           console.warn("[auth] profile refresh deferred after network/server failure", {
             message: requestError.userMessage || requestError.message,

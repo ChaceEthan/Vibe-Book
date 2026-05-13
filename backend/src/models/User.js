@@ -627,6 +627,11 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  verificationRequired: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
   isBlocked: {
     type: Boolean,
     default: false,
@@ -634,7 +639,7 @@ const userSchema = new mongoose.Schema({
   accountStatus: {
     type: String,
     enum: ["pending_verification", "active", "suspended"],
-    default: "pending_verification",
+    default: "active",
     index: true,
   },
   ratings: [

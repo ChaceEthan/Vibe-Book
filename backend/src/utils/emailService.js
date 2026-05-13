@@ -2,8 +2,8 @@
 const nodemailer = require("nodemailer");
 
 const getSmtpConfig = () => {
-  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.SMTP_USERNAME;
-  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.SMTP_AUTH_TOKEN;
+  const user = process.env.EMAIL_USER || process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.SMTP_USERNAME;
+  const pass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.SMTP_AUTH_TOKEN;
   const host = String(process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const isGmail = /gmail\.com$/i.test(host);
   const port = Number(process.env.SMTP_PORT) || (isGmail ? 465 : 587);
@@ -18,6 +18,24 @@ const getSmtpConfig = () => {
     port,
     secure,
     user,
+  };
+};
+
+const getEmailConfigStatus = () => {
+  const config = getSmtpConfig();
+  const hasUser = Boolean(process.env.EMAIL_USER || process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.SMTP_USERNAME);
+  const hasPass = Boolean(process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.SMTP_AUTH_TOKEN);
+  return {
+    configured: config.configured,
+    missing: [
+      hasUser ? "" : "EMAIL_USER/SMTP_USER",
+      hasPass ? "" : "EMAIL_PASS/SMTP_PASS",
+      process.env.SMTP_HOST ? "" : "SMTP_HOST",
+      process.env.SMTP_PORT ? "" : "SMTP_PORT",
+    ].filter(Boolean),
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
   };
 };
 
@@ -169,7 +187,7 @@ const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) =>
     return {
       sent: false,
       reason: "SMTP_NOT_CONFIGURED",
-      message: "Email verification is not configured on the server. Please contact support.",
+      message: "Verification service temporarily unavailable. Please try again.",
     };
   }
 
@@ -208,4 +226,5 @@ module.exports = {
   sendBookingNotification,
   sendVerificationEmail,
   getSmtpConfig,
+  getEmailConfigStatus,
 };

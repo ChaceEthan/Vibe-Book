@@ -174,10 +174,10 @@ const verificationErrorMessage = (requestError, fallback = "Verification is temp
   const reason = requestError?.response?.data?.reason || "";
   const message = requestError?.response?.data?.message || requestError?.message || "";
 
-  if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Phone verification coming soon.";
-  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is not configured. Please contact support.";
-  if (reason === "SMTP_AUTH_FAILED") return "Email delivery is unavailable. Please contact support.";
-  if (reason === "SMTP_CONNECTION_FAILED") return "Email delivery is unavailable due to a temporary connection issue. Please try again later.";
+  if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "SMTP_NOT_CONFIGURED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "SMTP_AUTH_FAILED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "SMTP_CONNECTION_FAILED") return "Verification service temporarily unavailable. Please try again.";
   if (message) return message;
   return fallback;
 };
@@ -812,8 +812,8 @@ const Settings = () => {
   const phoneDisplay = [user?.countryCode, user?.phoneNumber || user?.phone].filter(Boolean).join(" ") || "Not added";
   const accountStatus = user?.isSuspended || user?.accountStatus === "suspended" ? "Limited" : "Active";
   const verificationStatus = user?.isVerified || user?.verified ? "Verified" : "Not verified";
-  const emailVerificationLabel = user?.emailVerified ? "Verified" : user?.email ? "Unverified" : "Missing";
-  const phoneVerificationLabel = user?.phoneVerified ? "Verified" : phoneDisplay !== "Not added" ? "Unverified" : "Missing";
+  const emailVerificationLabel = user?.emailVerified ? "Verified" : emailFlow.step >= 3 && emailFlow.step <= 4 ? "Pending" : user?.email ? "Not Verified" : "Missing";
+  const phoneVerificationLabel = user?.phoneVerified ? "Verified" : cooldown > 0 || phoneCode ? "Pending" : phoneDisplay !== "Not added" ? "Not Verified" : "Missing";
   const usernameCanSave = usernameFlow.status === "available" && USERNAME_PATTERN.test(cleanUsername(usernameFlow.value));
   const passwordStrength = passwordStrengthFor(passwordFlow.newPassword);
   const passwordStrengthLabel = ["Weak", "Weak", "Fair", "Good", "Strong"][passwordStrength] || "Weak";
@@ -1507,7 +1507,7 @@ const Settings = () => {
                   <div>
                     <p className="text-sm font-black text-navy">{phoneDisplay}</p>
                     <p className="mt-1 text-xs font-semibold text-slate-500">
-                      {phoneUnavailable ? "Phone verification coming soon." : user?.phoneVerified ? "Phone verification is active." : "Add a phone number and verify it with a code."}
+                      {phoneUnavailable ? "Verification service temporarily unavailable. Please try again." : user?.phoneVerified ? "Phone verification is active." : "Add a phone number and verify it with a code."}
                     </p>
                   </div>
                   <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-black ${user?.phoneVerified ? "bg-green-100 text-green-700" : "bg-slate-200 text-slate-600"}`}>

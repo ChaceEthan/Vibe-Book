@@ -279,6 +279,7 @@ const userResponse = (user) => {
     isMonetized: Boolean(user.isMonetized),
     monetizationScore: user.monetizationScore || 0,
     isVerified: user.isVerified,
+    verificationRequired: Boolean(user.verificationRequired),
     isBlocked: user.isBlocked,
     accountStatus: user.accountStatus || "active",
     language: user.language || "en",
@@ -306,7 +307,7 @@ const activateVerifiedReferral = async (user) => {
     return;
   }
 
-  if (user.accountStatus !== "active" || (!user.emailVerified && !user.phoneVerified)) {
+  if (user.verificationRequired !== true || user.accountStatus !== "active" || (!user.emailVerified && !user.phoneVerified)) {
     return;
   }
 
@@ -503,6 +504,8 @@ const register = async (req, res, next) => {
     userData.countryCode = phoneFields.countryCode || userData.countryCode || "";
     userData.country = phoneFields.country || userData.country || "";
     userData.phoneVerified = false;
+    userData.verificationRequired = true;
+    userData.accountStatus = "pending_verification";
     userData.name = displayName;
     userData.referralCode = createReferralCode(displayName);
 
@@ -604,7 +607,7 @@ const login = async (req, res, next) => {
       return res.status(403).json({ message: "Your account is blocked" });
     }
 
-    if (user.accountStatus === "pending_verification") {
+    if (user.verificationRequired === true && user.accountStatus === "pending_verification") {
       return res.status(403).json({
         message: "Your account is pending verification. Please verify your email or phone to continue.",
         requiresVerification: true,
@@ -753,6 +756,7 @@ const verifyEmailCode = async (req, res, next) => {
     user.pendingEmail = undefined;
     user.pendingEmailNormalized = undefined;
     user.emailVerified = true;
+    user.verificationRequired = false;
     user.accountStatus = "active";
     user.emailVerificationCode = undefined;
     user.emailVerificationExpires = undefined;
@@ -815,7 +819,7 @@ const sendPhoneCode = async (req, res, next) => {
 
     if (!delivery.sent && !shouldExposeOtp("phone")) {
       return res.status(503).json({
-        message: "Phone verification coming soon.",
+        message: "Verification service temporarily unavailable. Please try again.",
         reason: delivery.reason || "SMS_PROVIDER_NOT_CONFIGURED",
       });
     }
@@ -880,6 +884,7 @@ const verifyPhoneCode = async (req, res, next) => {
     }
 
     user.phoneVerified = true;
+    user.verificationRequired = false;
     user.accountStatus = "active";
     user.phoneVerificationCode = undefined;
     user.phoneVerificationExpires = undefined;

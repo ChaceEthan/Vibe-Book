@@ -451,6 +451,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     premiumBadge: user.premiumBadge || user.isPremium,
     isVerified: user.isVerified,
     verified: user.isVerified,
+    verificationRequired: options.includePrivate ? Boolean(user.verificationRequired) : undefined,
     followers: options.includePrivate ? user.followers || [] : undefined,
     following: options.includePrivate ? user.following || [] : undefined,
     followerCount,

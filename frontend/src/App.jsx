@@ -41,7 +41,7 @@ const ProtectedRoute = ({ children }) => {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (user?.accountStatus === "pending_verification") {
+  if (user?.verificationRequired === true && user?.accountStatus === "pending_verification") {
     return <Navigate to="/register?verify=1" replace state={{ from: location }} />;
   }
 
