@@ -160,12 +160,12 @@ const FeedItem = memo(
     return (
       <article
         data-feed-post-id={item._id || item.url}
-        className="home-feed-viewport relative snap-start snap-always overflow-hidden bg-slate-950"
+        className="home-feed-viewport relative flex snap-start snap-always justify-center overflow-hidden bg-slate-950"
       >
         <PostMedia
           post={item}
           alt={profile.name || "VibeBook media"}
-          className="group h-full w-full"
+          className="home-feed-media group h-full w-full"
           imageClassName="h-full w-full object-contain"
           videoClassName="h-full w-full object-contain"
           placeholderClassName="h-full w-full"
@@ -188,7 +188,7 @@ const FeedItem = memo(
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-slate-950/35 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[34%] bg-gradient-to-t from-slate-950/70 via-slate-950/18 to-transparent" />
 
-        <div className="absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
+        <div className="home-feed-caption absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-center gap-3">
             <Link to={profilePath} className="shrink-0" aria-label="Open creator profile">
               <img src={mediaUrl(profileImage)} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
@@ -258,7 +258,7 @@ const FeedItem = memo(
           ))}
         </div>
 
-        <div className="absolute bottom-[calc(4.9rem+env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-2.5 sm:bottom-[calc(5.3rem+env(safe-area-inset-bottom))] sm:right-5">
+        <div className="home-feed-actions absolute bottom-[calc(4.9rem+env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-2.5 sm:bottom-[calc(5.3rem+env(safe-area-inset-bottom))] sm:right-5">
           <ActionButton active={item.likedByViewer} count={formatCount(item.likes || item.likeCount)} label="Like media" onClick={handleLikePress}>
             <Heart className={`h-6 w-6 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
           </ActionButton>
@@ -558,6 +558,40 @@ const Home = () => {
     window.addEventListener("vibebook:post-created", handlePostCreated);
     return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
   }, [prependPost]);
+
+  useEffect(() => {
+    const syncCurrentUserInFeed = (nextUser = currentUser) => {
+      if (!nextUser?._id) {
+        return;
+      }
+
+      updatePostsByUser(nextUser._id, (profile) => ({
+        ...profile,
+        profilePicture: nextUser.profilePicture || nextUser.profileImage || profile.profilePicture,
+        profileImage: nextUser.profileImage || nextUser.profilePicture || profile.profileImage,
+        equippedFrame: nextUser.equippedFrame || profile.equippedFrame,
+        equippedBadges: nextUser.equippedBadges || profile.equippedBadges,
+        premiumBadge: nextUser.premiumBadge ?? profile.premiumBadge,
+        isPremium: nextUser.isPremium ?? profile.isPremium,
+      }));
+    };
+
+    syncCurrentUserInFeed();
+
+    const handleUserUpdated = (event) => syncCurrentUserInFeed(event.detail?.user);
+    window.addEventListener("vibebook:user-updated", handleUserUpdated);
+    return () => window.removeEventListener("vibebook:user-updated", handleUserUpdated);
+  }, [currentUser, updatePostsByUser]);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      retryAttemptRef.current = 0;
+      loadFeed(1, { reconnect: true });
+    };
+
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, [loadFeed]);
 
   const validPosts = useMemo(() => posts.filter(isValidPost), [posts]);
 

@@ -6,7 +6,7 @@ const Footer = () => {
       <div className="container-page flex flex-col gap-4 pb-28 pt-8 text-sm text-slate-500 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="font-semibold text-slate-600">VibeBook is a Rwanda-based short-video social space for creators and communities.</p>
-          <p>Founded by Isaacson in Kigali, Rwanda. Support: gebmelody@gmail.com - +250786161109</p>
+          <p>Founded by Isaacson in Kigali, Rwanda. Support: gebmelody@gmail.com - +250 7XX XXX XXX</p>
         </div>
         <nav className="flex flex-wrap gap-x-4 gap-y-2 font-bold text-slate-600" aria-label="Footer">
           <Link to="/about" className="hover:text-navy">About</Link>

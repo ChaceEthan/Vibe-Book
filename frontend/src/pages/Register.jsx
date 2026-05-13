@@ -77,8 +77,9 @@ const verificationErrorMessage = (requestError, fallback = "Verification is temp
   const message = requestError?.response?.data?.message || requestError?.message || "";
 
   if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Phone verification coming soon.";
-  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is temporarily unavailable. Please contact support.";
+  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is not configured. Please contact support.";
   if (reason === "SMTP_AUTH_FAILED") return "Email delivery is unavailable. Please contact support.";
+  if (reason === "SMTP_CONNECTION_FAILED") return "Email delivery is unavailable due to a temporary connection issue. Please try again later.";
   if (message) return message;
   return fallback;
 };
@@ -90,7 +91,7 @@ const ValidationLine = ({ state }) => {
 };
 
 const Register = () => {
-  const { isAuthenticated, register, sendEmailCode, sendPhoneCode, verifyEmailCode, verifyPhoneCode } = useAuth();
+  const { isAuthenticated, user, register, sendEmailCode, sendPhoneCode, verifyEmailCode, verifyPhoneCode } = useAuth();
   const [searchParams] = useSearchParams();
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
@@ -332,7 +333,9 @@ const Register = () => {
     };
   }, [form.contactMethod, form.country, form.countryCode, form.phoneNumber]);
 
-  if (isAuthenticated && !phoneVerification.open && !emailVerification.open) {
+  const isPendingAccount = Boolean(isAuthenticated && user?.accountStatus === "pending_verification");
+
+  if (isAuthenticated && !isPendingAccount && !phoneVerification.open && !emailVerification.open) {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -396,11 +399,15 @@ const Register = () => {
     setError("");
 
     try {
+      const targetCountry = isPendingAccount ? user?.country || form.country || "Rwanda" : form.country;
+      const targetCountryCode = isPendingAccount ? user?.countryCode || form.countryCode || "+250" : form.countryCode;
+      const targetPhoneNumber = isPendingAccount ? user?.phoneNumber || user?.phone || form.phoneNumber || "" : form.phoneNumber;
       const data = await sendPhoneCode({
-        country: form.country,
-        countryCode: form.countryCode,
-        phoneNumber: form.phoneNumber,
+        country: targetCountry,
+        countryCode: targetCountryCode,
+        phoneNumber: targetPhoneNumber,
       });
+
       setPhoneVerification((current) => ({
         ...current,
         open: true,
@@ -414,7 +421,7 @@ const Register = () => {
       const retryAfter = requestError.response?.data?.retryAfterSeconds;
       setPhoneVerification((current) => ({
         ...current,
-        open: true,
+        open: false,
         cooldown: Number(retryAfter || current.cooldown || 0),
         unavailable: requestError.response?.data?.reason === "SMS_PROVIDER_NOT_CONFIGURED",
       }));
@@ -427,7 +434,9 @@ const Register = () => {
     setError("");
 
     try {
-      const data = await sendEmailCode({ email: form.email.trim().toLowerCase() });
+      const targetEmail = isPendingAccount ? user?.email || form.email.trim().toLowerCase() || "" : form.email.trim().toLowerCase();
+      const data = await sendEmailCode({ email: targetEmail });
+
       setEmailVerification((current) => ({
         ...current,
         open: true,
@@ -438,7 +447,7 @@ const Register = () => {
       setStatus(data.code ? `Local verification code: ${data.code}` : "Verification code sent to your email.");
     } catch (requestError) {
       const retryAfter = requestError.response?.data?.retryAfterSeconds;
-      setEmailVerification((current) => ({ ...current, open: true, cooldown: Number(retryAfter || current.cooldown || 0) }));
+      setEmailVerification((current) => ({ ...current, open: false, cooldown: Number(retryAfter || current.cooldown || 0) }));
       setError(verificationErrorMessage(requestError, "Unable to send email verification code."));
     }
   };
@@ -535,6 +544,28 @@ const Register = () => {
           <p className="mt-2 text-sm text-white/70">Start watching and posting in seconds.</p>
         </div>
 
+        {isPendingAccount ? (
+          <div className="grid gap-4 p-5 sm:p-6">
+            {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
+            {status && <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700">{status}</div>}
+            <div className="rounded-lg border border-brand/30 bg-brand/10 p-4 text-sm text-slate-700">
+              <p className="font-black text-navy">Verify your account to continue</p>
+              <p className="mt-1 font-semibold">Your account is protected until your email or phone number is confirmed.</p>
+            </div>
+            {user?.email && !user?.emailGeneratedFromPhone && (
+              <button type="button" className="btn-primary w-full gap-2" onClick={sendEmailVerificationCode} disabled={submitting || emailVerification.cooldown > 0}>
+                <Mail className="h-4 w-4" />
+                {emailVerification.cooldown > 0 ? `Email code in ${emailVerification.cooldown}s` : "Send email code"}
+              </button>
+            )}
+            {(user?.phone || user?.phoneNumber) && (
+              <button type="button" className="btn-secondary w-full gap-2" onClick={sendVerificationCode} disabled={submitting || phoneVerification.cooldown > 0}>
+                <Phone className="h-4 w-4" />
+                {phoneVerification.cooldown > 0 ? `Phone code in ${phoneVerification.cooldown}s` : "Send phone code"}
+              </button>
+            )}
+          </div>
+        ) : (
         <form className="grid gap-4 p-5 sm:p-6" onSubmit={handleSubmit}>
           {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
           {status && <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-700">{status}</div>}
@@ -597,6 +628,7 @@ const Register = () => {
                 name="email"
                 value={form.email}
                 onChange={(event) => updateField("email", event.target.value)}
+                placeholder="Enter your email address"
                 autoComplete="email"
                 required
               />
@@ -624,6 +656,7 @@ const Register = () => {
                     name="phoneNumber"
                     value={form.phoneNumber}
                     onChange={(event) => updateField("phoneNumber", event.target.value)}
+                    placeholder={form.countryCode === "+250" ? "+250 7XX XXX XXX" : "Enter your phone number"}
                     autoComplete="tel-national"
                     required
                   />
@@ -695,6 +728,7 @@ const Register = () => {
             {submitting ? "Creating..." : "Create account"}
           </button>
         </form>
+        )}
 
         <p className="border-t border-slate-100 p-5 text-center text-sm text-slate-600">
           Already have an account?{" "}
@@ -713,7 +747,7 @@ const Register = () => {
               </span>
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-navy">Verify your email</h2>
-                <p className="truncate text-sm text-slate-500">Code sent to {form.email.trim().toLowerCase()}</p>
+                <p className="truncate text-sm text-slate-500">Code sent to {form.email.trim().toLowerCase() || user?.email}</p>
               </div>
             </div>
 
@@ -733,11 +767,8 @@ const Register = () => {
               />
             </label>
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button type="button" className="btn-secondary py-2.5" onClick={() => navigate("/dashboard", { replace: true })}>
-                Later
-              </button>
-              <button type="submit" className="btn-primary py-2.5" disabled={submitting}>
+            <div className="mt-4">
+              <button type="submit" className="btn-primary w-full py-2.5" disabled={submitting}>
                 {submitting ? "Checking..." : "Verify"}
               </button>
             </div>
@@ -746,7 +777,7 @@ const Register = () => {
               type="button"
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
               onClick={sendEmailVerificationCode}
-              disabled={emailVerification.cooldown > 0}
+              disabled={emailVerification.cooldown > 0 || submitting}
             >
               <CheckCircle2 className="h-4 w-4" />
               {emailVerification.cooldown > 0 ? `Resend in ${emailVerification.cooldown}s` : "Resend code"}
@@ -765,7 +796,7 @@ const Register = () => {
               <div className="min-w-0">
                 <h2 className="text-lg font-black text-navy">Verify your phone</h2>
                 <p className="truncate text-sm text-slate-500">
-                  Code sent to {selectedCountry.code} {form.phoneNumber}
+                  Code sent to {user?.countryCode || selectedCountry.code} {user?.phoneNumber || form.phoneNumber}
                 </p>
               </div>
             </div>
@@ -775,7 +806,7 @@ const Register = () => {
 
             {phoneVerification.unavailable ? (
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600">
-                Phone verification is coming soon. You can continue to VibeBook and verify later from Settings & Privacy.
+                Phone verification is not available right now. Try email verification or contact support.
               </div>
             ) : (
               <label className="space-y-2">
@@ -792,11 +823,8 @@ const Register = () => {
               </label>
             )}
 
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button type="button" className="btn-secondary py-2.5" onClick={() => navigate("/dashboard", { replace: true })}>
-                Later
-              </button>
-              <button type="submit" className="btn-primary py-2.5" disabled={phoneVerification.unavailable || submitting}>
+            <div className="mt-4">
+              <button type="submit" className="btn-primary w-full py-2.5" disabled={phoneVerification.unavailable || submitting}>
                 {submitting ? "Checking..." : "Verify"}
               </button>
             </div>
@@ -805,7 +833,7 @@ const Register = () => {
               type="button"
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
               onClick={sendVerificationCode}
-              disabled={phoneVerification.unavailable || phoneVerification.cooldown > 0}
+              disabled={phoneVerification.unavailable || phoneVerification.cooldown > 0 || submitting}
             >
               <CheckCircle2 className="h-4 w-4" />
               {phoneVerification.cooldown > 0 ? `Resend in ${phoneVerification.cooldown}s` : "Resend code"}

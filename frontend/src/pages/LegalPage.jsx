@@ -5,7 +5,7 @@ import { Link } from "react-router-dom";
 const founder = "Isaacson";
 const location = "Kigali, Rwanda";
 const contactEmail = "gebmelody@gmail.com";
-const contactPhone = "+250786161109";
+const contactPhone = "+250 7XX XXX XXX";
 
 const platformSummary =
   "VibeBook is a Rwanda-based short-video social platform for creators and communities around the world.";

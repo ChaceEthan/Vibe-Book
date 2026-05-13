@@ -100,11 +100,16 @@ export const connectSocket = (token = getStoredToken(), extraAuth = {}) => {
 
   clearDisconnectTimer();
 
-  if (activeSocket && !activeSocket.connected && !connectRequested && !activeSocket.active) {
-    connectRequested = true;
-    activeSocket.connect();
+  if (!activeSocket) {
+    return null;
   }
 
+  if (activeSocket.connected || activeSocket.connecting || connectRequested) {
+    return activeSocket;
+  }
+
+  connectRequested = true;
+  activeSocket.connect();
   return activeSocket;
 };
 
@@ -116,7 +121,7 @@ export const disconnectSocket = ({ immediate = false } = {}) => {
   clearDisconnectTimer();
 
   const disconnect = () => {
-    if (socket && !socket.connected && !socket.active) {
+    if (socket && !socket.connected && !socket.connecting) {
       connectRequested = false;
       return;
     }

@@ -15,6 +15,7 @@ const PostMedia = ({
   managedPlayback = false,
   active = true,
   soundEnabled = !muted,
+  showAudioControl = false,
   audioUnlockToken = 0,
   className = "",
   imageClassName = "",
@@ -456,7 +457,7 @@ const PostMedia = ({
           </div>
         )}
 
-        {!minimal && (
+        {!minimal && showAudioControl && (
           <button
             type="button"
             className="absolute right-3 top-3 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur"

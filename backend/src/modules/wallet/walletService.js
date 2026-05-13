@@ -762,6 +762,21 @@ const rewardReferral = async (referrerId, newUserId) => {
     throw error;
   }
 
+  const referredUser = await User.findById(newUserId)
+    .select("accountStatus emailVerified phoneVerified referredBy")
+    .lean();
+
+  if (
+    !referredUser ||
+    referredUser.accountStatus !== "active" ||
+    (!referredUser.emailVerified && !referredUser.phoneVerified) ||
+    referredUser.referredBy?.toString() !== referrerId.toString()
+  ) {
+    const error = new Error("Referral rewards require a verified referred account");
+    error.code = "REFERRAL_NOT_VERIFIED";
+    throw error;
+  }
+
   const existing = await WalletTransaction.exists({
     userId: referrerId,
     source: TRANSACTION_SOURCES.REFERRAL,

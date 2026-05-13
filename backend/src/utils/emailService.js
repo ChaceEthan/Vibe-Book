@@ -2,9 +2,9 @@
 const nodemailer = require("nodemailer");
 
 const getSmtpConfig = () => {
-  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL;
-  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
-  const host = process.env.SMTP_HOST || "smtp.gmail.com";
+  const user = process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.SMTP_USERNAME;
+  const pass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.SMTP_AUTH_TOKEN;
+  const host = String(process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const isGmail = /gmail\.com$/i.test(host);
   const port = Number(process.env.SMTP_PORT) || (isGmail ? 465 : 587);
   const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === "true" : port === 465;
@@ -27,22 +27,26 @@ const hasSmtpConfig = () => {
 
 const createTransporter = () => {
   const config = getSmtpConfig();
-
-  return nodemailer.createTransport({
+  const transporterOptions = {
     host: config.host,
     port: config.port,
     secure: config.secure,
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
     socketTimeout: 15000,
     tls: {
       servername: config.host,
     },
-  });
+  };
+
+  if (config.user && config.pass) {
+    transporterOptions.auth = {
+      user: config.user,
+      pass: config.pass,
+    };
+  }
+
+  return nodemailer.createTransport(transporterOptions);
 };
 
 const defaultFrom = () => getSmtpConfig().from;
@@ -63,20 +67,20 @@ const classifySmtpError = (error = {}) => {
   if (code === "EAUTH" || responseCode === 535 || /invalid login|authentication/i.test(response)) {
     return {
       reason: "SMTP_AUTH_FAILED",
-      message: "Email verification is temporarily unavailable. Please check the Gmail App Password configuration.",
+      message: "Email delivery is unavailable. Please check SMTP credentials and try again.",
     };
   }
 
   if (code === "ECONNECTION" || code === "ETIMEDOUT" || /timeout|connect/i.test(response)) {
     return {
       reason: "SMTP_CONNECTION_FAILED",
-      message: "Email verification is temporarily unavailable. Please try again in a moment.",
+      message: "Email delivery is unavailable due to a connection issue. Please try again later.",
     };
   }
 
   return {
     reason: "SMTP_SEND_FAILED",
-    message: "Email verification is temporarily unavailable. Please try again later.",
+    message: "Email delivery failed. Please try again later or contact support.",
   };
 };
 
@@ -165,7 +169,7 @@ const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) =>
     return {
       sent: false,
       reason: "SMTP_NOT_CONFIGURED",
-      message: "Email verification is temporarily unavailable. Please contact support.",
+      message: "Email verification is not configured on the server. Please contact support.",
     };
   }
 

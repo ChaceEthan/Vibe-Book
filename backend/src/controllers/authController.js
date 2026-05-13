@@ -280,6 +280,7 @@ const userResponse = (user) => {
     monetizationScore: user.monetizationScore || 0,
     isVerified: user.isVerified,
     isBlocked: user.isBlocked,
+    accountStatus: user.accountStatus || "active",
     language: user.language || "en",
     notificationEnabled: user.notificationEnabled !== false,
     accountVisibility: user.accountVisibility || "public",
@@ -298,6 +299,44 @@ const userResponse = (user) => {
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
+};
+
+const activateVerifiedReferral = async (user) => {
+  if (!user?.referredBy) {
+    return;
+  }
+
+  if (user.accountStatus !== "active" || (!user.emailVerified && !user.phoneVerified)) {
+    return;
+  }
+
+  const referrerId = user.referredBy;
+
+  if (referrerId.toString() === user._id.toString()) {
+    return;
+  }
+
+  try {
+    const result = await walletService.rewardReferral(referrerId, user._id);
+    await User.findByIdAndUpdate(referrerId, { $inc: { referredUsers: 1 } });
+
+    const payload = {
+      type: "referral",
+      amount: Number(result.transaction?.amount || 0),
+      wallet: formatWalletResponse(result.wallet),
+      transaction: formatTransactionResponse(result.transaction),
+      referredUserId: user._id,
+      message: "Referral signup bonus earned",
+    };
+
+    emitToUser(referrerId, "wallet:update", payload.wallet);
+    emitToUser(referrerId, "wallet:reward", payload);
+    emitToUser(referrerId, "referral:success", payload);
+  } catch (error) {
+    if (error?.code !== "REFERRAL_ALREADY_REWARDED") {
+      console.error("[wallet] verified referral reward failed:", error.message);
+    }
+  }
 };
 
 const isValidEmail = (email) => emailPattern.test(email);
@@ -508,28 +547,6 @@ const register = async (req, res, next) => {
       password: hashedPassword,
     });
 
-    if (referrer && !deviceReferralUsed && referrer._id.toString() !== user._id.toString()) {
-      await User.findByIdAndUpdate(referrer._id, { $inc: { referredUsers: 1 } });
-      walletService
-        .rewardReferral(referrer._id, user._id)
-        .then((result) => {
-          const payload = {
-            type: "referral",
-            amount: Number(result.transaction?.amount || 0),
-            wallet: formatWalletResponse(result.wallet),
-            transaction: formatTransactionResponse(result.transaction),
-            referredUserId: user._id,
-            message: "Referral signup bonus earned",
-          };
-          emitToUser(referrer._id, "wallet:update", payload.wallet);
-          emitToUser(referrer._id, "wallet:reward", payload);
-          emitToUser(referrer._id, "referral:success", payload);
-        })
-        .catch((error) => {
-          console.error("[wallet] referral reward failed:", error.message);
-        });
-    }
-
     walletService.createWallet(user._id).catch((error) => {
       console.error("[wallet] signup initialization failed:", error.message);
     });
@@ -587,6 +604,17 @@ const login = async (req, res, next) => {
       return res.status(403).json({ message: "Your account is blocked" });
     }
 
+    if (user.accountStatus === "pending_verification") {
+      return res.status(403).json({
+        message: "Your account is pending verification. Please verify your email or phone to continue.",
+        requiresVerification: true,
+      });
+    }
+
+    if (user.accountStatus === "suspended") {
+      return res.status(403).json({ message: "Your account has been suspended" });
+    }
+
     await applyAdminIsolation(user);
     await syncTrialState(user);
     walletService.createWallet(user._id).catch((error) => {
@@ -641,7 +669,7 @@ const sendEmailCode = async (req, res, next) => {
 
     if (!delivery.sent && !shouldExposeOtp("email")) {
       return res.status(503).json({
-        message: delivery.message || "Email verification is temporarily unavailable. Please try again later.",
+        message: delivery.message || "Email delivery failed. Please try again later or contact support.",
         reason: delivery.reason || "SMTP_NOT_CONFIGURED",
       });
     }
@@ -725,6 +753,7 @@ const verifyEmailCode = async (req, res, next) => {
     user.pendingEmail = undefined;
     user.pendingEmailNormalized = undefined;
     user.emailVerified = true;
+    user.accountStatus = "active";
     user.emailVerificationCode = undefined;
     user.emailVerificationExpires = undefined;
     user.emailVerificationAttempts = 0;
@@ -732,6 +761,7 @@ const verifyEmailCode = async (req, res, next) => {
     user.verificationExpires = undefined;
     user.updatedAt = new Date();
     await user.save({ validateBeforeSave: false });
+    await activateVerifiedReferral(user);
 
     createNotification({
       userId: user._id,
@@ -850,11 +880,13 @@ const verifyPhoneCode = async (req, res, next) => {
     }
 
     user.phoneVerified = true;
+    user.accountStatus = "active";
     user.phoneVerificationCode = undefined;
     user.phoneVerificationExpires = undefined;
     user.phoneVerificationAttempts = 0;
     user.updatedAt = new Date();
     await user.save({ validateBeforeSave: false });
+    await activateVerifiedReferral(user);
 
     createNotification({
       userId: user._id,

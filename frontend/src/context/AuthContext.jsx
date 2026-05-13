@@ -23,6 +23,7 @@ export const AuthProvider = ({ children }) => {
   const syncUser = useCallback((nextUser) => {
     setUser(nextUser);
     localStorage.setItem("vibebook_user", JSON.stringify(nextUser));
+    window.dispatchEvent(new CustomEvent("vibebook:user-updated", { detail: { user: nextUser } }));
     return nextUser;
   }, []);
 
@@ -68,7 +69,9 @@ export const AuthProvider = ({ children }) => {
           return;
         }
       } catch (requestError) {
-        if (isRetryableApiError(requestError) && readStoredUser()) {
+        if (requestError.response?.status === 403 && requestError.response?.data?.requiresVerification && readStoredUser()) {
+          syncUser({ ...readStoredUser(), accountStatus: "pending_verification" });
+        } else if (isRetryableApiError(requestError) && readStoredUser()) {
           console.warn("[auth] profile refresh deferred after network/server failure", {
             message: requestError.userMessage || requestError.message,
           });

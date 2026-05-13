@@ -15,6 +15,16 @@ const getBearerToken = (req) => {
   return req.headers["x-auth-token"] || "";
 };
 
+const pendingVerificationAllowed = (req) => {
+  const path = String(req.originalUrl || req.path || "").toLowerCase();
+  return (
+    path.includes("/api/auth/send-email-code") ||
+    path.includes("/api/auth/verify-email-code") ||
+    path.includes("/api/auth/send-phone-code") ||
+    path.includes("/api/auth/verify-phone-code")
+  );
+};
+
 const authMiddleware = async (req, res, next) => {
   try {
     const token = getBearerToken(req);
@@ -33,6 +43,17 @@ const authMiddleware = async (req, res, next) => {
 
     if (user.isBlocked) {
       return res.status(403).json({ message: "Your account is blocked" });
+    }
+
+    if (user.accountStatus === "pending_verification" && !pendingVerificationAllowed(req)) {
+      return res.status(403).json({
+        message: "Please verify your email or phone number to continue.",
+        requiresVerification: true,
+      });
+    }
+
+    if (user.accountStatus === "suspended") {
+      return res.status(403).json({ message: "Your account has been suspended" });
     }
 
     await applyAdminIsolation(user);

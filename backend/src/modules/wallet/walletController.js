@@ -334,6 +334,10 @@ const referralReward = async (req, res, next) => {
       return walletFailure(res, 400, "referredUserId is required");
     }
 
+    if (targetReferrer.toString() !== userId.toString()) {
+      return walletFailure(res, 403, "Referral rewards can only be claimed by the referrer");
+    }
+
     const result = await walletService.rewardReferral(targetReferrer, targetReferred);
     const wallet = formatWalletResponse(result.wallet);
     const transaction = formatTransactionResponse(result.transaction);

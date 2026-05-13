@@ -75,6 +75,7 @@
 
   .home-feed-viewport {
     height: calc(100vh - 3.5rem);
+    min-height: 0;
   }
 
   @supports (height: 100svh) {
@@ -109,6 +110,26 @@
 
   .home-feed-scroll::-webkit-scrollbar {
     display: none;
+  }
+
+  .home-feed-media {
+    max-height: 100%;
+  }
+
+  @media (min-width: 768px) {
+    .home-feed-media {
+      width: min(100vw, 42rem, calc((100dvh - 4rem) * 0.64));
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    .home-feed-caption {
+      left: max(1.25rem, calc(50% - min(21rem, ((100dvh - 4rem) * 0.32)) + 1.25rem));
+      right: max(7rem, calc(50% - min(21rem, ((100dvh - 4rem) * 0.32)) + 5.25rem));
+    }
+
+    .home-feed-actions {
+      right: max(1.25rem, calc(50% - min(21rem, ((100dvh - 4rem) * 0.32)) + 1.25rem));
+    }
   }
 
   .comment-sheet-in {

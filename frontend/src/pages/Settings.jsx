@@ -175,8 +175,9 @@ const verificationErrorMessage = (requestError, fallback = "Verification is temp
   const message = requestError?.response?.data?.message || requestError?.message || "";
 
   if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Phone verification coming soon.";
-  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is temporarily unavailable. Please contact support.";
+  if (reason === "SMTP_NOT_CONFIGURED") return "Email verification is not configured. Please contact support.";
   if (reason === "SMTP_AUTH_FAILED") return "Email delivery is unavailable. Please contact support.";
+  if (reason === "SMTP_CONNECTION_FAILED") return "Email delivery is unavailable due to a temporary connection issue. Please try again later.";
   if (message) return message;
   return fallback;
 };
@@ -1536,7 +1537,7 @@ const Settings = () => {
                       inputMode="tel"
                       value={phoneForm.phoneNumber}
                       onChange={(event) => setPhoneForm((current) => ({ ...current, phoneNumber: cleanPhone(event.target.value) }))}
-                      placeholder="786161109"
+                      placeholder="7XX XXX XXX"
                     />
                   </div>
                 </label>

@@ -133,8 +133,6 @@ const uploadBufferOnce = (file, options = {}) =>
   });
 
 const uploadBufferToCloudinary = async (file, options = {}) => {
-  console.log("UPLOAD FILE:", file?.originalname);
-
   if (!Buffer.isBuffer(file?.buffer)) {
     throw createUploadError("No file uploaded", 400);
   }
@@ -158,8 +156,6 @@ const uploadBufferToCloudinary = async (file, options = {}) => {
       await delay(300 * (attempt + 1));
     }
   }
-
-  console.log("Uploaded to Cloudinary:", result?.secure_url);
 
   if (!isCloudinarySecureUrl(result?.secure_url)) {
     throw createUploadError("Cloudinary upload did not return a secure URL", 502);
