@@ -34,6 +34,7 @@ const errorMiddleware = require("./middleware/errorMiddleware");
 const { visitorMiddleware } = require("./middleware/visitorMiddleware");
 const { corsOptions, isOriginAllowed, logRejectedOrigin } = require("./config/cors");
 const { getEmailConfigStatus } = require("./utils/emailService");
+const { getSmsConfigStatus } = require("./utils/smsService");
 
 const app = express();
 app.set("trust proxy", 1);
@@ -47,6 +48,13 @@ if (!emailConfigStatus.configured) {
 
 if (!process.env.JWT_SECRET) {
   console.warn("[startup] JWT_SECRET is missing. Authentication tokens will fail until it is configured.");
+}
+
+const smsConfigStatus = getSmsConfigStatus();
+if (!smsConfigStatus.configured) {
+  console.warn(`[startup] Phone OTP delivery is not fully configured. Provider: ${smsConfigStatus.provider}. Missing: ${smsConfigStatus.missing.join(", ") || "unknown"}`);
+} else {
+  console.log(`[startup] Phone OTP delivery configured via ${smsConfigStatus.provider}`);
 }
 
 const uploadLimiter = rateLimit({

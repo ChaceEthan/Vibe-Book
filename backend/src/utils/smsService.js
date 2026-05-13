@@ -1,6 +1,17 @@
 // @ts-nocheck
 const providerName = () => String(process.env.SMS_PROVIDER || "").trim().toLowerCase();
 
+const envValue = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+};
+
 const maskPhone = (value = "") => {
   const raw = String(value || "");
   if (raw.length <= 4) return raw;
@@ -29,9 +40,9 @@ const postForm = async (url, body, headers = {}) => {
 };
 
 const sendWithTwilio = async ({ to, code, expiresMinutes = 10 }) => {
-  const sid = process.env.TWILIO_ACCOUNT_SID;
-  const token = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_FROM;
+  const sid = envValue("TWILIO_ACCOUNT_SID", "SMS_TWILIO_ACCOUNT_SID");
+  const token = envValue("TWILIO_AUTH_TOKEN", "SMS_TWILIO_AUTH_TOKEN");
+  const from = envValue("TWILIO_FROM", "SMS_FROM");
 
   if (!sid || !token || !from) {
     return { sent: false, reason: "TWILIO_NOT_CONFIGURED" };
@@ -50,34 +61,71 @@ const sendWithTwilio = async ({ to, code, expiresMinutes = 10 }) => {
 };
 
 const sendWithVonage = async ({ to, code, expiresMinutes = 10 }) => {
-  if (!process.env.VONAGE_API_KEY || !process.env.VONAGE_API_SECRET) {
+  const apiKey = envValue("VONAGE_API_KEY", "SMS_VONAGE_API_KEY");
+  const apiSecret = envValue("VONAGE_API_SECRET", "SMS_VONAGE_API_SECRET");
+
+  if (!apiKey || !apiSecret) {
     return { sent: false, reason: "VONAGE_NOT_CONFIGURED" };
   }
 
   return postForm("https://rest.nexmo.com/sms/json", {
-    api_key: process.env.VONAGE_API_KEY,
-    api_secret: process.env.VONAGE_API_SECRET,
-    from: process.env.VONAGE_FROM || "VibeBook",
+    api_key: apiKey,
+    api_secret: apiSecret,
+    from: envValue("VONAGE_FROM", "SMS_FROM") || "VibeBook",
     to: String(to || "").replace(/[^\d]/g, ""),
     text: `Your VibeBook verification code is: ${code}. It expires in ${expiresMinutes} minutes.`,
   });
 };
 
 const sendWithAfricasTalking = async ({ to, code, expiresMinutes = 10 }) => {
-  if (!process.env.AFRICASTALKING_USERNAME || !process.env.AFRICASTALKING_API_KEY) {
+  const username = envValue("AFRICASTALKING_USERNAME", "AFRICASTALKING_USER");
+  const apiKey = envValue("AFRICASTALKING_API_KEY", "AFRICASTALKING_TOKEN");
+
+  if (!username || !apiKey) {
     return { sent: false, reason: "AFRICASTALKING_NOT_CONFIGURED" };
   }
 
   return postForm(
     "https://api.africastalking.com/version1/messaging",
     {
-      username: process.env.AFRICASTALKING_USERNAME,
-      from: process.env.AFRICASTALKING_FROM || "",
+      username,
+      from: envValue("AFRICASTALKING_FROM", "SMS_FROM"),
       to,
       message: `Your VibeBook verification code is: ${code}. It expires in ${expiresMinutes} minutes.`,
     },
-    { apiKey: process.env.AFRICASTALKING_API_KEY }
+    { apiKey }
   );
+};
+
+const getSmsConfigStatus = () => {
+  const provider = providerName();
+
+  if (provider === "twilio") {
+    const missing = [
+      envValue("TWILIO_ACCOUNT_SID", "SMS_TWILIO_ACCOUNT_SID") ? "" : "TWILIO_ACCOUNT_SID",
+      envValue("TWILIO_AUTH_TOKEN", "SMS_TWILIO_AUTH_TOKEN") ? "" : "TWILIO_AUTH_TOKEN",
+      envValue("TWILIO_FROM", "SMS_FROM") ? "" : "TWILIO_FROM",
+    ].filter(Boolean);
+    return { configured: missing.length === 0, provider, missing };
+  }
+
+  if (provider === "vonage") {
+    const missing = [
+      envValue("VONAGE_API_KEY", "SMS_VONAGE_API_KEY") ? "" : "VONAGE_API_KEY",
+      envValue("VONAGE_API_SECRET", "SMS_VONAGE_API_SECRET") ? "" : "VONAGE_API_SECRET",
+    ].filter(Boolean);
+    return { configured: missing.length === 0, provider, missing };
+  }
+
+  if (provider === "africastalking" || provider === "africas_talking" || provider === "africa-talking") {
+    const missing = [
+      envValue("AFRICASTALKING_USERNAME", "AFRICASTALKING_USER") ? "" : "AFRICASTALKING_USERNAME",
+      envValue("AFRICASTALKING_API_KEY", "AFRICASTALKING_TOKEN") ? "" : "AFRICASTALKING_API_KEY",
+    ].filter(Boolean);
+    return { configured: missing.length === 0, provider: "africastalking", missing };
+  }
+
+  return { configured: false, provider: provider || "none", missing: ["SMS_PROVIDER"] };
 };
 
 const sendPhoneVerificationSms = async ({ to, code, expiresMinutes = 10 }) => {
@@ -107,5 +155,6 @@ const sendPhoneVerificationSms = async ({ to, code, expiresMinutes = 10 }) => {
 };
 
 module.exports = {
+  getSmsConfigStatus,
   sendPhoneVerificationSms,
 };

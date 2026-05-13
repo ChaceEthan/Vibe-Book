@@ -258,10 +258,32 @@ const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) =>
   }
 };
 
+const verifyEmailTransporter = async () => {
+  if (!hasSmtpConfig()) {
+    return { ok: false, reason: "SMTP_NOT_CONFIGURED", status: getEmailConfigStatus() };
+  }
+
+  try {
+    await createTransporter().verify();
+    return { ok: true, status: getEmailConfigStatus() };
+  } catch (error) {
+    const classified = classifySmtpError(error);
+    console.error("[email] SMTP verification failed", {
+      reason: classified.reason,
+      code: error?.code || "",
+      responseCode: error?.responseCode || "",
+      host: getSmtpConfig().host,
+      port: getSmtpConfig().port,
+    });
+    return { ok: false, ...classified, status: getEmailConfigStatus() };
+  }
+};
+
 module.exports = {
   sendContactNotification,
   sendBookingNotification,
   sendVerificationEmail,
   getSmtpConfig,
   getEmailConfigStatus,
+  verifyEmailTransporter,
 };

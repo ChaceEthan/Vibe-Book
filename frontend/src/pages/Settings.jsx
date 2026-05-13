@@ -717,6 +717,7 @@ const Settings = () => {
         notifySuccess("Email verified.");
       }
     } catch (requestError) {
+      setEmailFlow((current) => (current.step === 4 ? { ...current, step: 3 } : current));
       setAuthFlowError(verificationErrorMessage(requestError, "Unable to update email."));
     } finally {
       setSaving("");
@@ -1542,14 +1543,14 @@ const Settings = () => {
                   </div>
                 </label>
 
-                <button type="button" className="btn-secondary w-full" onClick={requestPhoneCode} disabled={phoneUnavailable || saving === "phone" || cooldown > 0}>
+                <button type="button" className="btn-secondary w-full" onClick={requestPhoneCode} disabled={saving === "phone" || cooldown > 0}>
                   {cooldown > 0 ? `Resend in ${cooldown}s` : saving === "phone" ? "Sending..." : "Send OTP"}
                 </button>
               </div>
 
               {phoneUnavailable ? (
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm font-semibold text-slate-600">
-                  Phone OTP is prepared for Twilio, Vonage, and Africa's Talking. It will be enabled when a provider is configured.
+                  Verification service temporarily unavailable. Please try again.
                 </div>
               ) : (
                 <form className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3" onSubmit={verifyPhone}>
