@@ -41,6 +41,8 @@ app.set("trust proxy", 1);
 const emailConfigStatus = getEmailConfigStatus();
 if (!emailConfigStatus.configured) {
   console.warn(`[startup] Email verification delivery is not fully configured. Missing: ${emailConfigStatus.missing.join(", ") || "unknown"}`);
+} else {
+  console.log(`[startup] Email verification delivery configured via ${emailConfigStatus.host}:${emailConfigStatus.port} secure=${emailConfigStatus.secure}`);
 }
 
 if (!process.env.JWT_SECRET) {

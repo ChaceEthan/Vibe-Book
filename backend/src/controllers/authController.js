@@ -78,7 +78,7 @@ const generateOtpCode = (channel = "phone") => {
     return String(process.env[mockKey]).replace(/[^\d]/g, "").slice(0, 6).padStart(6, "0");
   }
 
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(crypto.randomInt(100000, 1000000));
 };
 
 const shouldExposeOtp = (channel = "phone") => {

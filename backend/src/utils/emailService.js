@@ -1,17 +1,33 @@
 // @ts-nocheck
 const nodemailer = require("nodemailer");
 
+let cachedTransporter = null;
+let cachedTransporterKey = "";
+
+const envValue = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+};
+
 const getSmtpConfig = () => {
-  const user = process.env.EMAIL_USER || process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.SMTP_USERNAME;
-  const pass = process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.SMTP_AUTH_TOKEN;
-  const host = String(process.env.SMTP_HOST || "smtp.gmail.com").trim();
+  const user = envValue("EMAIL_USER", "SMTP_USER", "SMTP_EMAIL", "SMTP_USERNAME", "GMAIL_USER");
+  const pass = envValue("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "SMTP_AUTH_TOKEN", "GMAIL_APP_PASSWORD", "GMAIL_PASS");
+  const host = envValue("SMTP_HOST", "EMAIL_HOST") || "smtp.gmail.com";
   const isGmail = /gmail\.com$/i.test(host);
-  const port = Number(process.env.SMTP_PORT) || (isGmail ? 465 : 587);
-  const secure = process.env.SMTP_SECURE ? process.env.SMTP_SECURE === "true" : port === 465;
-  const from = process.env.SMTP_FROM || process.env.EMAIL_FROM || (user ? `VibeBook <${user}>` : "");
+  const port = Number(envValue("SMTP_PORT", "EMAIL_PORT")) || (isGmail ? 465 : 587);
+  const secure = envValue("SMTP_SECURE", "EMAIL_SECURE")
+    ? ["1", "true", "yes"].includes(envValue("SMTP_SECURE", "EMAIL_SECURE").toLowerCase())
+    : port === 465;
+  const from = envValue("FROM_EMAIL", "SMTP_FROM", "EMAIL_FROM", "MAIL_FROM") || (user ? `VibeBook <${user}>` : "");
 
   return {
-    configured: Boolean(user && pass && from),
+    configured: Boolean(user && pass && from && host && Number.isFinite(port) && port > 0),
     from,
     host,
     pass,
@@ -23,15 +39,14 @@ const getSmtpConfig = () => {
 
 const getEmailConfigStatus = () => {
   const config = getSmtpConfig();
-  const hasUser = Boolean(process.env.EMAIL_USER || process.env.SMTP_USER || process.env.SMTP_EMAIL || process.env.SMTP_USERNAME);
-  const hasPass = Boolean(process.env.EMAIL_PASS || process.env.SMTP_PASS || process.env.SMTP_PASSWORD || process.env.SMTP_AUTH_TOKEN);
   return {
     configured: config.configured,
     missing: [
-      hasUser ? "" : "EMAIL_USER/SMTP_USER",
-      hasPass ? "" : "EMAIL_PASS/SMTP_PASS",
-      process.env.SMTP_HOST ? "" : "SMTP_HOST",
-      process.env.SMTP_PORT ? "" : "SMTP_PORT",
+      config.user ? "" : "EMAIL_USER/SMTP_USER",
+      config.pass ? "" : "EMAIL_PASS/SMTP_PASS",
+      config.from ? "" : "FROM_EMAIL/SMTP_FROM",
+      config.host ? "" : "SMTP_HOST",
+      Number.isFinite(config.port) && config.port > 0 ? "" : "SMTP_PORT",
     ].filter(Boolean),
     host: config.host,
     port: config.port,
@@ -45,6 +60,17 @@ const hasSmtpConfig = () => {
 
 const createTransporter = () => {
   const config = getSmtpConfig();
+  const transporterKey = JSON.stringify({
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
+    user: config.user,
+  });
+
+  if (cachedTransporter && cachedTransporterKey === transporterKey) {
+    return cachedTransporter;
+  }
+
   const transporterOptions = {
     host: config.host,
     port: config.port,
@@ -64,7 +90,9 @@ const createTransporter = () => {
     };
   }
 
-  return nodemailer.createTransport(transporterOptions);
+  cachedTransporter = nodemailer.createTransport(transporterOptions);
+  cachedTransporterKey = transporterKey;
+  return cachedTransporter;
 };
 
 const defaultFrom = () => getSmtpConfig().from;
@@ -184,6 +212,8 @@ const verificationEmailHtml = ({ appUrl = "", code, expiresMinutes = 10, name = 
 
 const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) => {
   if (!hasSmtpConfig()) {
+    const status = getEmailConfigStatus();
+    console.warn(`[email] Verification email skipped; missing config: ${status.missing.join(", ") || "unknown"}`);
     return {
       sent: false,
       reason: "SMTP_NOT_CONFIGURED",
@@ -217,6 +247,13 @@ const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) =>
     return { sent: true };
   } catch (error) {
     const classified = classifySmtpError(error);
+    console.error("[email] Verification email delivery failed", {
+      reason: classified.reason,
+      code: error?.code || "",
+      responseCode: error?.responseCode || "",
+      host: getSmtpConfig().host,
+      port: getSmtpConfig().port,
+    });
     return { sent: false, ...classified };
   }
 };
