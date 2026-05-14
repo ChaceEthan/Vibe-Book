@@ -4,6 +4,27 @@ const nodemailer = require("nodemailer");
 let cachedTransporter = null;
 let cachedTransporterKey = "";
 
+const smtpNumber = (key, fallback, min = 1000, max = 60000) => {
+  const value = Number(process.env[key]);
+  if (!Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.max(value, min), max);
+};
+
+const SMTP_CONNECTION_TIMEOUT_MS = smtpNumber("SMTP_CONNECTION_TIMEOUT_MS", 7000);
+const SMTP_GREETING_TIMEOUT_MS = smtpNumber("SMTP_GREETING_TIMEOUT_MS", 5000);
+const SMTP_SOCKET_TIMEOUT_MS = smtpNumber("SMTP_SOCKET_TIMEOUT_MS", 9000);
+const SMTP_DNS_TIMEOUT_MS = smtpNumber("SMTP_DNS_TIMEOUT_MS", 5000);
+const SMTP_SEND_TIMEOUT_MS = smtpNumber("SMTP_SEND_TIMEOUT_MS", 10000);
+const SMTP_VERIFY_TIMEOUT_MS = smtpNumber("SMTP_VERIFY_TIMEOUT_MS", 8000);
+const configuredSmtpRetries = Number(process.env.SMTP_SEND_RETRIES);
+const SMTP_MAX_RETRIES = Number.isFinite(configuredSmtpRetries)
+  ? Math.min(Math.max(configuredSmtpRetries, 0), 2)
+  : 1;
+const SMTP_RETRY_BACKOFF_MS = smtpNumber("SMTP_RETRY_BACKOFF_MS", 500, 100, 5000);
+
 const envValue = (...keys) => {
   for (const key of keys) {
     const value = process.env[key];
@@ -81,6 +102,72 @@ const getEmailConfigStatus = () => {
 
 const hasSmtpConfig = () => getEmailConfigStatus().configured;
 
+const closeCachedTransporter = (reason = "reset") => {
+  if (!cachedTransporter) {
+    cachedTransporterKey = "";
+    return;
+  }
+
+  const transporter = cachedTransporter;
+  cachedTransporter = null;
+  cachedTransporterKey = "";
+
+  try {
+    if (typeof transporter.close === "function") {
+      transporter.close();
+      console.warn(`[email] SMTP transporter closed after ${reason}`);
+    }
+  } catch (error) {
+    console.warn("[email] SMTP transporter close failed", {
+      reason,
+      message: error?.message || "",
+    });
+  }
+};
+
+const timeoutError = (label, timeoutMs) => {
+  const error = new Error(`${label} timed out after ${timeoutMs}ms`);
+  error.code = "ETIMEDOUT";
+  error.command = label;
+  return error;
+};
+
+const withTimeout = (promise, timeoutMs, label, onTimeout) => {
+  let timeoutId;
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      try {
+        onTimeout?.();
+      } finally {
+        reject(timeoutError(label, timeoutMs));
+      }
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timeoutId);
+  });
+};
+
+const shouldResetTransporter = (error = {}) => {
+  const code = String(error.code || "");
+  const responseCode = Number(error.responseCode || 0);
+
+  return (
+    ["ECONNECTION", "ETIMEDOUT", "ESOCKET", "ENOTFOUND", "EHOSTUNREACH", "ENETUNREACH"].includes(code) ||
+    [421, 450, 451, 452].includes(responseCode)
+  );
+};
+
+const shouldRetrySmtpError = (error = {}) => {
+  if (error.code === "EAUTH" || [534, 535].includes(Number(error.responseCode || 0))) {
+    return false;
+  }
+
+  return shouldResetTransporter(error) || Number(error.responseCode || 0) >= 500;
+};
+
 const createTransporter = () => {
   const config = getSmtpConfig();
   const transporterKey = JSON.stringify({
@@ -95,8 +182,7 @@ const createTransporter = () => {
   }
 
   // Reset cache if configuration changed
-  cachedTransporter = null;
-  cachedTransporterKey = "";
+  closeCachedTransporter("SMTP config changed");
 
   const transporter = nodemailer.createTransport({
     host: config.host,
@@ -106,15 +192,16 @@ const createTransporter = () => {
       user: config.user,
       pass: config.pass,
     },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 20000,
-    pool: {
-      maxConnections: 5,
-      maxMessages: 100,
-      rateDelta: 1000,
-      rateLimit: 10,
-    },
+    connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
+    dnsTimeout: SMTP_DNS_TIMEOUT_MS,
+    pool: true,
+    maxConnections: 2,
+    maxMessages: 25,
+    rateDelta: 1000,
+    rateLimit: 5,
+    requireTLS: !config.secure && (config.port === 587 || config.host?.includes("gmail")),
     tls: {
       rejectUnauthorized: true,
       servername: config.host,
@@ -221,19 +308,27 @@ const classifySmtpError = (error = {}) => {
   };
 };
 
-const sendMailWithRetry = async (mailOptions, retries = 2) => {
-  const transporter = createTransporter();
+const sendMailWithRetry = async (mailOptions, retries = SMTP_MAX_RETRIES) => {
+  const maxRetries = Math.min(Math.max(Number(retries), 0), 2);
 
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const transporter = createTransporter();
+    const startedAt = Date.now();
+
     try {
-      const response = await transporter.sendMail(mailOptions);
-      console.log(`[email] Mail sent successfully on attempt ${attempt + 1}`);
+      const response = await withTimeout(
+        transporter.sendMail(mailOptions),
+        SMTP_SEND_TIMEOUT_MS,
+        "SMTP sendMail",
+        () => closeCachedTransporter("sendMail timeout")
+      );
+      console.log(`[email] Mail sent successfully on attempt ${attempt + 1} in ${Date.now() - startedAt}ms`);
       return response;
     } catch (error) {
-      const isLastAttempt = attempt === retries;
+      const isLastAttempt = attempt === maxRetries || !shouldRetrySmtpError(error);
       const classified = classifySmtpError(error);
 
-      console.error(`[email] Attempt ${attempt + 1}/${retries + 1} failed:`, {
+      console.error(`[email] Attempt ${attempt + 1}/${maxRetries + 1} failed:`, {
         reason: classified.reason,
         message: error?.message || "",
         code: error?.code || "",
@@ -241,26 +336,19 @@ const sendMailWithRetry = async (mailOptions, retries = 2) => {
         command: error?.command || "",
         response: error?.response?.split("\n")[0] || "",
         to: mailOptions.to || "unknown",
+        elapsedMs: Date.now() - startedAt,
       });
 
       // On certain errors, clear the transporter cache so it can be recreated
-      if (
-        error.code === "EAUTH" ||
-        error.code === "ECONNECTION" ||
-        error.code === "ETIMEDOUT" ||
-        error.responseCode === 535 ||
-        error.responseCode === 421
-      ) {
-        cachedTransporter = null;
-        cachedTransporterKey = "";
+      if (shouldResetTransporter(error)) {
+        closeCachedTransporter(classified.reason);
       }
 
       if (isLastAttempt) {
         throw error;
       }
 
-      // Exponential backoff: 1s, 2s, 4s, etc.
-      const backoffMs = 1000 * Math.pow(2, attempt);
+      const backoffMs = SMTP_RETRY_BACKOFF_MS * Math.pow(2, attempt);
       console.log(
         `[email] Retrying in ${backoffMs}ms after ${classified.reason}...`
       );
@@ -503,9 +591,16 @@ const verifyEmailTransporter = async () => {
       `[email] Verifying SMTP connection to ${config.host}:${config.port} (secure=${config.secure})`
     );
 
-    await createTransporter().verify();
+    await withTimeout(
+      createTransporter().verify(),
+      SMTP_VERIFY_TIMEOUT_MS,
+      "SMTP verify",
+      () => closeCachedTransporter("verify timeout")
+    );
 
     console.log("[email] ✓ SMTP transporter verified successfully");
+
+    closeCachedTransporter("verify completed");
 
     return {
       ok: true,
@@ -514,6 +609,9 @@ const verifyEmailTransporter = async () => {
     };
   } catch (error) {
     const classified = classifySmtpError(error);
+    if (shouldResetTransporter(error)) {
+      closeCachedTransporter(classified.reason);
+    }
 
     console.error("[email] ✗ SMTP verification failed", {
       reason: classified.reason,

@@ -636,6 +636,12 @@ const login = async (req, res, next) => {
 };
 
 const sendEmailCode = async (req, res, next) => {
+  const startedAt = Date.now();
+  const timings = {};
+  const mark = (label) => {
+    timings[label] = Date.now() - startedAt;
+  };
+
   try {
     const requestedEmail = normalizeEmail(req.body.email || req.user.email);
     const currentEmail = req.user.emailGeneratedFromPhone ? "" : normalizeEmail(req.user.email);
@@ -652,6 +658,7 @@ const sendEmailCode = async (req, res, next) => {
         return res.status(400).json({ message: "Email already exists" });
       }
     }
+    mark("emailCheckedMs");
 
     const lastSent = req.user.emailVerificationLastSentAt ? new Date(req.user.emailVerificationLastSentAt).getTime() : 0;
     const remainingMs = otpCooldownMs - (Date.now() - lastSent);
@@ -664,6 +671,7 @@ const sendEmailCode = async (req, res, next) => {
 
     const code = generateOtpCode("email");
     const hashedCode = await bcrypt.hash(code, 10);
+    mark("otpPreparedMs");
     
     console.log(`[auth] Attempting to send verification email to ${targetEmail} for user ${req.user._id}`);
     
@@ -673,12 +681,14 @@ const sendEmailCode = async (req, res, next) => {
       name: req.user.name || req.user.username || "creator",
       expiresMinutes: otpExpiryMinutes,
     });
+    mark("emailDeliveryMs");
 
     if (!delivery.sent) {
       console.error(`[auth] Email delivery failed for user ${req.user._id}:`, {
         reason: delivery.reason,
         message: delivery.message,
         to: targetEmail,
+        timings,
       });
 
       // If in development with MOCK_EMAIL_OTP enabled, allow verification to proceed
@@ -716,6 +726,13 @@ const sendEmailCode = async (req, res, next) => {
       returnDocument: "after",
       runValidators: true,
     }).select("-password");
+    mark("userSavedMs");
+
+    console.log(`[auth] sendEmailCode completed for user ${req.user._id}`, {
+      delivery: delivery.sent ? "email_sent" : "local_code",
+      totalMs: Date.now() - startedAt,
+      timings,
+    });
 
     return res.json({
       user: userResponse(user),
@@ -727,10 +744,12 @@ const sendEmailCode = async (req, res, next) => {
       ...(shouldExposeOtp("email") ? { code } : {}),
     });
   } catch (error) {
-    console.error(`[auth] sendEmailCode error for user ${req.user._id}:`, {
+    console.error(`[auth] sendEmailCode error for user ${req.user?._id || "unknown"}:`, {
       message: error?.message,
       code: error?.code,
       stack: error?.stack?.split("\n")[0],
+      totalMs: Date.now() - startedAt,
+      timings,
     });
     return next(error);
   }

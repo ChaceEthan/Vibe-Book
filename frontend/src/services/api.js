@@ -42,6 +42,7 @@ const API = axios.create({
 const UPLOAD_TIMEOUT_MS = 180000;
 const WALLET_REQUEST_TIMEOUT_MS = 15000;
 const MARKETPLACE_REQUEST_TIMEOUT_MS = 20000;
+const OTP_REQUEST_TIMEOUT_MS = 45000;
 
 export const getApiErrorMessage = (error, fallback = "Request failed. Please try again.") => {
   const data = error?.response?.data;
@@ -134,9 +135,9 @@ export const authApi = {
   login: (payload) => API.post("/auth/login", payload),
   register: (payload) => API.post("/auth/register", payload),
   checkAvailability: (params = {}, options = {}) => API.get("/auth/check", { params, signal: options.signal }),
-  sendEmailCode: (payload = {}) => API.post("/auth/send-email-code", payload),
+  sendEmailCode: (payload = {}) => API.post("/auth/send-email-code", payload, { timeout: OTP_REQUEST_TIMEOUT_MS }),
   verifyEmailCode: (payload = {}) => API.post("/auth/verify-email-code", payload),
-  sendPhoneCode: (payload = {}) => API.post("/auth/send-phone-code", payload),
+  sendPhoneCode: (payload = {}) => API.post("/auth/send-phone-code", payload, { timeout: OTP_REQUEST_TIMEOUT_MS }),
   verifyPhoneCode: (payload = {}) => API.post("/auth/verify-phone-code", payload),
 };
 
