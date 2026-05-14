@@ -313,6 +313,7 @@ const sendMailWithRetry = async (mailOptions, retries = SMTP_MAX_RETRIES) => {
   const maxRetries = Math.min(Math.max(Number(retries), 0), 2);
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const config = getSmtpConfig();
     const transporter = createTransporter();
     const startedAt = Date.now();
 
@@ -323,7 +324,15 @@ const sendMailWithRetry = async (mailOptions, retries = SMTP_MAX_RETRIES) => {
         "SMTP sendMail",
         () => closeCachedTransporter("sendMail timeout")
       );
-      console.log(`[email] Mail sent successfully on attempt ${attempt + 1} in ${Date.now() - startedAt}ms`);
+      const elapsedMs = Date.now() - startedAt;
+      console.log("[email] Mail sent successfully", {
+        attempt: attempt + 1,
+        elapsedMs,
+        host: config.host,
+        port: config.port,
+        recipient: mailOptions.to || "unknown",
+        response: response?.response || response?.messageId || "",
+      });
       return response;
     } catch (error) {
       const isLastAttempt = attempt === maxRetries || !shouldRetrySmtpError(error);
@@ -339,6 +348,16 @@ const sendMailWithRetry = async (mailOptions, retries = SMTP_MAX_RETRIES) => {
         to: mailOptions.to || "unknown",
         elapsedMs: Date.now() - startedAt,
       });
+
+      if (classified.reason === "SMTP_AUTH_FAILED") {
+        console.error("[email] SMTP authentication failed; check Gmail App Password and account access", {
+          code: error?.code || "",
+          responseCode: error?.responseCode || "",
+          command: error?.command || "",
+          host: config.host,
+          user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
+        });
+      }
 
       // On certain errors, clear the transporter cache so it can be recreated
       if (shouldResetTransporter(error)) {
@@ -518,9 +537,10 @@ const sendVerificationEmail = async ({
   const config = getSmtpConfig();
 
   try {
+    const startedAt = Date.now();
     console.log(`[email] Sending verification email to ${to} via ${config.host}:${config.port} (secure=${config.secure})`);
     
-    await sendMailWithRetry({
+    const response = await sendMailWithRetry({
       from: defaultFrom(),
       to,
       subject,
@@ -541,10 +561,26 @@ const sendVerificationEmail = async ({
       }),
     });
 
-    console.log(`[email] Verification email sent successfully to ${to}`);
+    console.log("[email] Verification email sent successfully", {
+      recipient: to,
+      elapsedMs: Date.now() - startedAt,
+      host: config.host,
+      port: config.port,
+      response: response?.response || response?.messageId || "",
+    });
     return { sent: true };
   } catch (error) {
     const classified = classifySmtpError(error);
+
+    if (classified.reason === "SMTP_AUTH_FAILED") {
+      console.error("[email] Verification email blocked by SMTP authentication failure", {
+        code: error?.code || "",
+        responseCode: error?.responseCode || "",
+        command: error?.command || "",
+        host: config.host,
+        user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
+      });
+    }
 
     console.error("[email] Verification email delivery failed", {
       reason: classified.reason,
