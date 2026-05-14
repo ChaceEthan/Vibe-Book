@@ -15,48 +15,71 @@ const envValue = (...keys) => {
   return "";
 };
 
+const truthy = (value) =>
+  ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
+
 const getSmtpConfig = () => {
-  const user = envValue("EMAIL_USER", "SMTP_USER", "SMTP_EMAIL", "SMTP_USERNAME", "GMAIL_USER");
-  const pass = envValue("EMAIL_PASS", "SMTP_PASS", "SMTP_PASSWORD", "SMTP_AUTH_TOKEN", "GMAIL_APP_PASSWORD", "GMAIL_PASS");
   const host = envValue("SMTP_HOST", "EMAIL_HOST") || "smtp.gmail.com";
-  const isGmail = /gmail\.com$/i.test(host);
-  const port = Number(envValue("SMTP_PORT", "EMAIL_PORT")) || (isGmail ? 465 : 587);
-  const secure = envValue("SMTP_SECURE", "EMAIL_SECURE")
-    ? ["1", "true", "yes"].includes(envValue("SMTP_SECURE", "EMAIL_SECURE").toLowerCase())
-    : port === 465;
-  const from = envValue("FROM_EMAIL", "SMTP_FROM", "EMAIL_FROM", "MAIL_FROM") || (user ? `VibeBook <${user}>` : "");
+  // Production default: Port 587 (STARTTLS) for Gmail reliability
+  // Port 465 (SMTPS implicit TLS) can have connection issues
+  const portEnv = Number(envValue("SMTP_PORT", "EMAIL_PORT")) || 0;
+  const port = portEnv > 0 ? portEnv : (host?.includes("gmail") ? 587 : 465);
+  const secure =
+    !envValue("SMTP_SECURE", "EMAIL_SECURE")
+      ? port === 465
+      : truthy(envValue("SMTP_SECURE", "EMAIL_SECURE"));
+  const user = envValue(
+    "EMAIL_USER",
+    "SMTP_USER",
+    "SMTP_EMAIL",
+    "SMTP_USERNAME",
+    "GMAIL_USER"
+  );
+  const pass = envValue(
+    "EMAIL_PASS",
+    "EMAIL_APP_PASSWORD",
+    "SMTP_PASS",
+    "SMTP_PASSWORD",
+    "SMTP_AUTH_TOKEN",
+    "GMAIL_APP_PASSWORD",
+    "GMAIL_PASS"
+  );
+  const from =
+    envValue("FROM_EMAIL", "SMTP_FROM", "EMAIL_FROM", "MAIL_FROM") ||
+    (user ? `VibeBook <${user}>` : "");
 
   return {
-    configured: Boolean(user && pass && from && host && Number.isFinite(port) && port > 0),
-    from,
     host,
-    pass,
     port,
     secure,
     user,
+    pass,
+    from,
   };
 };
 
 const getEmailConfigStatus = () => {
   const config = getSmtpConfig();
+  const missing = [];
+
+  if (!config.host) missing.push("SMTP_HOST");
+  if (!Number.isFinite(config.port) || config.port <= 0) missing.push("SMTP_PORT");
+  if (!config.user) missing.push("EMAIL_USER/SMTP_USER");
+  if (!config.pass) missing.push("EMAIL_PASS/SMTP_PASS");
+  if (!config.from) missing.push("FROM_EMAIL/SMTP_FROM");
+
   return {
-    configured: config.configured,
-    missing: [
-      config.user ? "" : "EMAIL_USER/SMTP_USER",
-      config.pass ? "" : "EMAIL_PASS/SMTP_PASS",
-      config.from ? "" : "FROM_EMAIL/SMTP_FROM",
-      config.host ? "" : "SMTP_HOST",
-      Number.isFinite(config.port) && config.port > 0 ? "" : "SMTP_PORT",
-    ].filter(Boolean),
+    configured: missing.length === 0,
+    missing,
     host: config.host,
     port: config.port,
     secure: config.secure,
+    user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "",
+    from: config.from,
   };
 };
 
-const hasSmtpConfig = () => {
-  return getSmtpConfig().configured;
-};
+const hasSmtpConfig = () => getEmailConfigStatus().configured;
 
 const createTransporter = () => {
   const config = getSmtpConfig();
@@ -71,27 +94,44 @@ const createTransporter = () => {
     return cachedTransporter;
   }
 
-  const transporterOptions = {
+  // Reset cache if configuration changed
+  cachedTransporter = null;
+  cachedTransporterKey = "";
+
+  const transporter = nodemailer.createTransport({
     host: config.host,
     port: config.port,
     secure: config.secure,
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000,
-    tls: {
-      servername: config.host,
-    },
-  };
-
-  if (config.user && config.pass) {
-    transporterOptions.auth = {
+    auth: {
       user: config.user,
       pass: config.pass,
-    };
-  }
+    },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    pool: {
+      maxConnections: 5,
+      maxMessages: 100,
+      rateDelta: 1000,
+      rateLimit: 10,
+    },
+    tls: {
+      rejectUnauthorized: true,
+      servername: config.host,
+      // Allow connection to Gmail with proper TLS handling
+      ...(config.host?.includes("gmail") && !config.secure && config.port === 587
+        ? { minVersion: "TLSv1.2" }
+        : {}),
+    },
+    // Enable detailed logging in non-production for debugging
+    ...(process.env.NODE_ENV !== "production"
+      ? { logger: true, debug: true }
+      : {}),
+  });
 
-  cachedTransporter = nodemailer.createTransport(transporterOptions);
+  cachedTransporter = transporter;
   cachedTransporterKey = transporterKey;
+
   return cachedTransporter;
 };
 
@@ -109,124 +149,289 @@ const classifySmtpError = (error = {}) => {
   const code = String(error.code || "");
   const response = String(error.response || error.message || "");
   const responseCode = Number(error.responseCode || 0);
+  const stack = String(error.stack || "");
 
-  if (code === "EAUTH" || responseCode === 535 || /invalid login|authentication/i.test(response)) {
+  // Authentication failures
+  if (
+    code === "EAUTH" ||
+    responseCode === 535 ||
+    responseCode === 534 ||
+    /authentication|invalid login|invalid credentials|login failed|verify credentials/i.test(response)
+  ) {
     return {
       reason: "SMTP_AUTH_FAILED",
-      message: "Email delivery is unavailable. Please check SMTP credentials and try again.",
+      message:
+        "Email delivery authentication failed. Please verify SMTP credentials and Gmail App Password.",
     };
   }
 
-  if (code === "ECONNECTION" || code === "ETIMEDOUT" || /timeout|connect/i.test(response)) {
+  // Connection/network failures
+  if (
+    code === "ECONNECTION" ||
+    code === "ETIMEDOUT" ||
+    code === "ESOCKET" ||
+    code === "ENOTFOUND" ||
+    code === "EHOSTUNREACH" ||
+    code === "ENETUNREACH" ||
+    /timeout|connect|network|socket|econnrefused|enotfound|unreachable|refused/i.test(response)
+  ) {
     return {
       reason: "SMTP_CONNECTION_FAILED",
-      message: "Email delivery is unavailable due to a connection issue. Please try again later.",
+      message:
+        "Email delivery connection failed. Please check SMTP host and port configuration. Verify firewall/network access.",
     };
   }
 
+  // TLS/SSL certificate failures
+  if (
+    code === "SELF_SIGNED_CERT_IN_CHAIN" ||
+    code === "CERT_HAS_EXPIRED" ||
+    /certificate|tls|ssl|handshake/i.test(response)
+  ) {
+    return {
+      reason: "SMTP_TLS_FAILED",
+      message:
+        "Email delivery TLS configuration issue. Check SMTP_SECURE and port compatibility.",
+    };
+  }
+
+  // Service unavailable
+  if (
+    responseCode === 421 ||
+    responseCode === 450 ||
+    /temporarily unavailable|try again later|service unavailable/i.test(response)
+  ) {
+    return {
+      reason: "SMTP_SERVICE_UNAVAILABLE",
+      message:
+        "Email service temporarily unavailable. Please try again in a few moments.",
+    };
+  }
+
+  // Generic failure with detailed info
   return {
     reason: "SMTP_SEND_FAILED",
-    message: "Email delivery failed. Please try again later or contact support.",
+    message:
+      "Email delivery failed. Please try again later or contact support.",
+    details: {
+      code,
+      responseCode,
+      firstResponseLine: response.split("\n")[0],
+    },
   };
 };
 
-const sendContactNotification = async ({ to, contactedUser, fromUser, message }) => {
-  if (!hasSmtpConfig()) {
-    return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
-  }
-
+const sendMailWithRetry = async (mailOptions, retries = 2) => {
   const transporter = createTransporter();
 
-  await transporter.sendMail({
-    from: defaultFrom(),
-    to,
-    subject: `New VibeBook contact from ${fromUser.name}`,
-    text: [
-      `Hi ${contactedUser.name},`,
-      "",
-      `${fromUser.name} contacted you on VibeBook.`,
-      "",
-      `Message: ${message}`,
-      "",
-      `Reply email: ${fromUser.email}`,
-    ].join("\n"),
-  });
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const response = await transporter.sendMail(mailOptions);
+      console.log(`[email] Mail sent successfully on attempt ${attempt + 1}`);
+      return response;
+    } catch (error) {
+      const isLastAttempt = attempt === retries;
+      const classified = classifySmtpError(error);
 
-  return { sent: true };
-};
+      console.error(`[email] Attempt ${attempt + 1}/${retries + 1} failed:`, {
+        reason: classified.reason,
+        message: error?.message || "",
+        code: error?.code || "",
+        responseCode: error?.responseCode || "",
+        command: error?.command || "",
+        response: error?.response?.split("\n")[0] || "",
+        to: mailOptions.to || "unknown",
+      });
 
-const sendBookingNotification = async ({ to, talent, requester, booking, whatsappLink }) => {
-  if (!hasSmtpConfig()) {
-    return { sent: false, reason: "SMTP_NOT_CONFIGURED" };
+      // On certain errors, clear the transporter cache so it can be recreated
+      if (
+        error.code === "EAUTH" ||
+        error.code === "ECONNECTION" ||
+        error.code === "ETIMEDOUT" ||
+        error.responseCode === 535 ||
+        error.responseCode === 421
+      ) {
+        cachedTransporter = null;
+        cachedTransporterKey = "";
+      }
+
+      if (isLastAttempt) {
+        throw error;
+      }
+
+      // Exponential backoff: 1s, 2s, 4s, etc.
+      const backoffMs = 1000 * Math.pow(2, attempt);
+      console.log(
+        `[email] Retrying in ${backoffMs}ms after ${classified.reason}...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
   }
-
-  const transporter = createTransporter();
-
-  await transporter.sendMail({
-    from: defaultFrom(),
-    to,
-    subject: `New VibeBook booking request from ${requester.name}`,
-    text: [
-      `Hi ${talent.name},`,
-      "",
-      `${requester.name} sent you a booking request on VibeBook.`,
-      "",
-      `Business: ${booking.businessName || "Not provided"}`,
-      `Event location: ${booking.location || "Not provided"}`,
-      `Offered price: ${booking.offeredPrice || booking.offerPrice || "Not provided"} RWF`,
-      `Message: ${booking.message || "No message"}`,
-      "",
-      whatsappLink ? `WhatsApp action link: ${whatsappLink}` : "",
-      `Reply email: ${requester.email}`,
-    ].filter(Boolean).join("\n"),
-  });
-
-  return { sent: true };
 };
 
-const verificationEmailHtml = ({ appUrl = "", code, expiresMinutes = 10, name = "creator" }) => `
-  <div style="margin:0;background:#f8fafc;padding:24px;font-family:Inter,Arial,sans-serif;color:#0f172a;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
-      <tr>
-        <td style="background:#020617;color:#ffffff;padding:28px 24px;">
-          <div style="display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:14px;background:#38bdf8;color:#020617;font-weight:900;font-size:18px;">VB</div>
-          <h1 style="margin:18px 0 0;font-size:26px;line-height:1.2;">VibeBook email verification</h1>
-          <p style="margin:10px 0 0;color:#cbd5e1;font-size:14px;line-height:1.6;">Hi ${escapeHtml(name)}, use this one-time code to finish securing your account.</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:28px 24px;">
-          <p style="margin:0 0 12px;font-size:14px;color:#475569;">Your VibeBook verification code is:</p>
-          <div style="letter-spacing:10px;font-size:34px;font-weight:900;text-align:center;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:14px;padding:18px 12px;color:#0f172a;">${code}</div>
-          <p style="margin:18px 0 0;font-size:14px;line-height:1.7;color:#475569;">This code expires in ${expiresMinutes} minutes. If you did not request this code, you can safely ignore this email.</p>
-          ${appUrl ? `<p style="margin:22px 0 0;"><a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:800;">Open VibeBook</a></p>` : ""}
-          <div style="margin-top:18px;border-top:1px solid #e2e8f0;padding-top:16px;font-size:12px;line-height:1.6;color:#64748b;">
-            VibeBook will never ask for your password or payment details by email. Keep this code private.
-            <br />VibeBook, Kigali, Rwanda. Support: gebmelody@gmail.com
-          </div>
-        </td>
-      </tr>
-    </table>
-  </div>
-`;
-
-const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) => {
+const sendContactNotification = async ({
+  to,
+  contactedUser = {},
+  fromUser = {},
+  message = "",
+}) => {
   if (!hasSmtpConfig()) {
-    const status = getEmailConfigStatus();
-    console.warn(`[email] Verification email skipped; missing config: ${status.missing.join(", ") || "unknown"}`);
     return {
       sent: false,
       reason: "SMTP_NOT_CONFIGURED",
-      message: "Verification service temporarily unavailable. Please try again.",
     };
   }
 
-  const transporter = createTransporter();
-  const subject = "Your VibeBook verification code";
-  const appUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || "";
+  try {
+    await sendMailWithRetry({
+      from: defaultFrom(),
+      to,
+      subject: `New VibeBook contact from ${fromUser.name || "a user"}`,
+      text: [
+        `Hi ${contactedUser.name || "there"},`,
+        "",
+        `${fromUser.name || "A VibeBook user"} contacted you on VibeBook.`,
+        "",
+        `Message: ${message || "No message"}`,
+        "",
+        `Reply email: ${fromUser.email || "Not provided"}`,
+      ].join("\n"),
+    });
+
+    return { sent: true };
+  } catch (error) {
+    return {
+      sent: false,
+      ...classifySmtpError(error),
+    };
+  }
+};
+
+const sendBookingNotification = async ({
+  to,
+  talent = {},
+  requester = {},
+  booking = {},
+  whatsappLink,
+}) => {
+  if (!hasSmtpConfig()) {
+    return {
+      sent: false,
+      reason: "SMTP_NOT_CONFIGURED",
+    };
+  }
 
   try {
-    await transporter.sendMail({
+    await sendMailWithRetry({
+      from: defaultFrom(),
+      to,
+      subject: `Your VibeBook booking request from ${requester.name || "a user"}`,
+      text: [
+        `Hi ${talent.name || "there"},`,
+        "",
+        `${requester.name || "A VibeBook user"} sent you a booking request on VibeBook.`,
+        "",
+        `Business: ${booking.businessName || "Not provided"}`,
+        `Event location: ${booking.location || "Not provided"}`,
+        `Offered price: ${
+          booking.offeredPrice || booking.offerPrice || "Not provided"
+        } RWF`,
+        `Message: ${booking.message || "No message"}`,
+        "",
+        whatsappLink ? `WhatsApp action link: ${whatsappLink}` : "",
+        `Reply email: ${requester.email || "Not provided"}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    });
+
+    return { sent: true };
+  } catch (error) {
+    return {
+      sent: false,
+      ...classifySmtpError(error),
+    };
+  }
+};
+
+const verificationEmailHtml = ({
+  appUrl = "",
+  code,
+  expiresMinutes = 10,
+  name = "creator",
+}) => `
+<div style="margin:0;background:#f8fafc;padding:24px;font-family:Arial,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
+    <tr>
+      <td style="background:#020617;color:#ffffff;padding:28px 24px;">
+        <h1 style="margin:0;font-size:26px;">VibeBook email verification</h1>
+        <p style="margin-top:10px;color:#cbd5e1;">
+          Hi ${escapeHtml(name)}, use this verification code to secure your account.
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:28px 24px;">
+        <div style="letter-spacing:10px;font-size:34px;font-weight:900;text-align:center;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:14px;padding:18px 12px;color:#0f172a;">
+          ${escapeHtml(code)}
+        </div>
+        <p style="margin-top:18px;color:#475569;">
+          This code expires in ${escapeHtml(expiresMinutes)} minutes.
+        </p>
+        <p style="margin-top:18px;color:#475569;">
+          If you did not request this code, you can safely ignore this email.
+        </p>
+        ${
+          appUrl
+            ? `
+        <p>
+          <a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:999px;padding:12px 18px;font-size:14px;font-weight:bold;">
+            Open VibeBook
+          </a>
+        </p>
+        `
+            : ""
+        }
+        <div style="margin-top:18px;border-top:1px solid #e2e8f0;padding-top:16px;font-size:12px;line-height:1.6;color:#64748b;">
+          VibeBook will never ask for your password or payment details by email. Keep this code private.
+        </div>
+      </td>
+    </tr>
+  </table>
+</div>
+`;
+
+const sendVerificationEmail = async ({
+  to,
+  code,
+  name = "creator",
+  expiresMinutes = 10,
+}) => {
+  if (!hasSmtpConfig()) {
+    const status = getEmailConfigStatus();
+
+    console.warn(
+      `[email] Verification email skipped; missing SMTP config. Missing: ${
+        status.missing.join(", ") || "unknown"
+      }`
+    );
+
+    return {
+      sent: false,
+      reason: "SMTP_NOT_CONFIGURED",
+      message:
+        "Verification service temporarily unavailable. Please ensure SMTP credentials are configured.",
+    };
+  }
+
+  const subject = "Your VibeBook verification code";
+  const appUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || "";
+  const config = getSmtpConfig();
+
+  try {
+    console.log(`[email] Sending verification email to ${to} via ${config.host}:${config.port} (secure=${config.secure})`);
+    
+    await sendMailWithRetry({
       from: defaultFrom(),
       to,
       subject,
@@ -236,50 +441,117 @@ const sendVerificationEmail = async ({ to, code, name, expiresMinutes = 10 }) =>
         `Your VibeBook verification code is: ${code}`,
         "",
         `This code expires in ${expiresMinutes} minutes.`,
-        "If you did not request this code, you can safely ignore this email.",
         "",
-        "VibeBook will never ask for your password or payment details by email.",
-        "VibeBook, Kigali, Rwanda. Support: gebmelody@gmail.com",
+        "If you did not request this code, you can safely ignore this email.",
       ].join("\n"),
-      html: verificationEmailHtml({ appUrl, code, expiresMinutes, name }),
+      html: verificationEmailHtml({
+        appUrl,
+        code,
+        expiresMinutes,
+        name,
+      }),
     });
 
+    console.log(`[email] Verification email sent successfully to ${to}`);
     return { sent: true };
   } catch (error) {
     const classified = classifySmtpError(error);
+
     console.error("[email] Verification email delivery failed", {
       reason: classified.reason,
-      code: error?.code || "",
-      responseCode: error?.responseCode || "",
-      host: getSmtpConfig().host,
-      port: getSmtpConfig().port,
+      message: classified.message,
+      details: classified.details || {},
+      originalError: {
+        message: error?.message || "",
+        code: error?.code || "",
+        response: error?.response?.split("\n")[0] || "",
+        responseCode: error?.responseCode || "",
+      },
+      config: {
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
+      },
+      recipient: to,
     });
-    return { sent: false, ...classified };
+
+    return {
+      sent: false,
+      ...classified,
+    };
   }
 };
 
 const verifyEmailTransporter = async () => {
-  if (!hasSmtpConfig()) {
-    return { ok: false, reason: "SMTP_NOT_CONFIGURED", status: getEmailConfigStatus() };
+  const config = getSmtpConfig();
+  const status = getEmailConfigStatus();
+
+  if (!status.configured) {
+    console.warn(
+      "[email] SMTP not configured. Missing: " + status.missing.join(", ")
+    );
+    return {
+      ok: false,
+      reason: "SMTP_NOT_CONFIGURED",
+      status,
+    };
   }
 
   try {
+    console.log(
+      `[email] Verifying SMTP connection to ${config.host}:${config.port} (secure=${config.secure})`
+    );
+
     await createTransporter().verify();
-    return { ok: true, status: getEmailConfigStatus() };
+
+    console.log("[email] ✓ SMTP transporter verified successfully");
+
+    return {
+      ok: true,
+      status,
+      message: `Connected to ${config.host}:${config.port}`,
+    };
   } catch (error) {
     const classified = classifySmtpError(error);
-    console.error("[email] SMTP verification failed", {
+
+    console.error("[email] ✗ SMTP verification failed", {
       reason: classified.reason,
-      code: error?.code || "",
-      responseCode: error?.responseCode || "",
-      host: getSmtpConfig().host,
-      port: getSmtpConfig().port,
+      message: classified.message,
+      details: classified.details || {},
+      originalError: {
+        message: error?.message || "",
+        code: error?.code || "",
+        response: error?.response?.split("\n")[0] || "",
+        responseCode: error?.responseCode || "",
+      },
+      config: {
+        host: config.host,
+        port: config.port,
+        secure: config.secure,
+        user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
+      },
     });
-    return { ok: false, ...classified, status: getEmailConfigStatus() };
+
+    return {
+      ok: false,
+      ...classified,
+      status,
+    };
   }
 };
 
+const transporter = {
+  sendMail: (mailOptions) => createTransporter().sendMail(mailOptions),
+  verify: () => createTransporter().verify(),
+};
+
+const verifyConnection = verifyEmailTransporter;
+
 module.exports = {
+  transporter,
+  verifyConnection,
+  sendMailWithRetry,
   sendContactNotification,
   sendBookingNotification,
   sendVerificationEmail,

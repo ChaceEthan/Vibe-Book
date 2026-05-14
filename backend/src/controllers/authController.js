@@ -1,3 +1,4 @@
+// @ts-nocheck
 const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 
@@ -663,6 +664,9 @@ const sendEmailCode = async (req, res, next) => {
 
     const code = generateOtpCode("email");
     const hashedCode = await bcrypt.hash(code, 10);
+    
+    console.log(`[auth] Attempting to send verification email to ${targetEmail} for user ${req.user._id}`);
+    
     const delivery = await sendVerificationEmail({
       to: targetEmail,
       code,
@@ -670,13 +674,27 @@ const sendEmailCode = async (req, res, next) => {
       expiresMinutes: otpExpiryMinutes,
     });
 
-    if (!delivery.sent && !shouldExposeOtp("email")) {
-      return res.status(503).json({
-        message: delivery.message || "Email delivery failed. Please try again later or contact support.",
-        reason: delivery.reason || "SMTP_NOT_CONFIGURED",
+    if (!delivery.sent) {
+      console.error(`[auth] Email delivery failed for user ${req.user._id}:`, {
+        reason: delivery.reason,
+        message: delivery.message,
+        to: targetEmail,
       });
+
+      // If in development with MOCK_EMAIL_OTP enabled, allow verification to proceed
+      if (!shouldExposeOtp("email")) {
+        return res.status(503).json({
+          message: delivery.message || "Email delivery failed. Please try again later or contact support.",
+          reason: delivery.reason || "SMTP_NOT_CONFIGURED",
+          details: delivery.details || {},
+          retryable: true,
+        });
+      }
+    } else {
+      console.log(`[auth] Email sent successfully to ${targetEmail} for user ${req.user._id}`);
     }
 
+    // Store OTP even if email delivery failed (for development/testing with mock OTP)
     const updates = {
       emailVerificationCode: hashedCode,
       emailVerificationExpires: new Date(Date.now() + otpExpiryMs),
@@ -705,9 +723,15 @@ const sendEmailCode = async (req, res, next) => {
       expiresAt: updates.emailVerificationExpires,
       cooldownSeconds: Math.ceil(otpCooldownMs / 1000),
       delivery: delivery.sent ? "email_sent" : "local_code",
+      deliveryReason: delivery.reason || "success",
       ...(shouldExposeOtp("email") ? { code } : {}),
     });
   } catch (error) {
+    console.error(`[auth] sendEmailCode error for user ${req.user._id}:`, {
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack?.split("\n")[0],
+    });
     return next(error);
   }
 };

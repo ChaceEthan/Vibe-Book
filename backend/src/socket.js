@@ -266,6 +266,14 @@ const initSocket = (server, corsOptions = {}) => {
       maxDisconnectionDuration: 2 * 60 * 1000,
       skipMiddlewares: false,
     },
+    // Improve timeout and connection handling for production
+    connectTimeout: 45000,
+    ackTimeout: 10000,
+    upgradeTimeout: 10000,
+    pingInterval: 25000,
+    pingTimeout: 20000,
+    // Transports with fallback
+    transports: ["websocket", "polling"],
   });
 
   ioInstance.use(async (socket, next) => {
@@ -273,20 +281,20 @@ const initSocket = (server, corsOptions = {}) => {
       const user = await getUserFromSocket(socket);
 
       if (!user || user.isBlocked || (user.verificationRequired === true && user.accountStatus === "pending_verification") || user.accountStatus === "suspended") {
-        console.warn("[socket] unauthorized connection attempt");
+        console.warn(`[socket] unauthorized connection attempt from ${socket.id}`);
         return next(new Error("Unauthorized"));
       }
 
       socket.user = user;
       return next();
     } catch (error) {
-      console.warn(`[socket] authentication failed: ${error.message}`);
+      console.warn(`[socket] authentication failed for ${socket.id}: ${error.message}`);
       return next(new Error("Unauthorized"));
     }
   });
 
   ioInstance.engine.on("connection_error", (error) => {
-    console.warn(`[socket] connection failed: ${error.message}`);
+    console.warn(`[socket] connection error: ${error.message || error}`);
   });
 
   ioInstance.on("connection", async (socket) => {
