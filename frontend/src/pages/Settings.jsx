@@ -658,7 +658,7 @@ const Settings = () => {
         cooldown: Number(data.cooldownSeconds || 60),
         step: 3,
       }));
-      notifySuccess(data.code ? `Local verification code: ${data.code}` : "Verification code sent to your email.");
+      notifySuccess(data.code ? `Local verification code: ${data.code}` : "Security code sent.");
       return data;
     } finally {
       setSaving("");

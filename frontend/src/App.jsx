@@ -26,7 +26,7 @@ const CreatorDashboard = lazy(() => import("./components/CreatorDashboard.jsx"))
 const Wallet = lazy(() => import("./pages/Wallet.jsx"));
 
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading, user } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -39,10 +39,6 @@ const ProtectedRoute = ({ children }) => {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location }} />;
-  }
-
-  if (user?.verificationRequired === true && user?.accountStatus === "pending_verification") {
-    return <Navigate to="/register?verify=1" replace state={{ from: location }} />;
   }
 
   return children;
