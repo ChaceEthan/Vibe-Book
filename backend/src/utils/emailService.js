@@ -1,5 +1,15 @@
 // @ts-nocheck
 const nodemailer = require("nodemailer");
+const dns = require("dns");
+const net = require("net");
+
+try {
+  dns.setDefaultResultOrder?.("ipv4first");
+} catch (error) {
+  console.warn("[email] Unable to set DNS result order to ipv4first", {
+    message: error?.message || "",
+  });
+}
 
 let cachedTransporter = null;
 let cachedTransporterKey = "";
@@ -150,6 +160,34 @@ const withTimeout = (promise, timeoutMs, label, onTimeout) => {
   });
 };
 
+const resolveSmtpHostForConnect = async (config) => {
+  if (net.isIP(config.host)) {
+    return {
+      connectionHost: config.host,
+      servername: envValue("SMTP_TLS_SERVERNAME", "EMAIL_TLS_SERVERNAME") || config.host,
+    };
+  }
+
+  const address = await withTimeout(
+    dns.promises.lookup(config.host, { family: 4 }),
+    SMTP_DNS_TIMEOUT_MS,
+    "SMTP IPv4 DNS lookup"
+  );
+  const connectionHost = address?.address || "";
+
+  if (!connectionHost) {
+    const error = new Error(`No IPv4 address found for ${config.host}`);
+    error.code = "ENOTFOUND";
+    error.command = "DNS";
+    throw error;
+  }
+
+  return {
+    connectionHost,
+    servername: config.host,
+  };
+};
+
 const shouldResetTransporter = (error = {}) => {
   const code = String(error.code || "");
   const responseCode = Number(error.responseCode || 0);
@@ -168,10 +206,12 @@ const shouldRetrySmtpError = (error = {}) => {
   return shouldResetTransporter(error) || Number(error.responseCode || 0) >= 500;
 };
 
-const createTransporter = () => {
+const createTransporter = async () => {
   const config = getSmtpConfig();
+  const { connectionHost, servername } = await resolveSmtpHostForConnect(config);
   const transporterKey = JSON.stringify({
     host: config.host,
+    connectionHost,
     port: config.port,
     secure: config.secure,
     user: config.user,
@@ -185,7 +225,7 @@ const createTransporter = () => {
   closeCachedTransporter("SMTP config changed");
 
   const transporter = nodemailer.createTransport({
-    host: config.host,
+    host: connectionHost,
     port: config.port,
     secure: config.secure,
     family: 4,
@@ -205,7 +245,7 @@ const createTransporter = () => {
     requireTLS: !config.secure && (config.port === 587 || config.host?.includes("gmail")),
     tls: {
       rejectUnauthorized: true,
-      servername: config.host,
+      servername,
       // Allow connection to Gmail with proper TLS handling
       ...(config.host?.includes("gmail") && !config.secure && config.port === 587
         ? { minVersion: "TLSv1.2" }
@@ -219,6 +259,14 @@ const createTransporter = () => {
 
   cachedTransporter = transporter;
   cachedTransporterKey = transporterKey;
+
+  if (connectionHost !== config.host) {
+    console.log("[email] SMTP host resolved for IPv4 connection", {
+      host: config.host,
+      connectionHost,
+      port: config.port,
+    });
+  }
 
   return cachedTransporter;
 };
@@ -314,10 +362,10 @@ const sendMailWithRetry = async (mailOptions, retries = SMTP_MAX_RETRIES) => {
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const config = getSmtpConfig();
-    const transporter = createTransporter();
     const startedAt = Date.now();
 
     try {
+      const transporter = await createTransporter();
       const response = await withTimeout(
         transporter.sendMail(mailOptions),
         SMTP_SEND_TIMEOUT_MS,
@@ -629,7 +677,7 @@ const verifyEmailTransporter = async () => {
     );
 
     await withTimeout(
-      createTransporter().verify(),
+      (await createTransporter()).verify(),
       SMTP_VERIFY_TIMEOUT_MS,
       "SMTP verify",
       () => closeCachedTransporter("verify timeout")
@@ -677,8 +725,8 @@ const verifyEmailTransporter = async () => {
 };
 
 const transporter = {
-  sendMail: (mailOptions) => createTransporter().sendMail(mailOptions),
-  verify: () => createTransporter().verify(),
+  sendMail: async (mailOptions) => (await createTransporter()).sendMail(mailOptions),
+  verify: async () => (await createTransporter()).verify(),
 };
 
 const verifyConnection = verifyEmailTransporter;
