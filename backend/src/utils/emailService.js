@@ -15,7 +15,7 @@ const smtpNumber = (key, fallback, min = 1000, max = 60000) => {
 
 const SMTP_CONNECTION_TIMEOUT_MS = smtpNumber("SMTP_CONNECTION_TIMEOUT_MS", 7000);
 const SMTP_GREETING_TIMEOUT_MS = smtpNumber("SMTP_GREETING_TIMEOUT_MS", 5000);
-const SMTP_SOCKET_TIMEOUT_MS = smtpNumber("SMTP_SOCKET_TIMEOUT_MS", 9000);
+const SMTP_SOCKET_TIMEOUT_MS = smtpNumber("SMTP_SOCKET_TIMEOUT_MS", 7000);
 const SMTP_DNS_TIMEOUT_MS = smtpNumber("SMTP_DNS_TIMEOUT_MS", 5000);
 const SMTP_SEND_TIMEOUT_MS = smtpNumber("SMTP_SEND_TIMEOUT_MS", 10000);
 const SMTP_VERIFY_TIMEOUT_MS = smtpNumber("SMTP_VERIFY_TIMEOUT_MS", 8000);
@@ -188,6 +188,7 @@ const createTransporter = () => {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    family: 4,
     auth: {
       user: config.user,
       pass: config.pass,
