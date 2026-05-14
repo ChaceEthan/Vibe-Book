@@ -141,7 +141,7 @@ const classifyEmailError = (error = {}) => {
     return {
       success: false,
       reason: "RESEND_SERVICE_UNAVAILABLE",
-      message: "Email service temporarily unavailable. Please try again in a few moments.",
+      message: "Email verification is currently unavailable. Your account remains active.",
     };
   }
 
@@ -366,7 +366,7 @@ const sendVerificationEmail = async ({
       success: false,
       reason: "RESEND_NOT_CONFIGURED",
       message:
-        "Verification service temporarily unavailable. Please ensure Resend email delivery is configured.",
+        "Email verification is currently unavailable. Your account remains active.",
     };
   }
 

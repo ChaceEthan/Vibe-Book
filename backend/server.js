@@ -63,21 +63,26 @@ const startServer = async () => {
     const app = require("./src/app");
     const server = http.createServer(app);
 
-    const io = initSocket(server, {
-      methods: corsOptions.methods,
-      allowedHeaders: corsOptions.allowedHeaders,
-      origin(origin, callback) {
-        if (isOriginAllowed(origin)) {
-          return callback(null, origin ? normalizeOrigin(origin) : true);
-        }
+    try {
+      const io = initSocket(server, {
+        methods: corsOptions.methods,
+        allowedHeaders: corsOptions.allowedHeaders,
+        origin(origin, callback) {
+          if (isOriginAllowed(origin)) {
+            return callback(null, origin ? normalizeOrigin(origin) : true);
+          }
 
-        logRejectedOrigin(origin, "socket");
-        return callback(null, false);
-      },
-    });
+          logRejectedOrigin(origin, "socket");
+          return callback(null, false);
+        },
+      });
 
-    app.set("io", io);
-    console.log(`[socket] initialized with ${allowedOrigins.size} explicit allowed origin(s) plus Vercel previews`);
+      app.set("io", io);
+      console.log(`[socket] initialized with ${allowedOrigins.size} explicit allowed origin(s) plus Vercel previews`);
+    } catch (error) {
+      console.error("[socket] initialization failed; continuing HTTP startup:", error.message || error);
+      app.set("io", null);
+    }
 
     server.listen(PORT, "0.0.0.0", () => {
       const address = server.address();

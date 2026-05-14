@@ -192,6 +192,17 @@ const referralFingerprintFor = (req) => {
   return crypto.createHash("sha256").update(`${ip}|${userAgent}`).digest("hex");
 };
 
+const referralCodeFromRequest = (req) => {
+  const raw =
+    req.body?.referralCode ||
+    req.body?.ref ||
+    req.query?.referralCode ||
+    req.query?.ref ||
+    "";
+
+  return typeof raw === "string" ? raw.trim() : "";
+};
+
 const emitToUser = (userId, event, payload = {}) => {
   const io = getIo?.();
   if (io && userId) {
@@ -550,19 +561,28 @@ const register = async (req, res, next) => {
       userData.protected = true;
     }
 
-    const refCode = typeof req.body.referralCode === "string" ? req.body.referralCode.trim() : "";
+    const refCode = referralCodeFromRequest(req);
     const referralFingerprint = referralFingerprintFor(req);
-    const referrer = refCode ? await User.findOne({ referralCode: refCode }) : null;
-    const deviceReferralUsed = referrer
-      ? await User.exists({
-          referredBy: referrer._id,
-          referralFingerprint,
-        })
-      : null;
+    if (refCode) {
+      try {
+        const referrer = await User.findOne({ referralCode: refCode }).select("_id").lean();
+        const deviceReferralUsed = referrer
+          ? await User.exists({
+              referredBy: referrer._id,
+              referralFingerprint,
+            })
+          : null;
 
-    if (referrer && !deviceReferralUsed) {
-      userData.referredBy = referrer._id;
-      userData.referralFingerprint = referralFingerprint;
+        if (referrer && !deviceReferralUsed) {
+          userData.referredBy = referrer._id;
+          userData.referralFingerprint = referralFingerprint;
+        }
+      } catch (error) {
+        console.warn("[auth] referral lookup failed; continuing signup without referral", {
+          referralCode: refCode,
+          message: error?.message || "unknown referral lookup error",
+        });
+      }
     }
 
     const user = await User.create({
@@ -733,7 +753,7 @@ const sendEmailCode = async (req, res, next) => {
         timings,
       });
 
-      return res.status(503).json({
+      return res.json({
         success: false,
         message: delivery.message || "Email delivery failed. Please try again later or contact support.",
         reason: delivery.reason || "RESEND_SEND_FAILED",
