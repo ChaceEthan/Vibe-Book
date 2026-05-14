@@ -527,8 +527,9 @@ const register = async (req, res, next) => {
     userData.countryCode = phoneFields.countryCode || userData.countryCode || "";
     userData.country = phoneFields.country || userData.country || "";
     userData.phoneVerified = false;
-    userData.verificationRequired = true;
-    userData.accountStatus = "pending_verification";
+    userData.isVerified = true;
+    userData.verificationRequired = false;
+    userData.accountStatus = "active";
     userData.name = displayName;
     userData.referralCode = createReferralCode(displayName);
 
@@ -564,10 +565,6 @@ const register = async (req, res, next) => {
       userData.referralFingerprint = referralFingerprint;
     }
 
-    const emailOtpCode = email ? generateOtpCode("email") : "";
-    const hashedEmailOtpCode = emailOtpCode ? await bcrypt.hash(emailOtpCode, 10) : "";
-    const emailOtpExpires = emailOtpCode ? new Date(Date.now() + otpExpiryMs) : undefined;
-
     const user = await User.create({
       ...userData,
       acceptedTerms: true,
@@ -575,43 +572,11 @@ const register = async (req, res, next) => {
       trialStartDate: new Date(),
       trialActive: true,
       password: hashedPassword,
-      ...(emailOtpCode
-        ? {
-            emailVerificationCode: hashedEmailOtpCode,
-            emailVerificationExpires: emailOtpExpires,
-            emailVerificationLastSentAt: new Date(),
-            emailVerificationAttempts: 0,
-            verificationCode: hashedEmailOtpCode,
-            verificationExpires: emailOtpExpires,
-          }
-        : {}),
     });
 
     walletService.createWallet(user._id).catch((error) => {
       console.error("[wallet] signup initialization failed:", error.message);
     });
-
-    if (emailOtpCode) {
-      console.log(`[auth] Registration OTP saved before email delivery for user ${user._id}`, {
-        recipient: email,
-        expiresAt: emailOtpExpires,
-      });
-
-      const delivery = await sendVerificationEmail({
-        to: email,
-        code: emailOtpCode,
-        name: user.name || user.username || "creator",
-        expiresMinutes: otpExpiryMinutes,
-      });
-
-      if (!delivery.sent) {
-        logEmailDeliveryFailure("Registration verification email delivery", user._id, delivery, {
-          recipient: email,
-        });
-      } else {
-        console.log(`[auth] Registration verification email sent to ${email} for user ${user._id}`);
-      }
-    }
 
     const isolatedUser = await applyAdminIsolation(user);
 
@@ -619,7 +584,7 @@ const register = async (req, res, next) => {
       success: true,
       user: userResponse(isolatedUser),
       token: generateToken(user._id),
-      message: "Registration successful. If email fails, you can resend OTP.",
+      message: "Account created successfully",
     });
   } catch (error) {
     if (error.code === 11000) {
@@ -665,13 +630,6 @@ const login = async (req, res, next) => {
 
     if (user.isBlocked) {
       return res.status(403).json({ message: "Your account is blocked" });
-    }
-
-    if (user.verificationRequired === true && user.accountStatus === "pending_verification") {
-      return res.status(403).json({
-        message: "Your account is pending verification. Please verify your email or phone to continue.",
-        requiresVerification: true,
-      });
     }
 
     if (user.accountStatus === "suspended") {

@@ -280,7 +280,7 @@ const initSocket = (server, corsOptions = {}) => {
     try {
       const user = await getUserFromSocket(socket);
 
-      if (!user || user.isBlocked || (user.verificationRequired === true && user.accountStatus === "pending_verification") || user.accountStatus === "suspended") {
+      if (!user || user.isBlocked || user.accountStatus === "suspended") {
         console.warn(`[socket] unauthorized connection attempt from ${socket.id}`);
         return next(new Error("Unauthorized"));
       }
