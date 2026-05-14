@@ -1,39 +1,9 @@
 // @ts-nocheck
-const nodemailer = require("nodemailer");
-const dns = require("dns");
-const net = require("net");
+const { Resend } = require("resend");
 
-try {
-  dns.setDefaultResultOrder?.("ipv4first");
-} catch (error) {
-  console.warn("[email] Unable to set DNS result order to ipv4first", {
-    message: error?.message || "",
-  });
-}
+const RESEND_SEND_TIMEOUT_MS = 8000;
 
-let cachedTransporter = null;
-let cachedTransporterKey = "";
-
-const smtpNumber = (key, fallback, min = 1000, max = 60000) => {
-  const value = Number(process.env[key]);
-  if (!Number.isFinite(value) || value <= 0) {
-    return fallback;
-  }
-
-  return Math.min(Math.max(value, min), max);
-};
-
-const SMTP_CONNECTION_TIMEOUT_MS = smtpNumber("SMTP_CONNECTION_TIMEOUT_MS", 7000);
-const SMTP_GREETING_TIMEOUT_MS = smtpNumber("SMTP_GREETING_TIMEOUT_MS", 5000);
-const SMTP_SOCKET_TIMEOUT_MS = smtpNumber("SMTP_SOCKET_TIMEOUT_MS", 7000);
-const SMTP_DNS_TIMEOUT_MS = smtpNumber("SMTP_DNS_TIMEOUT_MS", 5000);
-const SMTP_SEND_TIMEOUT_MS = smtpNumber("SMTP_SEND_TIMEOUT_MS", 10000);
-const SMTP_VERIFY_TIMEOUT_MS = smtpNumber("SMTP_VERIFY_TIMEOUT_MS", 8000);
-const configuredSmtpRetries = Number(process.env.SMTP_SEND_RETRIES);
-const SMTP_MAX_RETRIES = Number.isFinite(configuredSmtpRetries)
-  ? Math.min(Math.max(configuredSmtpRetries, 0), 2)
-  : 1;
-const SMTP_RETRY_BACKOFF_MS = smtpNumber("SMTP_RETRY_BACKOFF_MS", 500, 100, 5000);
+let resendClient = null;
 
 const envValue = (...keys) => {
   for (const key of keys) {
@@ -46,93 +16,30 @@ const envValue = (...keys) => {
   return "";
 };
 
-const truthy = (value) =>
-  ["1", "true", "yes", "on"].includes(String(value || "").trim().toLowerCase());
-
-const getSmtpConfig = () => {
-  const host = envValue("SMTP_HOST", "EMAIL_HOST") || "smtp.gmail.com";
-  // Production default: Port 587 (STARTTLS) for Gmail reliability
-  // Port 465 (SMTPS implicit TLS) can have connection issues
-  const portEnv = Number(envValue("SMTP_PORT", "EMAIL_PORT")) || 0;
-  const port = portEnv > 0 ? portEnv : (host?.includes("gmail") ? 587 : 465);
-  const secure =
-    !envValue("SMTP_SECURE", "EMAIL_SECURE")
-      ? port === 465
-      : truthy(envValue("SMTP_SECURE", "EMAIL_SECURE"));
-  const user = envValue(
-    "EMAIL_USER",
-    "SMTP_USER",
-    "SMTP_EMAIL",
-    "SMTP_USERNAME",
-    "GMAIL_USER"
-  );
-  const pass = envValue(
-    "EMAIL_PASS",
-    "EMAIL_APP_PASSWORD",
-    "SMTP_PASS",
-    "SMTP_PASSWORD",
-    "SMTP_AUTH_TOKEN",
-    "GMAIL_APP_PASSWORD",
-    "GMAIL_PASS"
-  );
-  const from =
-    envValue("FROM_EMAIL", "SMTP_FROM", "EMAIL_FROM", "MAIL_FROM") ||
-    (user ? `VibeBook <${user}>` : "");
-
-  return {
-    host,
-    port,
-    secure,
-    user,
-    pass,
-    from,
-  };
-};
-
 const getEmailConfigStatus = () => {
-  const config = getSmtpConfig();
+  const apiKey = envValue("RESEND_API_KEY");
+  const from = envValue("FROM_EMAIL");
   const missing = [];
 
-  if (!config.host) missing.push("SMTP_HOST");
-  if (!Number.isFinite(config.port) || config.port <= 0) missing.push("SMTP_PORT");
-  if (!config.user) missing.push("EMAIL_USER/SMTP_USER");
-  if (!config.pass) missing.push("EMAIL_PASS/SMTP_PASS");
-  if (!config.from) missing.push("FROM_EMAIL/SMTP_FROM");
+  if (!apiKey) missing.push("RESEND_API_KEY");
+  if (!from) missing.push("FROM_EMAIL");
 
   return {
     configured: missing.length === 0,
     missing,
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "",
-    from: config.from,
+    provider: "resend",
+    from,
   };
 };
 
-const hasSmtpConfig = () => getEmailConfigStatus().configured;
+const hasEmailConfig = () => getEmailConfigStatus().configured;
 
-const closeCachedTransporter = (reason = "reset") => {
-  if (!cachedTransporter) {
-    cachedTransporterKey = "";
-    return;
+const getResendClient = () => {
+  if (!resendClient) {
+    resendClient = new Resend(process.env.RESEND_API_KEY);
   }
 
-  const transporter = cachedTransporter;
-  cachedTransporter = null;
-  cachedTransporterKey = "";
-
-  try {
-    if (typeof transporter.close === "function") {
-      transporter.close();
-      console.warn(`[email] SMTP transporter closed after ${reason}`);
-    }
-  } catch (error) {
-    console.warn("[email] SMTP transporter close failed", {
-      reason,
-      message: error?.message || "",
-    });
-  }
+  return resendClient;
 };
 
 const timeoutError = (label, timeoutMs) => {
@@ -142,16 +49,12 @@ const timeoutError = (label, timeoutMs) => {
   return error;
 };
 
-const withTimeout = (promise, timeoutMs, label, onTimeout) => {
+const withTimeout = (promise, timeoutMs, label) => {
   let timeoutId;
 
   const timeoutPromise = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      try {
-        onTimeout?.();
-      } finally {
-        reject(timeoutError(label, timeoutMs));
-      }
+      reject(timeoutError(label, timeoutMs));
     }, timeoutMs);
   });
 
@@ -160,118 +63,7 @@ const withTimeout = (promise, timeoutMs, label, onTimeout) => {
   });
 };
 
-const resolveSmtpHostForConnect = async (config) => {
-  if (net.isIP(config.host)) {
-    return {
-      connectionHost: config.host,
-      servername: envValue("SMTP_TLS_SERVERNAME", "EMAIL_TLS_SERVERNAME") || config.host,
-    };
-  }
-
-  const address = await withTimeout(
-    dns.promises.lookup(config.host, { family: 4 }),
-    SMTP_DNS_TIMEOUT_MS,
-    "SMTP IPv4 DNS lookup"
-  );
-  const connectionHost = address?.address || "";
-
-  if (!connectionHost) {
-    const error = new Error(`No IPv4 address found for ${config.host}`);
-    error.code = "ENOTFOUND";
-    error.command = "DNS";
-    throw error;
-  }
-
-  return {
-    connectionHost,
-    servername: config.host,
-  };
-};
-
-const shouldResetTransporter = (error = {}) => {
-  const code = String(error.code || "");
-  const responseCode = Number(error.responseCode || 0);
-
-  return (
-    ["ECONNECTION", "ETIMEDOUT", "ESOCKET", "ENOTFOUND", "EHOSTUNREACH", "ENETUNREACH"].includes(code) ||
-    [421, 450, 451, 452].includes(responseCode)
-  );
-};
-
-const shouldRetrySmtpError = (error = {}) => {
-  if (error.code === "EAUTH" || [534, 535].includes(Number(error.responseCode || 0))) {
-    return false;
-  }
-
-  return shouldResetTransporter(error) || Number(error.responseCode || 0) >= 500;
-};
-
-const createTransporter = async () => {
-  const config = getSmtpConfig();
-  const { connectionHost, servername } = await resolveSmtpHostForConnect(config);
-  const transporterKey = JSON.stringify({
-    host: config.host,
-    connectionHost,
-    port: config.port,
-    secure: config.secure,
-    user: config.user,
-  });
-
-  if (cachedTransporter && cachedTransporterKey === transporterKey) {
-    return cachedTransporter;
-  }
-
-  // Reset cache if configuration changed
-  closeCachedTransporter("SMTP config changed");
-
-  const transporter = nodemailer.createTransport({
-    host: connectionHost,
-    port: config.port,
-    secure: config.secure,
-    family: 4,
-    auth: {
-      user: config.user,
-      pass: config.pass,
-    },
-    connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
-    greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
-    socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
-    dnsTimeout: SMTP_DNS_TIMEOUT_MS,
-    pool: true,
-    maxConnections: 2,
-    maxMessages: 25,
-    rateDelta: 1000,
-    rateLimit: 5,
-    requireTLS: !config.secure && (config.port === 587 || config.host?.includes("gmail")),
-    tls: {
-      rejectUnauthorized: true,
-      servername,
-      // Allow connection to Gmail with proper TLS handling
-      ...(config.host?.includes("gmail") && !config.secure && config.port === 587
-        ? { minVersion: "TLSv1.2" }
-        : {}),
-    },
-    // Enable detailed logging in non-production for debugging
-    ...(process.env.NODE_ENV !== "production"
-      ? { logger: true, debug: true }
-      : {}),
-  });
-
-  cachedTransporter = transporter;
-  cachedTransporterKey = transporterKey;
-
-  if (connectionHost !== config.host) {
-    console.log("[email] SMTP host resolved for IPv4 connection", {
-      host: config.host,
-      connectionHost,
-      port: config.port,
-    });
-  }
-
-  return cachedTransporter;
-};
-
-const defaultFrom = () => getSmtpConfig().from;
+const defaultFrom = () => envValue("FROM_EMAIL");
 
 const escapeHtml = (value = "") =>
   String(value)
@@ -281,148 +73,80 @@ const escapeHtml = (value = "") =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
-const classifySmtpError = (error = {}) => {
+const classifyEmailError = (error = {}) => {
   const code = String(error.code || "");
-  const response = String(error.response || error.message || "");
-  const responseCode = Number(error.responseCode || 0);
-  const stack = String(error.stack || "");
+  const statusCode = Number(error.statusCode || error.status || error.response?.status || 0);
+  const response = String(error.message || error.response?.data?.message || "");
 
-  // Authentication failures
-  if (
-    code === "EAUTH" ||
-    responseCode === 535 ||
-    responseCode === 534 ||
-    /authentication|invalid login|invalid credentials|login failed|verify credentials/i.test(response)
-  ) {
+  if (code === "ETIMEDOUT" || /timeout|network|fetch failed|econnrefused|enotfound|unreachable/i.test(response)) {
     return {
-      reason: "SMTP_AUTH_FAILED",
-      message:
-        "Email delivery authentication failed. Please verify SMTP credentials and Gmail App Password.",
+      reason: "RESEND_CONNECTION_FAILED",
+      message: "Email delivery connection failed. Please try again in a few moments.",
     };
   }
 
-  // Connection/network failures
-  if (
-    code === "ECONNECTION" ||
-    code === "ETIMEDOUT" ||
-    code === "ESOCKET" ||
-    code === "ENOTFOUND" ||
-    code === "EHOSTUNREACH" ||
-    code === "ENETUNREACH" ||
-    /timeout|connect|network|socket|econnrefused|enotfound|unreachable|refused/i.test(response)
-  ) {
+  if (statusCode === 401 || statusCode === 403 || /api key|unauthorized|forbidden|authentication/i.test(response)) {
     return {
-      reason: "SMTP_CONNECTION_FAILED",
-      message:
-        "Email delivery connection failed. Please check SMTP host and port configuration. Verify firewall/network access.",
+      reason: "RESEND_AUTH_FAILED",
+      message: "Email delivery authentication failed. Please verify the Resend API key.",
     };
   }
 
-  // TLS/SSL certificate failures
-  if (
-    code === "SELF_SIGNED_CERT_IN_CHAIN" ||
-    code === "CERT_HAS_EXPIRED" ||
-    /certificate|tls|ssl|handshake/i.test(response)
-  ) {
+  if (statusCode === 422 || /domain|sender|from/i.test(response)) {
     return {
-      reason: "SMTP_TLS_FAILED",
-      message:
-        "Email delivery TLS configuration issue. Check SMTP_SECURE and port compatibility.",
+      reason: "RESEND_SENDER_FAILED",
+      message: "Email sender configuration is invalid. Please verify FROM_EMAIL in Resend.",
     };
   }
 
-  // Service unavailable
-  if (
-    responseCode === 421 ||
-    responseCode === 450 ||
-    /temporarily unavailable|try again later|service unavailable/i.test(response)
-  ) {
+  if (statusCode === 429) {
     return {
-      reason: "SMTP_SERVICE_UNAVAILABLE",
-      message:
-        "Email service temporarily unavailable. Please try again in a few moments.",
+      reason: "RESEND_RATE_LIMITED",
+      message: "Email service is busy. Please try again in a few moments.",
     };
   }
 
-  // Generic failure with detailed info
+  if (statusCode >= 500) {
+    return {
+      reason: "RESEND_SERVICE_UNAVAILABLE",
+      message: "Email service temporarily unavailable. Please try again in a few moments.",
+    };
+  }
+
   return {
-    reason: "SMTP_SEND_FAILED",
-    message:
-      "Email delivery failed. Please try again later or contact support.",
+    reason: "RESEND_SEND_FAILED",
+    message: "Email delivery failed. Please try again later or contact support.",
     details: {
       code,
-      responseCode,
+      statusCode,
       firstResponseLine: response.split("\n")[0],
     },
   };
 };
 
-const sendMailWithRetry = async (mailOptions, retries = SMTP_MAX_RETRIES) => {
-  const maxRetries = Math.min(Math.max(Number(retries), 0), 2);
+const sendMailWithRetry = async (mailOptions) => {
+  const startedAt = Date.now();
+  const response = await withTimeout(
+    getResendClient().emails.send(mailOptions),
+    RESEND_SEND_TIMEOUT_MS,
+    "Resend email send"
+  );
 
-  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const config = getSmtpConfig();
-    const startedAt = Date.now();
-
-    try {
-      const transporter = await createTransporter();
-      const response = await withTimeout(
-        transporter.sendMail(mailOptions),
-        SMTP_SEND_TIMEOUT_MS,
-        "SMTP sendMail",
-        () => closeCachedTransporter("sendMail timeout")
-      );
-      const elapsedMs = Date.now() - startedAt;
-      console.log("[email] Mail sent successfully", {
-        attempt: attempt + 1,
-        elapsedMs,
-        host: config.host,
-        port: config.port,
-        recipient: mailOptions.to || "unknown",
-        response: response?.response || response?.messageId || "",
-      });
-      return response;
-    } catch (error) {
-      const isLastAttempt = attempt === maxRetries || !shouldRetrySmtpError(error);
-      const classified = classifySmtpError(error);
-
-      console.error(`[email] Attempt ${attempt + 1}/${maxRetries + 1} failed:`, {
-        reason: classified.reason,
-        message: error?.message || "",
-        code: error?.code || "",
-        responseCode: error?.responseCode || "",
-        command: error?.command || "",
-        response: error?.response?.split("\n")[0] || "",
-        to: mailOptions.to || "unknown",
-        elapsedMs: Date.now() - startedAt,
-      });
-
-      if (classified.reason === "SMTP_AUTH_FAILED") {
-        console.error("[email] SMTP authentication failed; check Gmail App Password and account access", {
-          code: error?.code || "",
-          responseCode: error?.responseCode || "",
-          command: error?.command || "",
-          host: config.host,
-          user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
-        });
-      }
-
-      // On certain errors, clear the transporter cache so it can be recreated
-      if (shouldResetTransporter(error)) {
-        closeCachedTransporter(classified.reason);
-      }
-
-      if (isLastAttempt) {
-        throw error;
-      }
-
-      const backoffMs = SMTP_RETRY_BACKOFF_MS * Math.pow(2, attempt);
-      console.log(
-        `[email] Retrying in ${backoffMs}ms after ${classified.reason}...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
+  if (response?.error) {
+    const error = new Error(response.error.message || "Resend email send failed");
+    error.statusCode = response.error.statusCode || response.error.status;
+    error.response = response.error;
+    throw error;
   }
+
+  console.log("[email] Mail sent successfully", {
+    provider: "resend",
+    elapsedMs: Date.now() - startedAt,
+    recipient: mailOptions.to || "unknown",
+    messageId: response?.data?.id || response?.id || "",
+  });
+
+  return response;
 };
 
 const sendContactNotification = async ({
@@ -431,10 +155,10 @@ const sendContactNotification = async ({
   fromUser = {},
   message = "",
 }) => {
-  if (!hasSmtpConfig()) {
+  if (!hasEmailConfig()) {
     return {
       sent: false,
-      reason: "SMTP_NOT_CONFIGURED",
+      reason: "RESEND_NOT_CONFIGURED",
     };
   }
 
@@ -456,9 +180,19 @@ const sendContactNotification = async ({
 
     return { sent: true };
   } catch (error) {
+    console.error("[email] Contact notification delivery failed", {
+      ...classifyEmailError(error),
+      originalError: {
+        message: error?.message || "",
+        code: error?.code || "",
+        statusCode: error?.statusCode || "",
+      },
+      recipient: to,
+    });
+
     return {
       sent: false,
-      ...classifySmtpError(error),
+      ...classifyEmailError(error),
     };
   }
 };
@@ -470,10 +204,10 @@ const sendBookingNotification = async ({
   booking = {},
   whatsappLink,
 }) => {
-  if (!hasSmtpConfig()) {
+  if (!hasEmailConfig()) {
     return {
       sent: false,
-      reason: "SMTP_NOT_CONFIGURED",
+      reason: "RESEND_NOT_CONFIGURED",
     };
   }
 
@@ -503,9 +237,19 @@ const sendBookingNotification = async ({
 
     return { sent: true };
   } catch (error) {
+    console.error("[email] Booking notification delivery failed", {
+      ...classifyEmailError(error),
+      originalError: {
+        message: error?.message || "",
+        code: error?.code || "",
+        statusCode: error?.statusCode || "",
+      },
+      recipient: to,
+    });
+
     return {
       sent: false,
-      ...classifySmtpError(error),
+      ...classifyEmailError(error),
     };
   }
 };
@@ -563,72 +307,64 @@ const sendVerificationEmail = async ({
   name = "creator",
   expiresMinutes = 10,
 }) => {
-  if (!hasSmtpConfig()) {
+  if (!hasEmailConfig()) {
     const status = getEmailConfigStatus();
 
     console.warn(
-      `[email] Verification email skipped; missing SMTP config. Missing: ${
+      `[email] Verification email skipped; missing Resend config. Missing: ${
         status.missing.join(", ") || "unknown"
       }`
     );
 
     return {
       sent: false,
-      reason: "SMTP_NOT_CONFIGURED",
+      reason: "RESEND_NOT_CONFIGURED",
       message:
-        "Verification service temporarily unavailable. Please ensure SMTP credentials are configured.",
+        "Verification service temporarily unavailable. Please ensure Resend email delivery is configured.",
     };
   }
 
   const subject = "Your VibeBook verification code";
   const appUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || "";
-  const config = getSmtpConfig();
 
   try {
     const startedAt = Date.now();
-    console.log(`[email] Sending verification email to ${to} via ${config.host}:${config.port} (secure=${config.secure})`);
-    
+    const text = [
+      `Hi ${name || "creator"},`,
+      "",
+      `Your VibeBook verification code is: ${code}`,
+      "",
+      `This code expires in ${expiresMinutes} minutes.`,
+      "",
+      "If you did not request this code, you can safely ignore this email.",
+    ].join("\n");
+    const html = verificationEmailHtml({
+      appUrl,
+      code,
+      expiresMinutes,
+      name,
+    });
+
+    console.log(`[email] Sending verification email to ${to} via Resend`);
+
     const response = await sendMailWithRetry({
-      from: defaultFrom(),
+      from: process.env.FROM_EMAIL,
       to,
       subject,
-      text: [
-        `Hi ${name || "creator"},`,
-        "",
-        `Your VibeBook verification code is: ${code}`,
-        "",
-        `This code expires in ${expiresMinutes} minutes.`,
-        "",
-        "If you did not request this code, you can safely ignore this email.",
-      ].join("\n"),
-      html: verificationEmailHtml({
-        appUrl,
-        code,
-        expiresMinutes,
-        name,
-      }),
+      html,
+      text,
     });
 
     console.log("[email] Verification email sent successfully", {
+      provider: "resend",
       recipient: to,
       elapsedMs: Date.now() - startedAt,
-      host: config.host,
-      port: config.port,
-      response: response?.response || response?.messageId || "",
+      messageId: response?.data?.id || response?.id || "",
     });
+
     return { sent: true };
   } catch (error) {
-    const classified = classifySmtpError(error);
-
-    if (classified.reason === "SMTP_AUTH_FAILED") {
-      console.error("[email] Verification email blocked by SMTP authentication failure", {
-        code: error?.code || "",
-        responseCode: error?.responseCode || "",
-        command: error?.command || "",
-        host: config.host,
-        user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
-      });
-    }
+    const classified = classifyEmailError(error);
 
     console.error("[email] Verification email delivery failed", {
       reason: classified.reason,
@@ -637,14 +373,7 @@ const sendVerificationEmail = async ({
       originalError: {
         message: error?.message || "",
         code: error?.code || "",
-        response: error?.response?.split("\n")[0] || "",
-        responseCode: error?.responseCode || "",
-      },
-      config: {
-        host: config.host,
-        port: config.port,
-        secure: config.secure,
-        user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
+        statusCode: error?.statusCode || "",
       },
       recipient: to,
     });
@@ -657,76 +386,32 @@ const sendVerificationEmail = async ({
 };
 
 const verifyEmailTransporter = async () => {
-  const config = getSmtpConfig();
   const status = getEmailConfigStatus();
 
   if (!status.configured) {
     console.warn(
-      "[email] SMTP not configured. Missing: " + status.missing.join(", ")
+      "[email] Resend email service not configured. Missing: " + status.missing.join(", ")
     );
     return {
       ok: false,
-      reason: "SMTP_NOT_CONFIGURED",
+      reason: "RESEND_NOT_CONFIGURED",
       status,
     };
   }
 
-  try {
-    console.log(
-      `[email] Verifying SMTP connection to ${config.host}:${config.port} (secure=${config.secure})`
-    );
+  getResendClient();
+  console.log("[email] Resend email service initialized");
 
-    await withTimeout(
-      (await createTransporter()).verify(),
-      SMTP_VERIFY_TIMEOUT_MS,
-      "SMTP verify",
-      () => closeCachedTransporter("verify timeout")
-    );
-
-    console.log("[email] ✓ SMTP transporter verified successfully");
-
-    closeCachedTransporter("verify completed");
-
-    return {
-      ok: true,
-      status,
-      message: `Connected to ${config.host}:${config.port}`,
-    };
-  } catch (error) {
-    const classified = classifySmtpError(error);
-    if (shouldResetTransporter(error)) {
-      closeCachedTransporter(classified.reason);
-    }
-
-    console.error("[email] ✗ SMTP verification failed", {
-      reason: classified.reason,
-      message: classified.message,
-      details: classified.details || {},
-      originalError: {
-        message: error?.message || "",
-        code: error?.code || "",
-        response: error?.response?.split("\n")[0] || "",
-        responseCode: error?.responseCode || "",
-      },
-      config: {
-        host: config.host,
-        port: config.port,
-        secure: config.secure,
-        user: config.user ? config.user.replace(/^(.{2}).*(@.*)?$/, "$1***$2") : "not-set",
-      },
-    });
-
-    return {
-      ok: false,
-      ...classified,
-      status,
-    };
-  }
+  return {
+    ok: true,
+    status,
+    message: "Resend email service initialized",
+  };
 };
 
 const transporter = {
-  sendMail: async (mailOptions) => (await createTransporter()).sendMail(mailOptions),
-  verify: async () => (await createTransporter()).verify(),
+  sendMail: sendMailWithRetry,
+  verify: verifyEmailTransporter,
 };
 
 const verifyConnection = verifyEmailTransporter;
@@ -738,7 +423,6 @@ module.exports = {
   sendContactNotification,
   sendBookingNotification,
   sendVerificationEmail,
-  getSmtpConfig,
   getEmailConfigStatus,
   verifyEmailTransporter,
 };

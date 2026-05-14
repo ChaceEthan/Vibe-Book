@@ -6,7 +6,6 @@ const http = require("http");
 const connectDB = require("./src/config/db");
 const { initSocket } = require("./src/socket");
 const { allowedOrigins, corsOptions, isOriginAllowed, logRejectedOrigin, normalizeOrigin } = require("./src/config/cors");
-const { verifyEmailTransporter } = require("./src/utils/emailService");
 
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === "production";
@@ -62,15 +61,6 @@ const startServer = async () => {
     await connectDB();
 
     const app = require("./src/app");
-    verifyEmailTransporter()
-      .then((result) => {
-        if (result.ok) {
-          console.log("[email] SMTP connection verified for OTP delivery");
-        }
-      })
-      .catch((error) => {
-        console.error("[email] SMTP verification check failed", error.message || "Unknown email verification error");
-      });
     const server = http.createServer(app);
 
     const io = initSocket(server, {

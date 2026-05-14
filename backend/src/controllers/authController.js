@@ -695,7 +695,7 @@ const sendEmailCode = async (req, res, next) => {
       if (!shouldExposeOtp("email")) {
         return res.status(503).json({
           message: delivery.message || "Email delivery failed. Please try again later or contact support.",
-          reason: delivery.reason || "SMTP_NOT_CONFIGURED",
+          reason: delivery.reason || "RESEND_NOT_CONFIGURED",
           details: delivery.details || {},
           retryable: true,
         });

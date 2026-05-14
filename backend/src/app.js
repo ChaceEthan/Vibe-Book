@@ -43,7 +43,7 @@ const emailConfigStatus = getEmailConfigStatus();
 if (!emailConfigStatus.configured) {
   console.warn(`[startup] Email verification delivery is not fully configured. Missing: ${emailConfigStatus.missing.join(", ") || "unknown"}`);
 } else {
-  console.log(`[startup] Email verification delivery configured via ${emailConfigStatus.host}:${emailConfigStatus.port} secure=${emailConfigStatus.secure}`);
+  console.log("[email] Resend email service initialized");
 }
 
 if (!process.env.JWT_SECRET) {
