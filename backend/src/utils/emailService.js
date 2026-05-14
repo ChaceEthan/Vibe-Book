@@ -2,6 +2,7 @@
 const { Resend } = require("resend");
 
 const RESEND_SEND_TIMEOUT_MS = 8000;
+const CONTROLLED_FROM_EMAIL = "vibebooksocialofficial@gmail.com";
 
 let resendClient = null;
 
@@ -18,11 +19,10 @@ const envValue = (...keys) => {
 
 const getEmailConfigStatus = () => {
   const apiKey = envValue("RESEND_API_KEY");
-  const from = envValue("FROM_EMAIL");
+  const from = envValue("FROM_EMAIL") || CONTROLLED_FROM_EMAIL;
   const missing = [];
 
   if (!apiKey) missing.push("RESEND_API_KEY");
-  if (!from) missing.push("FROM_EMAIL");
 
   return {
     configured: missing.length === 0,
@@ -36,7 +36,7 @@ const hasEmailConfig = () => getEmailConfigStatus().configured;
 
 const getResendClient = () => {
   if (!resendClient) {
-    resendClient = new Resend(process.env.RESEND_API_KEY);
+    resendClient = new Resend(envValue("RESEND_API_KEY"));
   }
 
   return resendClient;
@@ -63,7 +63,24 @@ const withTimeout = (promise, timeoutMs, label) => {
   });
 };
 
-const defaultFrom = () => envValue("FROM_EMAIL");
+const defaultFrom = () => envValue("FROM_EMAIL") || CONTROLLED_FROM_EMAIL;
+
+const getResendMessageId = (response = {}) => {
+  return response?.data?.id || response?.id || "";
+};
+
+const safeMailPayload = (mailOptions = {}) => ({
+  from: mailOptions.from || "",
+  to: mailOptions.to || "",
+  subject: mailOptions.subject || "",
+  hasHtml: Boolean(mailOptions.html),
+  hasText: Boolean(mailOptions.text),
+});
+
+const safeResendResponse = (response = {}) => ({
+  id: getResendMessageId(response),
+  error: response?.error || null,
+});
 
 const escapeHtml = (value = "") =>
   String(value)
@@ -76,10 +93,21 @@ const escapeHtml = (value = "") =>
 const classifyEmailError = (error = {}) => {
   const code = String(error.code || "");
   const statusCode = Number(error.statusCode || error.status || error.response?.status || 0);
-  const response = String(error.message || error.response?.data?.message || "");
+  const response = String(error.message || error.response?.data?.message || error.response?.message || "");
+
+  if (
+    /onboarding@resend\.dev|domain|sender|from|verified|verify your domain|not verified/i.test(response)
+  ) {
+    return {
+      success: false,
+      reason: "SENDER_NOT_VERIFIED",
+      message: "EMAIL NOT DELIVERED - SENDER NOT VERIFIED",
+    };
+  }
 
   if (code === "ETIMEDOUT" || /timeout|network|fetch failed|econnrefused|enotfound|unreachable/i.test(response)) {
     return {
+      success: false,
       reason: "RESEND_CONNECTION_FAILED",
       message: "Email delivery connection failed. Please try again in a few moments.",
     };
@@ -87,6 +115,7 @@ const classifyEmailError = (error = {}) => {
 
   if (statusCode === 401 || statusCode === 403 || /api key|unauthorized|forbidden|authentication/i.test(response)) {
     return {
+      success: false,
       reason: "RESEND_AUTH_FAILED",
       message: "Email delivery authentication failed. Please verify the Resend API key.",
     };
@@ -94,13 +123,15 @@ const classifyEmailError = (error = {}) => {
 
   if (statusCode === 422 || /domain|sender|from/i.test(response)) {
     return {
-      reason: "RESEND_SENDER_FAILED",
-      message: "Email sender configuration is invalid. Please verify FROM_EMAIL in Resend.",
+      success: false,
+      reason: "SENDER_NOT_VERIFIED",
+      message: "EMAIL NOT DELIVERED - SENDER NOT VERIFIED",
     };
   }
 
   if (statusCode === 429) {
     return {
+      success: false,
       reason: "RESEND_RATE_LIMITED",
       message: "Email service is busy. Please try again in a few moments.",
     };
@@ -108,12 +139,14 @@ const classifyEmailError = (error = {}) => {
 
   if (statusCode >= 500) {
     return {
+      success: false,
       reason: "RESEND_SERVICE_UNAVAILABLE",
       message: "Email service temporarily unavailable. Please try again in a few moments.",
     };
   }
 
   return {
+    success: false,
     reason: "RESEND_SEND_FAILED",
     message: "Email delivery failed. Please try again later or contact support.",
     details: {
@@ -124,13 +157,24 @@ const classifyEmailError = (error = {}) => {
   };
 };
 
+const resendErrorDetails = (error = {}) => ({
+  message: error?.message || "",
+  code: error?.code || "",
+  statusCode: error?.statusCode || error?.status || error?.response?.status || "",
+  response: error?.response || null,
+});
+
 const sendMailWithRetry = async (mailOptions) => {
   const startedAt = Date.now();
+  console.log("[email] Resend request payload", safeMailPayload(mailOptions));
+
   const response = await withTimeout(
     getResendClient().emails.send(mailOptions),
     RESEND_SEND_TIMEOUT_MS,
     "Resend email send"
   );
+
+  console.log("[email] Resend response", safeResendResponse(response));
 
   if (response?.error) {
     const error = new Error(response.error.message || "Resend email send failed");
@@ -139,11 +183,20 @@ const sendMailWithRetry = async (mailOptions) => {
     throw error;
   }
 
+  const messageId = getResendMessageId(response);
+
+  if (!messageId) {
+    const error = new Error("Resend email send did not return a message id");
+    error.code = "RESEND_MISSING_MESSAGE_ID";
+    error.response = safeResendResponse(response);
+    throw error;
+  }
+
   console.log("[email] Mail sent successfully", {
     provider: "resend",
     elapsedMs: Date.now() - startedAt,
     recipient: mailOptions.to || "unknown",
-    messageId: response?.data?.id || response?.id || "",
+    messageId,
   });
 
   return response;
@@ -182,11 +235,7 @@ const sendContactNotification = async ({
   } catch (error) {
     console.error("[email] Contact notification delivery failed", {
       ...classifyEmailError(error),
-      originalError: {
-        message: error?.message || "",
-        code: error?.code || "",
-        statusCode: error?.statusCode || "",
-      },
+      resendResponse: resendErrorDetails(error),
       recipient: to,
     });
 
@@ -239,11 +288,7 @@ const sendBookingNotification = async ({
   } catch (error) {
     console.error("[email] Booking notification delivery failed", {
       ...classifyEmailError(error),
-      originalError: {
-        message: error?.message || "",
-        code: error?.code || "",
-        statusCode: error?.statusCode || "",
-      },
+      resendResponse: resendErrorDetails(error),
       recipient: to,
     });
 
@@ -318,6 +363,7 @@ const sendVerificationEmail = async ({
 
     return {
       sent: false,
+      success: false,
       reason: "RESEND_NOT_CONFIGURED",
       message:
         "Verification service temporarily unavailable. Please ensure Resend email delivery is configured.",
@@ -326,6 +372,23 @@ const sendVerificationEmail = async ({
 
   const subject = "Your VibeBook verification code";
   const appUrl = process.env.CLIENT_URL || process.env.FRONTEND_URL || "";
+  const from = defaultFrom();
+
+  if (/onboarding@resend\.dev/i.test(from)) {
+    console.warn("[email] EMAIL NOT DELIVERED - SENDER NOT VERIFIED", {
+      provider: "resend",
+      recipient: to,
+      from,
+      reason: "SENDER_NOT_VERIFIED",
+    });
+
+    return {
+      sent: false,
+      success: false,
+      reason: "SENDER_NOT_VERIFIED",
+      message: "EMAIL NOT DELIVERED - SENDER NOT VERIFIED",
+    };
+  }
 
   try {
     const startedAt = Date.now();
@@ -345,42 +408,54 @@ const sendVerificationEmail = async ({
       name,
     });
 
+    console.log("[email] OTP generated for verification email", {
+      provider: "resend",
+      recipient: to,
+      expiresMinutes,
+      codeLength: String(code || "").length,
+    });
+
     console.log(`[email] Sending verification email to ${to} via Resend`);
 
     const response = await sendMailWithRetry({
-      from: process.env.FROM_EMAIL,
+      from,
       to,
       subject,
       html,
       text,
     });
+    const messageId = getResendMessageId(response);
 
     console.log("[email] Verification email sent successfully", {
       provider: "resend",
       recipient: to,
       elapsedMs: Date.now() - startedAt,
-      messageId: response?.data?.id || response?.id || "",
+      messageId,
     });
 
-    return { sent: true };
+    return {
+      sent: true,
+      success: true,
+      messageId,
+      provider: "resend",
+    };
   } catch (error) {
     const classified = classifyEmailError(error);
+    const logMethod = classified.reason === "SENDER_NOT_VERIFIED" ? console.warn : console.error;
 
-    console.error("[email] Verification email delivery failed", {
+    logMethod("[email] Verification email delivery failed", {
       reason: classified.reason,
       message: classified.message,
       details: classified.details || {},
-      originalError: {
-        message: error?.message || "",
-        code: error?.code || "",
-        statusCode: error?.statusCode || "",
-      },
+      resendResponse: resendErrorDetails(error),
       recipient: to,
+      from: defaultFrom(),
     });
 
     return {
       sent: false,
       ...classified,
+      resendResponse: resendErrorDetails(error),
     };
   }
 };

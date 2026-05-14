@@ -347,6 +347,28 @@ const hasAcceptedTerms = (acceptedTerms) => {
   return acceptedTerms === true || acceptedTerms === "true";
 };
 
+const logEmailDeliveryFailure = (context, userId, delivery = {}, extra = {}) => {
+  const logPayload = {
+    recipient: extra.recipient,
+    reason: delivery.reason || "RESEND_SEND_FAILED",
+    message: delivery.message,
+    details: delivery.details || {},
+    resendResponse: delivery.resendResponse || null,
+    timings: extra.timings,
+  };
+
+  if (
+    delivery.reason === "RESEND_AUTH_FAILED" ||
+    delivery.reason === "RESEND_SENDER_FAILED" ||
+    delivery.reason === "SENDER_NOT_VERIFIED"
+  ) {
+    console.warn(`[auth] ${context} blocked by Resend configuration for user ${userId}; OTP remains valid`, logPayload);
+    return;
+  }
+
+  console.error(`[auth] ${context} failed for user ${userId}; OTP remains valid`, logPayload);
+};
+
 const isValidPhoneNumber = (phoneNumber = "") => {
   const digits = normalizePhoneDigits(phoneNumber);
   return digits.length >= 7 && digits.length <= 15;
@@ -542,6 +564,10 @@ const register = async (req, res, next) => {
       userData.referralFingerprint = referralFingerprint;
     }
 
+    const emailOtpCode = email ? generateOtpCode("email") : "";
+    const hashedEmailOtpCode = emailOtpCode ? await bcrypt.hash(emailOtpCode, 10) : "";
+    const emailOtpExpires = emailOtpCode ? new Date(Date.now() + otpExpiryMs) : undefined;
+
     const user = await User.create({
       ...userData,
       acceptedTerms: true,
@@ -549,18 +575,51 @@ const register = async (req, res, next) => {
       trialStartDate: new Date(),
       trialActive: true,
       password: hashedPassword,
+      ...(emailOtpCode
+        ? {
+            emailVerificationCode: hashedEmailOtpCode,
+            emailVerificationExpires: emailOtpExpires,
+            emailVerificationLastSentAt: new Date(),
+            emailVerificationAttempts: 0,
+            verificationCode: hashedEmailOtpCode,
+            verificationExpires: emailOtpExpires,
+          }
+        : {}),
     });
 
     walletService.createWallet(user._id).catch((error) => {
       console.error("[wallet] signup initialization failed:", error.message);
     });
 
+    if (emailOtpCode) {
+      console.log(`[auth] Registration OTP saved before email delivery for user ${user._id}`, {
+        recipient: email,
+        expiresAt: emailOtpExpires,
+      });
+
+      const delivery = await sendVerificationEmail({
+        to: email,
+        code: emailOtpCode,
+        name: user.name || user.username || "creator",
+        expiresMinutes: otpExpiryMinutes,
+      });
+
+      if (!delivery.sent) {
+        logEmailDeliveryFailure("Registration verification email delivery", user._id, delivery, {
+          recipient: email,
+        });
+      } else {
+        console.log(`[auth] Registration verification email sent to ${email} for user ${user._id}`);
+      }
+    }
+
     const isolatedUser = await applyAdminIsolation(user);
 
     return res.status(201).json({
+      success: true,
       user: userResponse(isolatedUser),
       token: generateToken(user._id),
-      message: "Registration successful",
+      message: "Registration successful. If email fails, you can resend OTP.",
     });
   } catch (error) {
     if (error.code === 11000) {
@@ -672,39 +731,7 @@ const sendEmailCode = async (req, res, next) => {
     const code = generateOtpCode("email");
     const hashedCode = await bcrypt.hash(code, 10);
     mark("otpPreparedMs");
-    
-    console.log(`[auth] Attempting to send verification email to ${targetEmail} for user ${req.user._id}`);
-    
-    const delivery = await sendVerificationEmail({
-      to: targetEmail,
-      code,
-      name: req.user.name || req.user.username || "creator",
-      expiresMinutes: otpExpiryMinutes,
-    });
-    mark("emailDeliveryMs");
 
-    if (!delivery.sent) {
-      console.error(`[auth] Email delivery failed for user ${req.user._id}:`, {
-        reason: delivery.reason,
-        message: delivery.message,
-        to: targetEmail,
-        timings,
-      });
-
-      // If in development with MOCK_EMAIL_OTP enabled, allow verification to proceed
-      if (!shouldExposeOtp("email")) {
-        return res.status(503).json({
-          message: delivery.message || "Email delivery failed. Please try again later or contact support.",
-          reason: delivery.reason || "RESEND_NOT_CONFIGURED",
-          details: delivery.details || {},
-          retryable: true,
-        });
-      }
-    } else {
-      console.log(`[auth] Email sent successfully to ${targetEmail} for user ${req.user._id}`);
-    }
-
-    // Store OTP even if email delivery failed (for development/testing with mock OTP)
     const updates = {
       emailVerificationCode: hashedCode,
       emailVerificationExpires: new Date(Date.now() + otpExpiryMs),
@@ -728,6 +755,41 @@ const sendEmailCode = async (req, res, next) => {
     }).select("-password");
     mark("userSavedMs");
 
+    console.log(`[auth] Verification OTP saved before email delivery for user ${req.user._id}`, {
+      to: targetEmail,
+      expiresAt: updates.emailVerificationExpires,
+      timings,
+    });
+
+    const delivery = await sendVerificationEmail({
+      to: targetEmail,
+      code,
+      name: req.user.name || req.user.username || "creator",
+      expiresMinutes: otpExpiryMinutes,
+    });
+    mark("emailDeliveryMs");
+
+    if (!delivery.sent) {
+      logEmailDeliveryFailure("Email delivery", req.user._id, delivery, {
+        recipient: targetEmail,
+        timings,
+      });
+
+      return res.status(503).json({
+        success: false,
+        message: delivery.message || "Email delivery failed. Please try again later or contact support.",
+        reason: delivery.reason || "RESEND_SEND_FAILED",
+        delivery: "email_failed",
+        deliveryReason: delivery.reason || "RESEND_SEND_FAILED",
+        retryable: delivery.reason !== "SENDER_NOT_VERIFIED",
+        expiresAt: updates.emailVerificationExpires,
+        cooldownSeconds: Math.ceil(otpCooldownMs / 1000),
+        ...(shouldExposeOtp("email") ? { code } : {}),
+      });
+    } else {
+      console.log(`[auth] Email sent successfully to ${targetEmail} for user ${req.user._id}`);
+    }
+
     console.log(`[auth] sendEmailCode completed for user ${req.user._id}`, {
       delivery: delivery.sent ? "email_sent" : "local_code",
       totalMs: Date.now() - startedAt,
@@ -735,8 +797,11 @@ const sendEmailCode = async (req, res, next) => {
     });
 
     return res.json({
+      success: true,
       user: userResponse(user),
-      message: delivery.sent ? "Verification code sent to your email" : "Verification code prepared",
+      message: delivery.sent
+        ? "Verification code sent to your email"
+        : "Verification code prepared. If email fails, you can resend OTP.",
       expiresAt: updates.emailVerificationExpires,
       cooldownSeconds: Math.ceil(otpCooldownMs / 1000),
       delivery: delivery.sent ? "email_sent" : "local_code",
