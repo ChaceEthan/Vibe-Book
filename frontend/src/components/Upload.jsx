@@ -620,6 +620,23 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     event.target.value = "";
   };
 
+  const handlePreviewDragOver = (event) => {
+    event.preventDefault();
+    if (!uploading) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  };
+
+  const handlePreviewDrop = (event) => {
+    event.preventDefault();
+    if (uploading) {
+      return;
+    }
+
+    setCaptureMode("gallery");
+    acceptSelectedFile(event.dataTransfer.files?.[0]);
+  };
+
   const startCamera = async (preferredFacing = cameraFacing) => {
     setCameraError("");
     setCameraPreparing(true);
@@ -962,22 +979,41 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     document.getElementById("upload-editor-tools")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
 
+  const publishButtonContent = uploading ? (
+    <span className="inline-flex items-center justify-center gap-2">
+      <Loader2 className="h-5 w-5 animate-spin" />
+      <span>Uploading {progress}%</span>
+    </span>
+  ) : success ? (
+    <span className="inline-flex items-center justify-center gap-2">
+      <CheckCircle2 className="h-5 w-5" />
+      Upload complete
+    </span>
+  ) : error ? (
+    "Retry upload"
+  ) : (
+    <span className="inline-flex items-center justify-center gap-2">
+      <UploadCloud className="h-5 w-5" />
+      Post now
+    </span>
+  );
+
   return (
-    <div className="fixed inset-0 z-[80] flex items-end overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:items-center sm:justify-center sm:p-4">
-      <div className="flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[94dvh] sm:max-w-6xl sm:rounded-2xl">
+    <div className="fixed inset-0 z-[80] flex items-end overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:items-center sm:justify-center sm:p-3">
+      <div className="flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] sm:max-w-5xl sm:rounded-2xl xl:max-w-6xl">
         {/* Header with step progress */}
-        <div className="shrink-0 border-b border-slate-200 bg-white px-3 py-3 sm:px-6 sm:py-4">
-          <div className="mb-3 flex items-center justify-between gap-3 sm:mb-4">
+        <div className="z-40 shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 sm:py-3">
+          <div className="flex items-center justify-between gap-2 sm:gap-3">
             <button
               type="button"
-              className="inline-flex h-10 shrink-0 items-center justify-center rounded-full px-3 text-sm font-black text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-full px-3 text-sm font-black text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
               onClick={handleClose}
             >
               Back
             </button>
             <div className="min-w-0 flex-1 text-center sm:text-left">
-              <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Create Post</p>
-              <h2 className="mt-1 truncate text-lg font-bold text-slate-900 sm:text-2xl">
+              <p className="text-[0.68rem] font-bold uppercase tracking-widest text-blue-600">Create Post</p>
+              <h2 className="truncate text-base font-bold text-slate-900 sm:text-xl">
                 Create a VibeBook post
               </h2>
             </div>
@@ -999,23 +1035,23 @@ const Upload = ({ open, initialType = "image", onClose }) => {
           </div>
 
           {/* Step progress indicator */}
-          <div className="flex items-center gap-2">
+          <div className="mt-2 flex items-center gap-1.5 overflow-x-auto pb-1 sm:grid sm:grid-cols-5 sm:gap-2 sm:overflow-visible sm:pb-0">
             {steps.map((step, index) => (
-              <div key={step} className="flex flex-1 items-center">
-                <div className="relative flex flex-1 items-center gap-2">
+              <div key={step} className="flex min-w-[4.75rem] flex-1 items-center sm:min-w-0">
+                <div className="relative flex flex-1 items-center gap-1.5 rounded-full bg-slate-50 px-2 py-1">
                   <div
-                    className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold transition-all duration-200 sm:h-8 sm:w-8 sm:text-sm ${
+                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[0.68rem] font-semibold transition-all duration-200 ${
                       index < activeStep
                         ? "bg-green-500 text-white"
                         : index === activeStep
-                          ? "bg-blue-600 text-white shadow-lg"
+                          ? "bg-blue-600 text-white shadow-md"
                           : "bg-slate-200 text-slate-600"
                     }`}
                   >
-                    {index < activeStep ? <CheckCircle2 className="h-4 w-4" /> : index + 1}
+                    {index < activeStep ? <CheckCircle2 className="h-3.5 w-3.5" /> : index + 1}
                   </div>
                   <span
-                    className={`hidden text-xs font-semibold sm:block ${
+                    className={`truncate text-[0.68rem] font-semibold ${
                       index <= activeStep ? "text-slate-900" : "text-slate-400"
                     }`}
                   >
@@ -1024,7 +1060,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 </div>
                 {index < steps.length - 1 && (
                   <div
-                    className={`h-0.5 w-1.5 transition-all duration-200 sm:w-2 ${
+                    className={`mx-1 hidden h-0.5 w-2 transition-all duration-200 sm:block ${
                       index < activeStep ? "bg-green-500" : "bg-slate-300"
                     }`}
                   />
@@ -1034,10 +1070,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
           </div>
         </div>
 
-        <div className="grid min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain lg:grid-cols-[0.82fr_1.18fr]">
-          <aside className="min-w-0 border-b border-slate-200 bg-slate-50 p-3 sm:p-6 lg:border-b-0 lg:border-r">
+        <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 gap-3 overflow-y-auto overflow-x-hidden overscroll-contain bg-surface p-3 sm:p-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-start lg:gap-3 xl:gap-4">
+          <aside className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:col-start-1 lg:row-start-1">
             {/* Media type selector */}
-            <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-white p-1.5 shadow-sm sm:gap-2 sm:p-2">
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
               {[
                 { value: "image", label: "Photo", icon: ImageIcon },
                 { value: "video", label: "Video", icon: Video },
@@ -1047,57 +1083,63 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   <button
                     key={option.value}
                     type="button"
-                    className={`flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-lg px-2 py-2.5 text-xs font-bold transition-all duration-200 sm:gap-2 sm:px-3 sm:py-3 ${
+                    className={`flex min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold transition-all duration-200 ${
                       type === option.value
-                        ? "bg-blue-600 text-white shadow-lg scale-105"
+                        ? "bg-blue-600 text-white shadow-sm"
                         : "bg-white text-slate-600 hover:bg-slate-100"
                     }`}
                     onClick={() => switchType(option.value)}
                     disabled={uploading}
                   >
-                    <Icon className="h-5 w-5" />
+                    <Icon className="h-4 w-4" />
                     <span className="truncate">{option.label}</span>
                   </button>
                 );
               })}
             </div>
 
-            <div className="mt-4 grid gap-2.5 sm:mt-6 sm:gap-3">
+            <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
                 <button
                   type="button"
-                  className="group relative flex items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50 sm:p-4"
+                  className="group relative flex min-h-[3.75rem] items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50"
                   onClick={() => startCamera(cameraFacing)}
                   disabled={uploading || recording || cameraPreparing}
                 >
-                  <div className="relative z-10 min-w-0">
-                    <span className="block text-sm font-bold text-slate-900">{cameraPreparing ? "Preparing camera..." : "Record Video"}</span>
-                    <span className="mt-1 block text-xs font-semibold text-slate-500">Use your phone camera inside VibeBook.</span>
+                  <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
+                    {cameraPreparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                  </span>
+                  <div className="relative z-10 min-w-0 flex-1">
+                    <span className="block text-[0.82rem] font-bold text-slate-900">{cameraPreparing ? "Preparing camera..." : "Record Video"}</span>
+                    <span className="mt-0.5 block text-xs font-semibold text-slate-500">Capture in app.</span>
                   </div>
-                  {cameraPreparing ? <Loader2 className="relative z-10 h-6 w-6 shrink-0 animate-spin text-blue-600" /> : <Camera className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />}
                 </button>
 
-                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md sm:p-4">
-                  <div className="relative z-10 min-w-0">
-                    <span className="block text-sm font-bold text-slate-900">Upload Video</span>
-                    <span className="mt-1 block text-xs font-semibold text-slate-500">Select a video up to 2 minutes.</span>
+                <label className="group relative flex min-h-[3.75rem] cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
+                  <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
+                    <UploadCloud className="h-4 w-4" />
+                  </span>
+                  <div className="relative z-10 min-w-0 flex-1">
+                    <span className="block text-[0.82rem] font-bold text-slate-900">Upload Video</span>
+                    <span className="mt-0.5 block text-xs font-semibold text-slate-500">Up to 2 minutes.</span>
                   </div>
-                  <UploadCloud className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
                   <input className="hidden" type="file" accept={VIDEO_FILE_ACCEPT} onChange={(event) => handleSelect(event, "video")} disabled={uploading} />
                 </label>
 
-                <label className="group relative flex cursor-pointer items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md sm:p-4">
-                  <div className="relative z-10 min-w-0">
-                    <span className="block text-sm font-bold text-slate-900">Upload Photo</span>
-                    <span className="mt-1 block text-xs font-semibold text-slate-500">Post an image with filters and effects.</span>
+                <label className="group relative flex min-h-[3.75rem] cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
+                  <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
+                    <ImageIcon className="h-4 w-4" />
+                  </span>
+                  <div className="relative z-10 min-w-0 flex-1">
+                    <span className="block text-[0.82rem] font-bold text-slate-900">Upload Photo</span>
+                    <span className="mt-0.5 block text-xs font-semibold text-slate-500">Image post.</span>
                   </div>
-                  <ImageIcon className="relative z-10 h-6 w-6 shrink-0 text-blue-600 transition-transform group-hover:scale-110" />
                   <input className="hidden" type="file" accept={IMAGE_FILE_ACCEPT} onChange={(event) => handleSelect(event, "image")} disabled={uploading} />
                 </label>
               </div>
 
             {cameraOpen && (
-              <div className="mx-auto mt-4 w-full max-w-sm overflow-hidden rounded-xl border-2 border-slate-200 bg-slate-950 shadow-lg sm:mt-6">
-                <div className="relative aspect-[9/16] max-h-[58dvh]">
+              <div className="mx-auto mt-3 w-full max-w-[18rem] overflow-hidden rounded-xl border border-slate-200 bg-slate-950 shadow-lg">
+                <div className="relative aspect-[9/16] max-h-[54dvh]">
                   <video ref={cameraVideoRef} className="h-full w-full object-contain" autoPlay muted playsInline />
                   
                   {/* Recording indicator */}
@@ -1187,7 +1229,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
               </div>
             )}
 
-            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-xs font-semibold leading-5 text-slate-500 shadow-sm">
+            <div className="mt-2.5 rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs font-semibold leading-5 text-slate-500 lg:line-clamp-2">
               {helperCopy}
             </div>
 
@@ -1195,10 +1237,14 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             {status && !success && <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">{status}</div>}
           </aside>
 
-          <main className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-5">
-            <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.58fr)] xl:gap-5">
-              <div className="min-w-0 space-y-4">
-                <div className="relative mx-auto flex h-[46dvh] min-h-[16rem] w-full max-w-[22rem] items-center justify-center overflow-hidden rounded-xl bg-slate-950 shadow-2xl sm:h-[62dvh] sm:max-h-[38rem] xl:h-auto xl:min-h-[34rem]">
+          <main className="min-w-0 max-w-full overflow-x-hidden lg:contents">
+            <div className="grid min-w-0 gap-3 lg:contents">
+              <div className="min-w-0 space-y-3 lg:col-start-1 lg:row-start-2">
+                <div
+                  className="relative mx-auto flex h-[46dvh] min-h-[18rem] w-full max-w-[19rem] items-center justify-center overflow-hidden rounded-xl bg-slate-950 shadow-2xl sm:h-[52dvh] sm:max-h-[30rem] sm:max-w-[20rem] lg:h-[min(50dvh,28rem)] lg:min-h-[21rem] lg:max-w-[18.5rem] xl:max-w-[19.5rem]"
+                  onDragOver={handlePreviewDragOver}
+                  onDrop={handlePreviewDrop}
+                >
                   {previewSrc ? (
                     <>
                       {isImage ? (
@@ -1299,16 +1345,18 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       )}
                     </>
                   ) : (
-                    <div className="px-8 text-center text-white/70">
-                      <Video className="mx-auto h-10 w-10 text-brand" />
-                      <h3 className="mt-4 text-xl font-black text-white">Preview appears here</h3>
-                      <p className="mt-2 text-sm leading-6">Record, edit, or upload media while the original quality stays safe for posting.</p>
+                    <div className="px-6 text-center text-white/70">
+                      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/10">
+                        <Video className="h-7 w-7 text-brand" />
+                      </div>
+                      <h3 className="mt-4 text-lg font-black text-white">Drop media here</h3>
+                      <p className="mt-2 text-sm leading-6">{selectedLabel}</p>
                     </div>
                   )}
                 </div>
 
                 {!isProfile && (
-                  <div id="upload-post-details" className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:hidden">
+                  <div id="upload-post-details" className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:hidden">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-black uppercase text-brand">Post details</p>
@@ -1329,7 +1377,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       />
                     </label>
 
-                    <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
                       <label className="block space-y-2">
                         <span className="label">Hashtags</span>
                         <div className="relative">
@@ -1359,39 +1407,41 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       </label>
                     </div>
 
-                    <label className="mt-3 block space-y-2">
-                      <span className="label">Location</span>
-                      <input
-                        className="field"
-                        value={location}
-                        onChange={(event) => setLocation(event.target.value)}
-                        placeholder="Kigali, Rwanda"
-                        disabled={uploading}
-                      />
-                    </label>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                      <label className="block space-y-2">
+                        <span className="label">Location</span>
+                        <input
+                          className="field"
+                          value={location}
+                          onChange={(event) => setLocation(event.target.value)}
+                          placeholder="Kigali, Rwanda"
+                          disabled={uploading}
+                        />
+                      </label>
 
-                    <div className="mt-3">
-                      <span className="label font-bold">Audience</span>
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        {visibilityOptions.map((option) => {
-                          const Icon = option.icon;
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-xs font-black transition-all duration-200 ${
-                                visibility === option.value
-                                  ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
-                                  : "border-slate-200 bg-white text-slate-700"
-                              }`}
-                              onClick={() => setVisibility(option.value)}
-                              disabled={uploading}
-                            >
-                              <Icon className="h-4 w-4" />
-                              <span className="truncate">{option.label}</span>
-                            </button>
-                          );
-                        })}
+                      <div>
+                        <span className="label font-bold">Audience</span>
+                        <div className="mt-2 grid grid-cols-3 gap-2">
+                          {visibilityOptions.map((option) => {
+                            const Icon = option.icon;
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                className={`flex min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-black transition-all duration-200 ${
+                                  visibility === option.value
+                                    ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
+                                    : "border-slate-200 bg-white text-slate-700"
+                                }`}
+                                onClick={() => setVisibility(option.value)}
+                                disabled={uploading}
+                              >
+                                <Icon className="h-4 w-4 shrink-0" />
+                                <span className="truncate">{option.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
@@ -1419,38 +1469,21 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       </div>
                     )}
 
-                    <div className="sticky bottom-0 -mx-3 mt-3 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
+                    <div className="sticky bottom-0 -mx-3 mt-3 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur">
                       <button
                         type="button"
-                        className="w-full rounded-full bg-blue-600 px-6 py-3 text-base font-black text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
+                        className="w-full rounded-xl bg-blue-600 px-6 py-3 text-base font-black text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
                         onClick={handleUpload}
                         disabled={!canPost}
                       >
-                        {uploading ? (
-                          <span className="inline-flex items-center justify-center gap-2">
-                            <Loader2 className="h-5 w-5 animate-spin" />
-                            <span>Uploading {progress}%</span>
-                          </span>
-                        ) : success ? (
-                          <span className="inline-flex items-center justify-center gap-2">
-                            <CheckCircle2 className="h-5 w-5" />
-                            Upload complete
-                          </span>
-                        ) : error ? (
-                          "Retry upload"
-                        ) : (
-                          <span className="inline-flex items-center justify-center gap-2">
-                            <UploadCloud className="h-5 w-5" />
-                            Post now
-                          </span>
-                        )}
+                        {publishButtonContent}
                       </button>
                     </div>
                   </div>
                 )}
 
                 {file && !isProfile && (
-                  <div id="upload-editor-tools" className="min-w-0 rounded-t-2xl border border-slate-200 bg-white p-3 shadow-sm sm:rounded-lg sm:p-4">
+                  <div id="upload-editor-tools" className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-xs font-black uppercase text-brand">Editor</p>
@@ -1684,7 +1717,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
 
                 {uploading && (
-                  <div className="rounded-xl border-2 border-blue-200 bg-blue-50 p-5 shadow-md">
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 shadow-sm">
                     <div className="mb-3 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="h-4 w-4 rounded-full bg-blue-600 animate-pulse" />
@@ -1711,8 +1744,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
 
                 {success && (
-                  <div className="flex items-center gap-4 rounded-xl border-2 border-green-300 bg-green-50 p-5 shadow-lg">
-                    <CheckCircle2 className="h-8 w-8 shrink-0 text-green-600 animate-bounce" />
+                  <div className="flex items-center gap-3 rounded-xl border border-green-200 bg-green-50 p-4 shadow-sm">
+                    <CheckCircle2 className="h-6 w-6 shrink-0 animate-bounce text-green-600" />
                     <div className="min-w-0">
                       <p className="font-bold text-green-900">Upload complete!</p>
                       <p className="mt-1 text-sm font-semibold text-green-700">Your post will appear in your feed shortly.</p>
@@ -1721,21 +1754,21 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                 )}
               </div>
 
-              <div id="upload-post-details-desktop" className="hidden min-w-0 space-y-3 xl:block">
+              <div id="upload-post-details-desktop" className="hidden min-w-0 space-y-2.5 lg:sticky lg:top-3 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:block">
                 {!isProfile && (
-                  <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                  <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-black uppercase text-brand">Post details</p>
-                        <h3 className="text-base font-black text-navy">Caption and audience</h3>
+                        <p className="text-[0.68rem] font-black uppercase tracking-wide text-brand">Post details</p>
+                        <h3 className="text-sm font-black text-navy">Caption and audience</h3>
                       </div>
                       <span className="text-xs font-bold text-slate-400">{caption.length}/2200</span>
                     </div>
 
-                    <label className="mt-3 block space-y-2">
-                      <span className="label">Caption</span>
+                    <label className="mt-2.5 block space-y-1.5">
+                      <span className="text-xs font-bold text-slate-700">Caption</span>
                       <textarea
-                        className="field min-h-20 resize-none sm:min-h-24"
+                        className="field min-h-[5.75rem] resize-none px-3 py-2.5 text-sm"
                         value={caption}
                         onChange={(event) => setCaption(event.target.value)}
                         placeholder="Write a caption..."
@@ -1744,13 +1777,13 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       />
                     </label>
 
-                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                      <label className="block space-y-2">
-                        <span className="label">Hashtags</span>
+                    <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                      <label className="block space-y-1.5">
+                        <span className="text-xs font-bold text-slate-700">Hashtags</span>
                         <div className="relative">
                           <Hash className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                           <input
-                            className="field pl-10"
+                            className="field px-3 py-2.5 pl-9 text-sm"
                             value={tags}
                             onChange={(event) => setTags(event.target.value)}
                             placeholder="vibebook, comedy"
@@ -1759,12 +1792,12 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         </div>
                       </label>
 
-                      <label className="block space-y-2">
-                        <span className="label">Mentions</span>
+                      <label className="block space-y-1.5">
+                        <span className="text-xs font-bold text-slate-700">Mentions</span>
                         <div className="relative">
                           <AtSign className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                           <input
-                            className="field pl-10"
+                            className="field px-3 py-2.5 pl-9 text-sm"
                             value={mentions}
                             onChange={(event) => setMentions(event.target.value)}
                             placeholder="@creator"
@@ -1774,50 +1807,52 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                       </label>
                     </div>
 
-                    <label className="mt-3 block space-y-2">
-                      <span className="label">Location optional</span>
-                      <input
-                        className="field"
-                        value={location}
-                        onChange={(event) => setLocation(event.target.value)}
-                        placeholder="Kigali, Rwanda"
-                        disabled={uploading}
-                      />
-                    </label>
+                    <div className="mt-2.5 grid gap-2 sm:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+                      <label className="block space-y-1.5">
+                        <span className="text-xs font-bold text-slate-700">Location</span>
+                        <input
+                          className="field px-3 py-2.5 text-sm"
+                          value={location}
+                          onChange={(event) => setLocation(event.target.value)}
+                          placeholder="Kigali, Rwanda"
+                          disabled={uploading}
+                        />
+                      </label>
 
-                    <div className="mt-3">
-                      <span className="label font-bold">Visibility</span>
-                      <div className="mt-2 grid grid-cols-3 gap-2">
-                        {visibilityOptions.map((option) => {
-                          const Icon = option.icon;
-                          return (
-                            <button
-                              key={option.value}
-                              type="button"
-                              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-black transition-all duration-200 ${
-                                visibility === option.value
-                                  ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
-                                  : "border-slate-200 bg-white text-slate-700 hover:border-blue-400"
-                              }`}
-                              onClick={() => setVisibility(option.value)}
-                              disabled={uploading}
-                            >
-                              <Icon className="h-4 w-4" />
-                              <span className="truncate">{option.label}</span>
-                            </button>
-                          );
-                        })}
+                      <div>
+                        <span className="text-xs font-bold text-slate-700">Audience</span>
+                        <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                          {visibilityOptions.map((option) => {
+                            const Icon = option.icon;
+                            return (
+                              <button
+                                key={option.value}
+                                type="button"
+                                className={`flex min-w-0 items-center justify-center gap-1 rounded-lg border px-2 py-2 text-xs font-black transition-all duration-200 ${
+                                  visibility === option.value
+                                    ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
+                                    : "border-slate-200 bg-white text-slate-700 hover:border-blue-400"
+                                }`}
+                                onClick={() => setVisibility(option.value)}
+                                disabled={uploading}
+                              >
+                                <Icon className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">{option.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="mt-3">
-                      <span className="label">Safe display</span>
-                      <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg bg-surface p-1">
+                    <div className="mt-2.5">
+                      <span className="text-xs font-bold text-slate-700">Safe display</span>
+                      <div className="mt-1.5 grid grid-cols-2 gap-1.5 rounded-lg bg-surface p-1">
                         {["portrait", "landscape"].map((option) => (
                           <button
                             key={option}
                             type="button"
-                            className={`rounded-lg px-3 py-2 text-xs font-black capitalize ${
+                            className={`rounded-lg px-3 py-1.5 text-xs font-black capitalize ${
                               orientation === option ? "bg-white text-navy shadow-sm" : "text-slate-500"
                             }`}
                             onClick={() => setOrientation(option)}
@@ -1831,9 +1866,17 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   </div>
                 )}
 
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-black uppercase text-slate-500">Thumbnail preview</p>
-                  <div className="mt-2 flex items-center gap-3">
+                {error && file && !uploading && !success && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
+                    <p>{error}</p>
+                    <button type="button" className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-black text-red-700 shadow-sm" onClick={handleUpload}>
+                      Retry upload
+                    </button>
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex items-center gap-3">
                     <div className="flex h-16 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-950">
                       {previewSrc ? (
                         isImage ? (
@@ -1845,45 +1888,19 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         <ImageIcon className="h-5 w-5 text-white/60" />
                       )}
                     </div>
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-black text-navy">{file?.name || "No media selected"}</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-500">Aspect ratio is preserved in preview and feed.</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-black uppercase text-slate-500">Thumbnail preview</p>
+                      <p className="mt-1 truncate text-sm font-black text-navy">{file?.name || "No media selected"}</p>
+                      <p className="mt-0.5 text-xs font-semibold text-slate-500">Aspect ratio preserved.</p>
                     </div>
                   </div>
-                </div>
-
-                {error && file && !uploading && !success && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
-                    <p>{error}</p>
-                    <button type="button" className="mt-2 rounded-lg bg-white px-3 py-2 text-xs font-black text-red-700 shadow-sm" onClick={handleUpload}>
-                      Retry upload
-                    </button>
-                  </div>
-                )}
-
-                <div className="sticky bottom-0 -mx-3 bg-white/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 shadow-[0_-10px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:p-0 sm:shadow-none">
                   <button
                     type="button"
-                    className="w-full rounded-xl bg-blue-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 active:scale-95"
+                    className="mt-3 w-full rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-black text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 active:scale-95"
                     onClick={handleUpload}
                     disabled={!canPost}
                   >
-                    {uploading ? (
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        <span>Uploading {progress}%</span>
-                      </span>
-                    ) : success ? (
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <CheckCircle2 className="h-5 w-5" />
-                        Upload complete
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center justify-center gap-2">
-                        <UploadCloud className="h-5 w-5" />
-                        Post now
-                      </span>
-                    )}
+                    {publishButtonContent}
                   </button>
                 </div>
               </div>
