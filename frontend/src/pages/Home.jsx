@@ -13,6 +13,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, getApiErrorMessage, isRetryableApiError, mediaUrl, userApi } from "../services/api";
 import { isValidPost, usePostStore } from "../store/postStore";
@@ -191,7 +192,7 @@ const FeedItem = memo(
         <div className="home-feed-caption absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-center gap-3">
             <Link to={profilePath} className="shrink-0" aria-label="Open creator profile">
-              <img src={mediaUrl(profileImage)} alt="" className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
+              <SafeAvatar user={profile} src={mediaUrl(profileImage)} className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
             </Link>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
@@ -246,7 +247,7 @@ const FeedItem = memo(
             <div key={burst.id} className="activity-bubble flex items-center gap-2 rounded-full bg-white/90 py-1 pl-1 pr-3 text-xs font-black text-navy shadow-xl">
               <span className={`flex h-7 w-7 items-center justify-center overflow-hidden rounded-full ${burst.kind === "like" ? "bg-red-500 text-white" : "bg-brand text-navy"}`}>
                 {burst.kind === "like" && currentUserImage ? (
-                  <img src={mediaUrl(currentUserImage)} alt="" className="h-full w-full object-cover" />
+                  <SafeAvatar user={currentUser} src={mediaUrl(currentUserImage)} className="h-full w-full object-cover" />
                 ) : burst.kind === "like" ? (
                   <Heart className="h-4 w-4 fill-white text-white" />
                 ) : (
@@ -346,7 +347,7 @@ const CommentsSheet = ({
                 return (
                   <article key={key} className="flex gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-900 text-xs font-black text-white">
-                      {avatar ? <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" /> : initialsFor(name)}
+                      <SafeAvatar user={comment.user || comment} src={avatar ? mediaUrl(avatar) : ""} className="h-full w-full object-cover" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">

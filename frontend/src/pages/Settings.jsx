@@ -31,14 +31,16 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { GENDER_OPTIONS, PROFILE_CATEGORIES } from "../constants/profile";
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import { authApi, mediaUrl, userApi } from "../services/api";
+import { handleAvatarError } from "../utils/profileImage";
 
 const PHONE_COUNTRIES = [
   { country: "Rwanda", code: "+250", label: "RW" },
@@ -287,7 +289,7 @@ const SettingsSection = ({ children, icon: Icon, title }) => (
 
 const Settings = () => {
   const { languages, language, setLanguage } = useLanguage();
-  const { logout, refreshProfile, sendEmailCode, sendPhoneCode, updateProfile, user, verifyEmailCode, verifyPhoneCode } = useAuth();
+  const { logout, refreshProfile, sendEmailCode, sendPhoneCode, updateProfile, uploadProfilePicture, user, verifyEmailCode, verifyPhoneCode } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const [profileForm, setProfileForm] = useState(() => initialProfileForm(user || {}));
@@ -315,6 +317,10 @@ const Settings = () => {
   const [authFlowError, setAuthFlowError] = useState("");
   const [phoneUnavailable, setPhoneUnavailable] = useState(false);
   const [phoneSuccess, setPhoneSuccess] = useState(false);
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const [avatarSaving, setAvatarSaving] = useState(false);
+  const avatarInputRef = useRef(null);
 
   const profileImage = mediaUrl(user?.profilePicture || user?.profileImage || "");
   const activeCountry = useMemo(
@@ -337,6 +343,14 @@ const Settings = () => {
     });
     setUsernameFlow({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") });
   }, [user]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+    };
+  }, [avatarPreview]);
 
   useEffect(() => {
     if (cooldown <= 0) {
@@ -806,7 +820,77 @@ const Settings = () => {
   };
 
   const openProfileUpload = () => {
-    window.dispatchEvent(new CustomEvent("vibebook:open-upload", { detail: { type: "profile" } }));
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarSelect = (event) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!selectedFile) {
+      return;
+    }
+
+    if (!selectedFile.type?.startsWith("image/")) {
+      notifyError("Choose an image file for your profile photo.");
+      return;
+    }
+
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      notifyError("Choose a profile photo under 5MB.");
+      return;
+    }
+
+    const nextPreview = URL.createObjectURL(selectedFile);
+    setAvatarPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return nextPreview;
+    });
+    setAvatarFile(selectedFile);
+  };
+
+  const closeAvatarPreview = () => {
+    if (avatarSaving) {
+      return;
+    }
+
+    setAvatarFile(null);
+    setAvatarPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  };
+
+  const saveAvatar = async () => {
+    if (!avatarFile || avatarSaving) {
+      return;
+    }
+
+    setAvatarSaving(true);
+    setStatus("");
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.append("image", avatarFile, avatarFile.name || `vibebook-avatar-${Date.now()}.jpg`);
+      const data = await uploadProfilePicture(formData);
+
+      if (!data?.user?.profilePicture && !data?.user?.profileImage) {
+        throw new Error("Profile image update did not return an image URL.");
+      }
+
+      await refreshProfile();
+      setAvatarFile(null);
+      setAvatarPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+      notifySuccess("Profile image updated.");
+    } catch (requestError) {
+      notifyError(requestError.response?.data?.message || requestError.message || "Unable to update profile image.");
+    } finally {
+      setAvatarSaving(false);
+    }
   };
 
   const languageOptions = languages.map((item) => ({ value: item.code, label: item.label }));
@@ -970,7 +1054,7 @@ const Settings = () => {
         <form id="account-editor" className="scroll-mt-24 rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={saveProfile}>
           <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-4">
-              <img src={profileImage} alt="" className="h-20 w-20 shrink-0 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" />
+              <SafeAvatar user={user} src={profileImage} className="h-20 w-20 shrink-0 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" />
               <div className="min-w-0">
                 <h2 className="truncate text-xl font-black text-navy">{user?.name || "Profile"}</h2>
                 <p className="mt-1 truncate text-sm font-semibold text-slate-500">@{user?.username || "creator"}</p>
@@ -1272,6 +1356,36 @@ const Settings = () => {
         </div>
       </div>
 
+      <input ref={avatarInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={handleAvatarSelect} />
+
+      {avatarPreview && (
+        <div className="fixed inset-0 z-[95] flex items-end justify-center bg-slate-950/60 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Profile image</p>
+                <h2 className="text-lg font-black text-navy">Preview before saving</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={closeAvatarPreview} disabled={avatarSaving} aria-label="Close profile image preview">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-5 text-center">
+              <img src={avatarPreview} alt="" className="mx-auto h-48 w-48 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" onError={handleAvatarError} />
+              <p className="mt-4 truncate text-sm font-semibold text-slate-500">{avatarFile?.name || "Selected image"}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button type="button" className="btn-secondary" onClick={closeAvatarPreview} disabled={avatarSaving}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={saveAvatar} disabled={avatarSaving}>
+                {avatarSaving ? "Saving..." : "Save image"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {authModal === "manage" && (
         <div className="fixed inset-0 z-[90] flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-4" role="dialog" aria-modal="true">
           <form className="flex max-h-[94dvh] w-full max-w-3xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg" onSubmit={saveProfile}>
@@ -1301,7 +1415,7 @@ const Settings = () => {
               <section className="rounded-lg border border-slate-200 bg-white p-4">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 items-center gap-4">
-                    <img src={profileImage} alt="" className="h-20 w-20 shrink-0 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" />
+                    <SafeAvatar user={user} src={profileImage} className="h-20 w-20 shrink-0 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" />
                     <div className="min-w-0">
                       <p className="text-sm font-black uppercase tracking-wide text-brand">Profile identity</p>
                       <h3 className="truncate text-xl font-black text-navy">{profileForm.name || user?.name || "Profile"}</h3>

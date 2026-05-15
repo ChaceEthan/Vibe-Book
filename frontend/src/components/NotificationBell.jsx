@@ -3,6 +3,7 @@ import { BadgeCheck, Bell, CheckCheck, Heart, MessageCircle, MessageSquare, User
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
+import SafeAvatar from "./SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, notificationApi } from "../services/api";
 import { connectSocket } from "../services/socket";
@@ -395,13 +396,7 @@ export function NotificationBell() {
                           {/* Icon badge */}
                           <div className="relative h-10 w-10 shrink-0">
                             <div className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${notification.read ? "bg-slate-200 text-slate-600" : "bg-blue-200 text-blue-600"}`}>
-                              {avatar ? (
-                                <img src={mediaUrl(avatar)} alt="" className="h-full w-full object-cover" />
-                              ) : actor?.name ? (
-                                <span className="text-xs font-black">{initialsFor(actor.name)}</span>
-                              ) : (
-                                <Icon className="h-5 w-5" />
-                              )}
+                              {actor || avatar ? <SafeAvatar user={actor} src={avatar ? mediaUrl(avatar) : ""} className="h-full w-full object-cover" /> : <Icon className="h-5 w-5" />}
                             </div>
                             {verified && <BadgeCheck className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full fill-sky-500 text-white ring-2 ring-white" />}
                           </div>

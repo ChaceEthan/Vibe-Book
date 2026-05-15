@@ -38,6 +38,7 @@ import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import WalletErrorBoundary from "../components/WalletErrorBoundary.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, referralUrlFor } from "../services/api";
@@ -238,7 +239,7 @@ const BalanceHero = ({ user, wallet, socketConnected }) => {
       <div className="relative z-10">
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <img src={mediaUrl(user?.profilePicture || user?.profileImage || "/logo.png")} alt="" className="h-11 w-11 rounded-full border border-white/20 object-cover" />
+            <SafeAvatar user={user} className="h-11 w-11 rounded-full border border-white/20 object-cover" />
             <div className="min-w-0">
               <p className="truncate text-base font-black">@{user?.username || user?.name || "creator"}</p>
               <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-[11px] font-black text-brand">
@@ -589,7 +590,7 @@ const LeaderboardPage = ({ leaderboards, loading, user, loadLeaderboards }) => {
               return (
                 <article key={idOf(creator) || `${active.id}-${index}`} className={`flex items-center gap-3 rounded-lg border p-3 ${rank <= 3 ? "border-amber-200 bg-amber-50" : me ? "border-brand/50 bg-brand/10" : "border-slate-200 bg-white"}`}>
                   <span className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-black ${rank === 1 ? "bg-amber-400 text-white" : "bg-slate-100 text-navy"}`}>{rank <= 3 ? <Crown className="h-4 w-4" /> : rank}</span>
-                  <img src={mediaUrl(creator?.profilePicture || creator?.profileImage || "/logo.png")} alt="" className="h-10 w-10 rounded-full object-cover" />
+                  <SafeAvatar user={creator} className="h-10 w-10 rounded-full object-cover" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-black text-navy">@{creator?.username || creator?.name || (me ? user?.username : "creator")}</p>
                     <p className="text-xs font-bold text-slate-500">{rank <= 3 ? "Podium creator" : "Creator economy rank"}</p>

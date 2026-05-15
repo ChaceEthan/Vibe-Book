@@ -3,6 +3,7 @@ import { MessageCircle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, messageApi } from "../services/api";
 import { connectSocket } from "../services/socket";
@@ -204,13 +205,7 @@ const Inbox = () => {
               return (
                 <Link key={otherUser._id} to={`/chat/${otherUser._id}`} className="flex items-center gap-3 p-3 transition hover:bg-slate-50 sm:p-4">
                   <span className="relative shrink-0">
-                    {image ? (
-                      <img src={mediaUrl(image)} alt="" loading="lazy" className="h-12 w-12 rounded-full object-cover sm:h-14 sm:w-14" />
-                    ) : (
-                      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-navy text-xs font-black text-white sm:h-14 sm:w-14">
-                        {initialsFor(otherUser.name)}
-                      </span>
-                    )}
+                    <SafeAvatar user={otherUser} src={image ? mediaUrl(image) : ""} className="h-12 w-12 rounded-full object-cover sm:h-14 sm:w-14" />
                     <span className={`absolute bottom-0 right-0 h-3.5 w-3.5 rounded-full border-2 border-white ${item.online ? "bg-green-500" : "bg-slate-300"}`} />
                   </span>
                   <span className="min-w-0 flex-1">

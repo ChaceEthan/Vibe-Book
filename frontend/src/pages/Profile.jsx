@@ -38,10 +38,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
 import EditVideoModal from "../components/EditVideoModal.jsx";
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
+import { useToast } from "../context/ToastContext.jsx";
 import { bookingApi, feedApi, mediaUrl, paymentApi, userApi } from "../services/api";
 import { usePostStore } from "../store/postStore";
 import { useWalletStore } from "../store/walletStore";
+import { getSafeProfileImage, handleAvatarError } from "../utils/profileImage";
 
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
 
@@ -488,7 +491,7 @@ const ProfileMediaViewer = ({
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[103] bg-gradient-to-t from-slate-950 via-slate-950/65 to-transparent px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-20 sm:px-8">
         <div className="max-w-[min(84vw,42rem)]">
           <div className="flex items-center gap-3">
-            <img src={mediaUrl(profilePicture || user?.profilePicture || "/logo.png")} alt="" className="h-10 w-10 rounded-full border border-white/30 object-cover" />
+            <SafeAvatar user={{ ...user, profilePicture }} className="h-10 w-10 rounded-full border border-white/30 object-cover" />
             <div className="min-w-0">
               <p className="truncate text-sm font-black">@{user?.username || "creator"}</p>
               <p className="text-xs font-semibold text-white/60">{activeIsVideo ? "Original video" : "Photo"} {activeItem?.duration ? `- ${formatDuration(activeItem.duration)}` : ""}</p>
@@ -525,12 +528,7 @@ const ProfileMediaViewer = ({
 
                   return (
                     <article key={key} className="flex gap-3">
-                      <img
-                        src={mediaUrl(author.profilePicture || author.profileImage || author.images?.[0] || "/logo.png")}
-                        alt=""
-                        className="h-9 w-9 rounded-full bg-slate-100 object-cover"
-                        loading="lazy"
-                      />
+                      <SafeAvatar user={author} className="h-9 w-9 rounded-full bg-slate-100 object-cover" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className="truncate text-sm font-black text-navy">@{author.username || author.name || "creator"}</p>
@@ -568,7 +566,7 @@ const ProfileMediaViewer = ({
             )}
           </div>
           <form className="flex gap-2 border-t border-slate-200 bg-white p-3" onSubmit={submitComment}>
-            <img src={mediaUrl(currentUser?.profilePicture || currentUser?.profileImage || "/logo.png")} alt="" className="h-10 w-10 rounded-full bg-slate-100 object-cover" />
+            <SafeAvatar user={currentUser} className="h-10 w-10 rounded-full bg-slate-100 object-cover" />
             <input
               className="field min-w-0 flex-1"
               value={commentText}
@@ -593,7 +591,8 @@ const ProfileMediaViewer = ({
 
 const Profile = () => {
   const { id } = useParams();
-  const { logout, refreshProfile, user: currentUser } = useAuth();
+  const { logout, refreshProfile, uploadProfilePicture, user: currentUser } = useAuth();
+  const { addToast } = useToast();
   const { wallet: profileWallet, loadWallet: loadProfileWallet } = useWalletStore();
   const storePosts = usePostStore((state) => state.posts);
   const mergePosts = usePostStore((state) => state.mergePosts);
@@ -631,6 +630,11 @@ const Profile = () => {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [profileShareStatus, setProfileShareStatus] = useState("");
   const [qrProfileOpen, setQrProfileOpen] = useState(false);
+  const [profileRetry, setProfileRetry] = useState(0);
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const [avatarSaving, setAvatarSaving] = useState(false);
+  const avatarInputRef = useRef(null);
   const profileActionsRef = useRef(null);
   const navigate = useNavigate();
 
@@ -651,14 +655,24 @@ const Profile = () => {
           });
         }
       } catch (requestError) {
-        setError(requestError.response?.data?.message || "Profile not found.");
+        const status = requestError.response?.status;
+        setUser(null);
+        setError(status === 404 ? "We could not find that VibeBook profile." : requestError.response?.data?.message || "Profile could not load. Please retry.");
       } finally {
         setLoading(false);
       }
     };
 
     fetchProfile();
-  }, [id, mergePosts]);
+  }, [id, mergePosts, profileRetry]);
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) {
+        URL.revokeObjectURL(avatarPreview);
+      }
+    };
+  }, [avatarPreview]);
 
   useEffect(() => {
     setActiveImage(0);
@@ -727,7 +741,7 @@ const Profile = () => {
 
   const profilePicture = user?.profilePicture || user?.profileImage || "";
   const allImages = useMemo(
-    () => (user?.images?.length ? user.images : [profilePicture || "/logo.png"]),
+    () => (user?.images?.length ? user.images : [profilePicture || getSafeProfileImage(user)]),
     [profilePicture, user]
   );
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
@@ -744,7 +758,7 @@ const Profile = () => {
   const contentLocked = Boolean(!isOwnProfile && !contentUnlocked);
   const images = allImages;
   const lockedImageCount = contentLocked ? Math.max(Number(user?.galleryImageCount || allImages.length) - images.length, 0) : 0;
-  const activeImageUrl = images[activeImage] || images[0] || "/logo.png";
+  const activeImageUrl = images[activeImage] || images[0] || getSafeProfileImage(user);
   const videoUrls = useMemo(() => {
     const videos = Array.isArray(user?.videos) && user.videos.length ? user.videos : user?.videoUrls || [];
     return Array.isArray(videos) ? videos.filter(Boolean) : [];
@@ -772,7 +786,7 @@ const Profile = () => {
   const followButtonLabel = isMutualFollow ? "Following each other" : isFollowing ? "Following" : followsViewer ? "Follow Back" : "Follow";
   const FollowButtonIcon = isMutualFollow ? BadgeCheck : isFollowing ? UserMinus : UserPlus;
   const followButtonClass = isFollowing ? "btn-secondary" : "btn-primary";
-  const coverImage = user?.coverImage || user?.coverPicture || user?.bannerImage || user?.coverPhoto || images.find((image) => image && image !== profilePicture) || profilePicture || "/logo.png";
+  const coverImage = user?.coverImage || user?.coverPicture || user?.bannerImage || user?.coverPhoto || images.find((image) => image && image !== profilePicture) || profilePicture || getSafeProfileImage(user);
   const profileLikes = profilePosts.reduce((total, post) => total + Number(post.likes || post.likeCount || 0), 0);
   const profileViews = profilePosts.reduce((total, post) => total + Number(post.views || post.viewCount || 0), 0);
   const totalLikes = Number(user?.likes || user?.likeCount || profileLikes || 0);
@@ -1299,6 +1313,84 @@ const Profile = () => {
     }
   };
 
+  const openAvatarPicker = () => {
+    if (!isOwnProfile || avatarSaving) {
+      return;
+    }
+
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarSelect = (event) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!selectedFile) {
+      return;
+    }
+
+    if (!selectedFile.type?.startsWith("image/")) {
+      addToast("Choose an image file for your profile photo.", "error");
+      return;
+    }
+
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      addToast("Choose a profile photo under 5MB.", "error");
+      return;
+    }
+
+    const nextPreview = URL.createObjectURL(selectedFile);
+    setAvatarPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return nextPreview;
+    });
+    setAvatarFile(selectedFile);
+  };
+
+  const closeAvatarPreview = () => {
+    if (avatarSaving) {
+      return;
+    }
+
+    setAvatarFile(null);
+    setAvatarPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  };
+
+  const saveAvatar = async () => {
+    if (!avatarFile || avatarSaving) {
+      return;
+    }
+
+    setAvatarSaving(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", avatarFile, avatarFile.name || `vibebook-avatar-${Date.now()}.jpg`);
+      const data = await uploadProfilePicture(formData);
+      const nextUser = data?.user;
+
+      if (!nextUser?.profilePicture && !nextUser?.profileImage) {
+        throw new Error("Profile image update did not return an image URL.");
+      }
+
+      setUser((current) => ({ ...(current || {}), ...nextUser }));
+      await refreshProfile().catch(() => null);
+      setAvatarFile(null);
+      setAvatarPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+      addToast("Profile photo updated.", "success");
+    } catch (requestError) {
+      addToast(requestError.response?.data?.message || requestError.message || "Unable to update profile photo.", "error");
+    } finally {
+      setAvatarSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <section className="container-page py-10">
@@ -1310,11 +1402,18 @@ const Profile = () => {
   if (error) {
     return (
       <section className="container-page py-10">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-8 text-center">
-          <h1 className="text-xl font-bold text-red-800">{error}</h1>
-          <Link to="/search" className="btn-primary mt-5">
-            Back to Search
-          </Link>
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
+          <img src="/logo.png" alt="" className="mx-auto h-16 w-16 rounded-2xl object-cover" onError={handleAvatarError} />
+          <h1 className="mt-4 text-xl font-black text-navy">{error}</h1>
+          <p className="mt-2 text-sm font-semibold text-slate-500">The profile may have moved, or the network may have dropped the request.</p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <button type="button" className="btn-secondary" onClick={() => setProfileRetry((current) => current + 1)}>
+              Retry
+            </button>
+            <Link to="/search" className="btn-primary">
+              Back to Search
+            </Link>
+          </div>
         </div>
       </section>
     );
@@ -1323,8 +1422,9 @@ const Profile = () => {
   if (!user) {
     return (
       <section className="container-page py-10">
-        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
-          <h1 className="text-xl font-bold text-navy">Profile not found.</h1>
+        <div className="mx-auto max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
+          <img src="/logo.png" alt="" className="mx-auto h-16 w-16 rounded-2xl object-cover" onError={handleAvatarError} />
+          <h1 className="mt-4 text-xl font-black text-navy">Profile not found.</h1>
           <Link to="/search" className="btn-primary mt-5">
             Back to Search
           </Link>
@@ -1337,7 +1437,7 @@ const Profile = () => {
     <section className="container-page pb-28 pt-4 sm:py-8">
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
         <div className="relative h-40 overflow-hidden bg-slate-950 sm:h-56">
-          <img src={mediaUrl(coverImage)} alt="" className="h-full w-full object-cover opacity-75" />
+          <img src={mediaUrl(coverImage)} alt="" className="h-full w-full object-cover opacity-75" onError={handleAvatarError} />
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
           <div className="absolute left-4 right-40 top-4 flex flex-wrap gap-2 sm:right-48">
             {verified && (
@@ -1429,8 +1529,23 @@ const Profile = () => {
         <div className="px-4 pb-6 text-center sm:px-6">
           <div className={`relative mx-auto -mt-16 h-32 w-32 rounded-full ${frameGradient ? `bg-gradient-to-br ${frameGradient} p-1 shadow-[0_0_32px_rgba(34,197,94,0.45)]` : "border-4 border-white bg-slate-100 shadow-xl"}`}>
             {frameGradient && <motion.span className="absolute inset-[-7px] rounded-full bg-inherit opacity-40 blur-md" animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} />}
-            <img src={mediaUrl(profilePicture || activeImageUrl)} alt={user.name} className="relative h-full w-full rounded-full border-4 border-white object-cover" />
-            {verified && <BadgeCheck className="absolute bottom-2 right-1 h-8 w-8 rounded-full fill-sky-500 text-white shadow" aria-label="Verified creator" />}
+            <SafeAvatar user={{ ...user, profilePicture: profilePicture || activeImageUrl }} alt={user.name} className="relative h-full w-full rounded-full border-4 border-white object-cover" loading="eager" />
+            {isOwnProfile && (
+              <>
+                <input ref={avatarInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={handleAvatarSelect} />
+                <button
+                  type="button"
+                  className="absolute bottom-2 right-1 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white text-navy shadow-lg ring-2 ring-white transition hover:bg-brand active:scale-95"
+                  onClick={openAvatarPicker}
+                  disabled={avatarSaving}
+                  aria-label="Change profile photo"
+                  title="Change profile photo"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </>
+            )}
+            {verified && <BadgeCheck className={`absolute bottom-2 h-8 w-8 rounded-full fill-sky-500 text-white shadow ${isOwnProfile ? "left-1" : "right-1"}`} aria-label="Verified creator" />}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -1883,6 +1998,34 @@ const Profile = () => {
         />
       )}
 
+      {avatarPreview && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/65 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full max-w-sm overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Profile photo</p>
+                <h2 className="text-lg font-black text-navy">Preview</h2>
+              </div>
+              <button type="button" className="rounded-full p-2 text-slate-500 hover:bg-slate-100" onClick={closeAvatarPreview} disabled={avatarSaving} aria-label="Close profile photo preview">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-5 text-center">
+              <img src={avatarPreview} alt="" className="mx-auto h-48 w-48 rounded-full bg-slate-100 object-cover ring-4 ring-slate-100" onError={handleAvatarError} />
+              <p className="mt-4 truncate text-sm font-semibold text-slate-500">{avatarFile?.name || "Selected image"}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button type="button" className="btn-secondary" onClick={closeAvatarPreview} disabled={avatarSaving}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={saveAvatar} disabled={avatarSaving}>
+                {avatarSaving ? "Saving..." : "Save photo"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {previewImage && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm">
           <div className="relative max-h-full w-full max-w-4xl">
@@ -1894,7 +2037,7 @@ const Profile = () => {
             >
               <X className="h-5 w-5" />
             </button>
-            <img src={mediaUrl(previewImage)} alt="" className="max-h-[86vh] w-full rounded-lg object-contain" />
+            <img src={mediaUrl(previewImage)} alt="" className="max-h-[86vh] w-full rounded-lg object-contain" onError={handleAvatarError} />
           </div>
         </div>
       )}

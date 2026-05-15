@@ -21,7 +21,6 @@ import {
   Timer,
   Trash2,
   UploadCloud,
-  UserRound,
   Users,
   Video,
   Volume2,
@@ -83,7 +82,7 @@ const inferMimeType = (file, forcedType = "") => {
     return extensionType;
   }
 
-  if (forcedType === "profile" || forcedType === "image") return "image/jpeg";
+  if (forcedType === "image") return "image/jpeg";
   if (forcedType === "video") return "video/mp4";
   return "";
 };
@@ -280,7 +279,7 @@ const buildEditorFilter = (editor) => {
 };
 
 const Upload = ({ open, initialType = "image", onClose }) => {
-  const { deleteMedia, uploadMedia, uploadProfilePicture } = useAuth();
+  const { deleteMedia, uploadMedia } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
   const prependPost = usePostStore((state) => state.prependPost);
@@ -322,8 +321,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const [cameraPreparing, setCameraPreparing] = useState(false);
   const [activeEditorPanel, setActiveEditorPanel] = useState("filters");
 
-  const isProfile = type === "profile";
-  const isImage = type === "image" || isProfile;
+  const isProfile = false;
+  const isImage = type === "image";
   const success = Boolean(uploadedUrl && status);
   const activeStep = success ? 4 : uploading ? 3 : file ? 2 : 0;
   const previewSrc = uploadedUrl ? mediaUrl(uploadedUrl) : preview;
@@ -348,16 +347,12 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const editorPanelClass = (panel) => (activeEditorPanel === panel ? "block" : "hidden lg:block");
 
   const helperCopy = useMemo(() => {
-    if (isProfile) {
-      return "Update your profile picture without changing the upload pipeline.";
-    }
-
     if (type === "video") {
       return "Record in the app or upload a video. Portrait is preferred, but every ratio stays safe.";
     }
 
     return "Upload photos with lightweight editing, clean details, and the same reliable upload path.";
-  }, [isProfile, type]);
+  }, [type]);
 
   const stopCamera = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
@@ -468,7 +463,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
   useEffect(() => {
     if (open) {
-      setType(initialType || "image");
+      setType(initialType === "video" ? "video" : "image");
       setCaptureMode("gallery");
     }
   }, [initialType, open]);
@@ -551,8 +546,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     }
 
     const sourceMimeType = inferMimeType(selectedFile, forcedType);
-    const nextType = forcedType || (sourceMimeType.startsWith("video/") ? "video" : isProfile ? "profile" : "image");
-    const nextIsImage = nextType === "image" || nextType === "profile";
+    const nextType = forcedType === "video" || sourceMimeType.startsWith("video/") ? "video" : "image";
+    const nextIsImage = nextType === "image";
     const normalizedFile = normalizeUploadFile(selectedFile, nextType);
     const mimeType = inferMimeType(normalizedFile, nextType);
 
@@ -779,9 +774,9 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setProgress(4);
 
     try {
-      const uploadType = type === "video" ? "video" : isProfile ? "profile" : "image";
+      const uploadType = type === "video" ? "video" : "image";
       const normalizedFile = normalizeUploadFile(file, uploadType);
-      const uploadFile = uploadType === "image" || uploadType === "profile" ? await compressImageFile(normalizedFile) : normalizedFile;
+      const uploadFile = uploadType === "image" ? await compressImageFile(normalizedFile) : normalizedFile;
       const uploadMimeType = inferMimeType(uploadFile, uploadType);
 
       if (!uploadFile?.size) {
@@ -792,30 +787,26 @@ const Upload = ({ open, initialType = "image", onClose }) => {
         throw new Error("Use an MP4, MOV, or WEBM video.");
       }
 
-      if ((uploadType === "image" || uploadType === "profile") && !IMAGE_MIME_TYPES.has(uploadMimeType)) {
+      if (uploadType === "image" && !IMAGE_MIME_TYPES.has(uploadMimeType)) {
         throw new Error("Use a JPEG, PNG, WEBP, or GIF image.");
       }
 
       const formData = new FormData();
 
-      if (isProfile) {
-        appendFile(formData, "image", uploadFile, "profile");
-      } else {
-        appendFile(formData, "media", uploadFile, uploadType);
-        formData.append("type", uploadType);
-        formData.append("orientation", orientation === "landscape" ? "landscape" : "portrait");
-        formData.append("caption", caption.trim());
-        formData.append("description", caption.trim());
-        formData.append("tags", serializeTags(tags));
-        formData.append("mentions", serializeMentions(mentions));
-        formData.append("visibility", VALID_VISIBILITIES.has(visibility) ? visibility : "public");
-        formData.append("location", location.trim());
-        formData.append("editor", JSON.stringify({ ...defaultEditor, ...editor, source: captureMode }));
-        formData.append("muted", String(Boolean(editor.muted)));
-        formData.append("playbackSpeed", String(Number(editor.speed || 1)));
-        if (uploadType === "video" && duration) {
-          formData.append("duration", String(Math.round(duration)));
-        }
+      appendFile(formData, "media", uploadFile, uploadType);
+      formData.append("type", uploadType);
+      formData.append("orientation", orientation === "landscape" ? "landscape" : "portrait");
+      formData.append("caption", caption.trim());
+      formData.append("description", caption.trim());
+      formData.append("tags", serializeTags(tags));
+      formData.append("mentions", serializeMentions(mentions));
+      formData.append("visibility", VALID_VISIBILITIES.has(visibility) ? visibility : "public");
+      formData.append("location", location.trim());
+      formData.append("editor", JSON.stringify({ ...defaultEditor, ...editor, source: captureMode }));
+      formData.append("muted", String(Boolean(editor.muted)));
+      formData.append("playbackSpeed", String(Number(editor.speed || 1)));
+      if (uploadType === "video" && duration) {
+        formData.append("duration", String(Math.round(duration)));
       }
 
       setStatus(uploadType === "video" ? "Uploading video..." : "Uploading media...");
@@ -829,18 +820,16 @@ const Upload = ({ open, initialType = "image", onClose }) => {
         },
       };
 
-      const data = isProfile
-        ? await withUploadRetry(() => uploadProfilePicture(formData, progressOptions))
-        : await withUploadRetry(() => uploadMedia(formData, uploadType, progressOptions));
+      const data = await withUploadRetry(() => uploadMedia(formData, uploadType, progressOptions));
 
-      const nextUrl = uploadUrl(data.url) || uploadUrl(data.user?.profilePicture);
+      const nextUrl = uploadUrl(data.url);
       const nextPath = nextUrl;
       setUploadedUrl(nextUrl);
       setUploadedPath(nextPath);
       setProgress(100);
       setStatus("Upload complete");
 
-      if (!isProfile && nextUrl && !data.feedItem) {
+      if (nextUrl && !data.feedItem) {
         const { data: feedData } = await feedApi.get({ page: 1, limit: 10 });
         const uploadedFeedItem = (Array.isArray(feedData?.posts) ? feedData.posts : Array.isArray(feedData?.feed) ? feedData.feed : [])
           .find((post) => post?.url === nextUrl);
@@ -860,11 +849,11 @@ const Upload = ({ open, initialType = "image", onClose }) => {
         window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: uploadedPost } }));
       }
 
-      addToast(isProfile ? "Profile image updated" : "Upload successful", "success");
+      addToast("Upload successful", "success");
 
       closeTimerRef.current = window.setTimeout(() => {
         onClose?.();
-        navigate(isProfile ? "/settings" : "/", { replace: false });
+        navigate("/", { replace: false });
       }, 900);
     } catch (requestError) {
       const canceled = requestError?.code === "ERR_CANCELED" || requestError?.name === "CanceledError" || requestError?.name === "AbortError";
@@ -944,7 +933,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             <div className="min-w-0 flex-1 text-center sm:text-left">
               <p className="text-xs font-bold uppercase tracking-widest text-blue-600">Create Post</p>
               <h2 className="mt-1 truncate text-lg font-bold text-slate-900 sm:text-2xl">
-                {isProfile ? "Update profile picture" : "Create a VibeBook post"}
+                Create a VibeBook post
               </h2>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -1003,9 +992,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
         <div className="grid min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain lg:grid-cols-[0.82fr_1.18fr]">
           <aside className="min-w-0 border-b border-slate-200 bg-slate-50 p-3 sm:p-6 lg:border-b-0 lg:border-r">
             {/* Media type selector */}
-            <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-white p-1.5 shadow-sm sm:gap-2 sm:p-2">
+            <div className="grid grid-cols-2 gap-1.5 rounded-xl bg-white p-1.5 shadow-sm sm:gap-2 sm:p-2">
               {[
-                { value: "profile", label: "Profile", icon: UserRound },
                 { value: "image", label: "Photo", icon: ImageIcon },
                 { value: "video", label: "Video", icon: Video },
               ].map((option) => {
@@ -1029,8 +1017,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
               })}
             </div>
 
-            {!isProfile ? (
-              <div className="mt-4 grid gap-2.5 sm:mt-6 sm:gap-3">
+            <div className="mt-4 grid gap-2.5 sm:mt-6 sm:gap-3">
                 <button
                   type="button"
                   className="group relative flex items-center justify-between overflow-hidden rounded-xl border-2 border-slate-200 bg-white p-3 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50 sm:p-4"
@@ -1062,14 +1049,6 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                   <input className="hidden" type="file" accept={IMAGE_FILE_ACCEPT} onChange={(event) => handleSelect(event, "image")} disabled={uploading} />
                 </label>
               </div>
-            ) : (
-              <label className="mt-5 flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-4 py-6 text-center transition hover:border-brand hover:bg-brand/5">
-                <UserRound className="h-9 w-9 text-slate-400" />
-                <span className="mt-3 text-sm font-black text-navy">Select profile picture</span>
-                <span className="mt-2 max-w-xs text-xs font-semibold leading-5 text-slate-500">{selectedLabel}</span>
-                <input className="hidden" type="file" accept={IMAGE_FILE_ACCEPT} onChange={(event) => handleSelect(event, "profile")} disabled={uploading} />
-              </label>
-            )}
 
             {cameraOpen && (
               <div className="mx-auto mt-4 w-full max-w-sm overflow-hidden rounded-xl border-2 border-slate-200 bg-slate-950 shadow-lg sm:mt-6">
@@ -1799,8 +1778,6 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         <CheckCircle2 className="h-5 w-5" />
                         Upload complete
                       </span>
-                    ) : isProfile ? (
-                      "Save profile image"
                     ) : (
                       <span className="inline-flex items-center justify-center gap-2">
                         <UploadCloud className="h-5 w-5" />

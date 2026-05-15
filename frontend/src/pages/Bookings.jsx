@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { bookingApi, mediaUrl, paymentApi } from "../services/api";
 
@@ -119,7 +120,7 @@ const Bookings = () => {
               <article key={booking._id} className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft">
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="flex gap-4">
-                    <img src={mediaUrl(image)} alt="" className="h-16 w-16 rounded-lg object-cover" />
+                    <SafeAvatar user={otherUser} src={image ? mediaUrl(image) : ""} className="h-16 w-16 rounded-lg object-cover" />
                     <div>
                       <h2 className="text-lg font-black text-navy">{otherUser.name || booking.businessName || "Creator request"}</h2>
                       <p className="mt-1 text-sm text-slate-600">{booking.location || "Location pending"}</p>

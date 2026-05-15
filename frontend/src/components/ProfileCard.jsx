@@ -2,10 +2,9 @@
 import { BadgeCheck, Heart, MapPin, UserPlus, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { mediaUrl } from "../services/api";
+import SafeAvatar from "./SafeAvatar.jsx";
 
 const ProfileCard = ({ user }) => {
-  const image = user?.profilePicture || user?.profileImage || user?.images?.[0] || user?.gallery?.[0] || "/logo.png";
   const premiumActive = Boolean(user?.isPremium || user?.premiumBadge);
   const verified = Boolean(user?.isVerified || user?.verified);
   const frame = user?.equippedFrame || user?.marketplace?.equippedFrame || "";
@@ -26,7 +25,7 @@ const ProfileCard = ({ user }) => {
   return (
     <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft transition hover:-translate-y-1 hover:shadow-lg">
       <div className={`aspect-[4/3] bg-slate-100 ${frameTone ? `bg-gradient-to-br ${frameTone} p-1` : ""}`}>
-        <img src={mediaUrl(image)} alt={user.name} className="h-full w-full rounded-md object-cover" loading="lazy" />
+        <SafeAvatar user={user} alt={user.name} className="h-full w-full rounded-md object-cover" />
       </div>
       <div className="space-y-4 p-5">
         <div>

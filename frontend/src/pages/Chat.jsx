@@ -3,9 +3,11 @@ import { AlertCircle, Check, CheckCheck, Clock3, Pin, Plus, Search, Send, UserCh
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { groupChatApi, mediaUrl, messageApi, userApi } from "../services/api";
 import { connectSocket, getChatId } from "../services/socket";
+import { handleAvatarError } from "../utils/profileImage";
 
 const formatTime = (value) => {
   if (!value) {
@@ -96,17 +98,7 @@ const avatarImageFor = (profile = {}) =>
 
 const Avatar = memo(({ profile, size = "h-9 w-9", className = "" }) => {
   const image = avatarImageFor(profile || {});
-  const name = profile?.name || "VibeBook user";
-
-  if (image) {
-    return <img src={mediaUrl(image)} alt="" loading="lazy" className={`${size} rounded-full object-cover ${className}`} />;
-  }
-
-  return (
-    <span className={`${size} inline-flex shrink-0 items-center justify-center rounded-full bg-navy text-xs font-black text-white ${className}`}>
-      {initialsFor(name)}
-    </span>
-  );
+  return <SafeAvatar user={profile} src={image ? mediaUrl(image) : ""} className={`${size} shrink-0 rounded-full object-cover ${className}`} />;
 });
 
 Avatar.displayName = "Avatar";
@@ -1214,7 +1206,7 @@ const Chat = () => {
                   >
                     <button type="button" className="flex w-full items-center gap-3 text-left" onClick={() => setSelectedGroup(group._id)}>
                       <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-navy text-xs font-black text-white">
-                        {group.avatar ? <img src={mediaUrl(group.avatar)} alt="" className="h-full w-full rounded-lg object-cover" /> : initialsFor(group.groupName)}
+                        {group.avatar ? <img src={mediaUrl(group.avatar)} alt="" className="h-full w-full rounded-lg object-cover" onError={handleAvatarError} /> : initialsFor(group.groupName)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-black">{group.groupName}</span>
@@ -1248,7 +1240,7 @@ const Chat = () => {
                 <div className="flex min-w-0 flex-1 gap-3">
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-black text-white">
                     {selectedGroupInfo?.avatar ? (
-                      <img src={mediaUrl(selectedGroupInfo.avatar)} alt="" className="h-full w-full rounded-lg object-cover" />
+                      <img src={mediaUrl(selectedGroupInfo.avatar)} alt="" className="h-full w-full rounded-lg object-cover" onError={handleAvatarError} />
                     ) : (
                       initialsFor(selectedGroupInfo?.groupName || "Group")
                     )}
