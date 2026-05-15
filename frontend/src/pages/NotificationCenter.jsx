@@ -7,6 +7,17 @@ import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, notificationApi } from "../services/api";
 import { connectSocket } from "../services/socket";
+import {
+  NOTIFICATION_SYNC_EVENT,
+  actorFor,
+  actorVerified,
+  avatarFor,
+  broadcastNotificationSync,
+  groupNotificationsBySection,
+  idOf,
+  relativeNotificationTime,
+  safeNavigateToNotification,
+} from "../utils/notifications";
 
 const notificationTypes = [
   { value: "all", label: "All", icon: Bell },
@@ -38,8 +49,6 @@ const colorForType = (type) => {
   return "bg-slate-100 text-slate-600";
 };
 
-const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
-
 const initialsFor = (value = "VibeBook") =>
   String(value)
     .trim()
@@ -47,54 +56,6 @@ const initialsFor = (value = "VibeBook") =>
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("") || "VB";
-
-const actorFor = (notification = {}) => (notification.actorId && typeof notification.actorId === "object" ? notification.actorId : null);
-const avatarFor = (notification = {}) => {
-  const actor = actorFor(notification);
-  return actor?.profilePicture || actor?.profileImage || "";
-};
-const actorVerified = (actor = {}) => Boolean(actor?.isVerified || actor?.verified || actor?.premiumBadge);
-const notificationDataFor = (notification = {}) => (notification.data && typeof notification.data === "object" ? notification.data : {});
-const notificationTargetFor = (notification = {}, currentUser = {}) => {
-  const data = notificationDataFor(notification);
-  const actor = actorFor(notification);
-  const actorId = idOf(actor) || idOf(notification.actorId) || idOf(data.actorId) || idOf(data.senderId) || idOf(data.userId);
-  const postId = idOf(notification.postId) || idOf(data.postId) || idOf(data.feedItemId) || idOf(data.post?._id);
-  const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(currentUser?._id);
-  const groupId = idOf(notification.groupId) || idOf(data.groupId) || idOf(data.group?._id);
-
-  if (notification.type === "account_verification") return "/settings";
-  if (notification.type === "follow" && actorId) return `/profile/${actorId}`;
-  if (notification.type === "message" && actorId) return `/chat/${actorId}`;
-  if (notification.type === "group_message" || notification.type === "group_invite") return groupId ? `/groups?group=${groupId}` : "/groups";
-  if (["like", "comment", "mention"].includes(notification.type)) {
-    const profileId = postOwnerId || actorId;
-    if (profileId) return `/profile/${profileId}${postId ? `?post=${postId}` : ""}`;
-    return postId ? `/?post=${postId}` : "/notifications";
-  }
-
-  return actorId ? `/profile/${actorId}` : "/notifications";
-};
-const NOTIFICATION_SYNC_EVENT = "vibebook:notifications-unread";
-const broadcastNotificationSync = (detail = {}) => {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(NOTIFICATION_SYNC_EVENT, { detail }));
-  }
-};
-
-const relativeTimeFor = (value) => {
-  const timestamp = value ? new Date(value).getTime() : 0;
-
-  if (!timestamp || Number.isNaN(timestamp)) return "now";
-
-  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-
-  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-};
 
 const mergeNotificationPage = (current, nextItems, replace = false) => {
   if (replace) return nextItems;
@@ -144,25 +105,7 @@ export default function NotificationCenter() {
     return showUnreadOnly ? typed.filter((notification) => !notification.read) : typed;
   }, [notifications, selectedType, showUnreadOnly]);
 
-  const groupedNotifications = useMemo(() => {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const groups = filteredNotifications.reduce(
-      (acc, notification) => {
-        const createdAt = notification.createdAt ? new Date(notification.createdAt).getTime() : Date.now();
-        const bucket = createdAt >= todayStart.getTime() ? "today" : "earlier";
-        acc[bucket].push(notification);
-        return acc;
-      },
-      { today: [], earlier: [] }
-    );
-
-    return [
-      { label: "Today", items: groups.today },
-      { label: "Earlier", items: groups.earlier },
-    ].filter((group) => group.items.length);
-  }, [filteredNotifications]);
+  const groupedNotifications = useMemo(() => groupNotificationsBySection(filteredNotifications), [filteredNotifications]);
 
   const fetchNotifications = async (pageNum = 1, reset = false) => {
     if (!isAuthenticated) {
@@ -432,7 +375,7 @@ export default function NotificationCenter() {
     }
 
     markAsRead(notification);
-    navigate(notificationTargetFor(notification, user));
+    safeNavigateToNotification(navigate, notification, user);
   };
 
   if (!isAuthenticated) {
@@ -557,7 +500,7 @@ export default function NotificationCenter() {
                           ) : null}
                           <p className="mt-1 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
                           <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
-                            <time>{relativeTimeFor(notification.createdAt)}</time>
+                            <time>{relativeNotificationTime(notification.createdAt)}</time>
                           </div>
                         </button>
 

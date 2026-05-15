@@ -7,6 +7,17 @@ import SafeAvatar from "./SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { mediaUrl, notificationApi } from "../services/api";
 import { connectSocket } from "../services/socket";
+import {
+  NOTIFICATION_SYNC_EVENT,
+  actorFor,
+  actorVerified,
+  avatarFor,
+  broadcastNotificationSync,
+  groupNotificationsBySection,
+  idOf,
+  relativeNotificationTime,
+  safeNavigateToNotification,
+} from "../utils/notifications";
 
 const iconForType = (type) => {
   if (type === "account_verification") return BadgeCheck;
@@ -15,64 +26,6 @@ const iconForType = (type) => {
   if (type === "comment") return MessageSquare;
   if (type === "message" || type === "group_message" || type === "group_invite" || type === "mention") return MessageCircle;
   return Bell;
-};
-
-const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
-
-const initialsFor = (value = "VibeBook") =>
-  String(value)
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "VB";
-
-const actorFor = (notification = {}) => (notification.actorId && typeof notification.actorId === "object" ? notification.actorId : null);
-const avatarFor = (notification = {}) => {
-  const actor = actorFor(notification);
-  return actor?.profilePicture || actor?.profileImage || "";
-};
-const actorVerified = (actor = {}) => Boolean(actor?.isVerified || actor?.verified || actor?.premiumBadge);
-const notificationDataFor = (notification = {}) => (notification.data && typeof notification.data === "object" ? notification.data : {});
-const notificationTargetFor = (notification = {}, currentUser = {}) => {
-  const data = notificationDataFor(notification);
-  const actor = actorFor(notification);
-  const actorId = idOf(actor) || idOf(notification.actorId) || idOf(data.actorId) || idOf(data.senderId) || idOf(data.userId);
-  const postId = idOf(notification.postId) || idOf(data.postId) || idOf(data.feedItemId) || idOf(data.post?._id);
-  const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(currentUser?._id);
-  const groupId = idOf(notification.groupId) || idOf(data.groupId) || idOf(data.group?._id);
-
-  if (notification.type === "account_verification") return "/settings";
-  if (notification.type === "follow" && actorId) return `/profile/${actorId}`;
-  if (notification.type === "message" && actorId) return `/chat/${actorId}`;
-  if (notification.type === "group_message" || notification.type === "group_invite") return groupId ? `/groups?group=${groupId}` : "/groups";
-  if (["like", "comment", "mention"].includes(notification.type)) {
-    const profileId = postOwnerId || actorId;
-    if (profileId) return `/profile/${profileId}${postId ? `?post=${postId}` : ""}`;
-    return postId ? `/?post=${postId}` : "/notifications";
-  }
-
-  return actorId ? `/profile/${actorId}` : "/notifications";
-};
-const NOTIFICATION_SYNC_EVENT = "vibebook:notifications-unread";
-const broadcastNotificationSync = (detail = {}) => {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(NOTIFICATION_SYNC_EVENT, { detail }));
-  }
-};
-
-const relativeTimeFor = (value) => {
-  const timestamp = value ? new Date(value).getTime() : 0;
-
-  if (!timestamp || Number.isNaN(timestamp)) return "now";
-
-  const seconds = Math.max(1, Math.round((Date.now() - timestamp) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-
-  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
 
 export function NotificationBell() {
@@ -87,7 +40,8 @@ export function NotificationBell() {
   const rootRef = useRef(null);
   const panelRef = useRef(null);
 
-  const visibleNotifications = useMemo(() => notifications.slice(0, 12), [notifications]);
+  const visibleNotifications = useMemo(() => notifications.slice(0, 16), [notifications]);
+  const notificationSections = useMemo(() => groupNotificationsBySection(visibleNotifications), [visibleNotifications]);
 
   const openNotifications = (event) => {
     event?.preventDefault?.();
@@ -300,7 +254,50 @@ export function NotificationBell() {
   const openNotification = (notification) => {
     markAsRead(notification);
     setOpen(false);
-    navigate(notificationTargetFor(notification, user));
+    safeNavigateToNotification(navigate, notification, user);
+  };
+
+  const NotificationRow = ({ notification }) => {
+    const Icon = iconForType(notification.type);
+    const actor = actorFor(notification);
+    const avatar = avatarFor(notification);
+    const verified = actorVerified(actor);
+
+    return (
+      <article className={`rounded-xl border p-2.5 transition duration-200 hover:-translate-y-0.5 hover:shadow-md ${notification.read ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"}`}>
+        <div className="flex items-start gap-3">
+          <div className="relative h-10 w-10 shrink-0">
+            <div className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${notification.read ? "bg-slate-100 text-slate-600" : "bg-blue-100 text-blue-700"}`}>
+              {actor || avatar ? <SafeAvatar user={actor} src={avatar ? mediaUrl(avatar) : ""} className="h-full w-full object-cover" /> : <Icon className="h-5 w-5" />}
+            </div>
+            {verified && <BadgeCheck className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full fill-sky-500 text-white ring-2 ring-white" />}
+          </div>
+
+          <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openNotification(notification)}>
+            <div className="flex items-start justify-between gap-2">
+              <p className="truncate text-sm font-black text-slate-900">{notification.title || "Notification"}</p>
+              {!notification.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-600" />}
+            </div>
+            {actor?.username || actor?.name ? <p className="mt-0.5 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p> : null}
+            <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{notification.message || "Open VibeBook to view this update."}</p>
+            <p className="mt-1 text-xs font-semibold text-slate-400">{relativeNotificationTime(notification.createdAt)}</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              deleteNotification(notification._id);
+            }}
+            className="rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+            aria-label="Delete notification"
+            title="Delete"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </article>
+    );
   };
 
   if (!isAuthenticated) {
@@ -343,13 +340,16 @@ export function NotificationBell() {
           <div
             id="notification-panel"
             ref={panelRef}
-            className="notification-panel-in fixed inset-x-0 bottom-0 top-auto z-[95] max-h-[82svh] overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:bottom-auto sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-[min(500px,calc(100vh-5rem))] sm:rounded-xl"
+            className="notification-panel-in fixed inset-x-0 bottom-0 top-auto z-[95] max-h-[82svh] overflow-hidden rounded-t-2xl border border-slate-200 bg-white shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:bottom-auto sm:w-[min(30rem,calc(100vw-2rem))] sm:max-h-[min(620px,calc(100vh-5rem))] sm:rounded-xl lg:right-0"
             onClick={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-900">Notifications</h3>
+              <div>
+                <h3 className="text-sm font-black text-slate-900">Notifications</h3>
+                <p className="mt-0.5 text-xs font-semibold text-slate-500">{unreadCount} unread</p>
+              </div>
               <div className="flex items-center gap-1">
                 <button
                   type="button"
@@ -373,70 +373,26 @@ export function NotificationBell() {
             </div>
 
             {/* Content */}
-            <div className="max-h-[calc(82svh-8rem)] overflow-y-auto sm:max-h-[430px]">
+            <div className="max-h-[calc(82svh-8rem)] overflow-y-auto overscroll-contain scroll-smooth p-3 sm:max-h-[500px]">
               {loading && !visibleNotifications.length ? (
                 <div className="flex items-center justify-center gap-2 px-6 py-8">
                   <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "0ms" }} />
                   <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "150ms" }} />
                   <div className="h-2 w-2 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: "300ms" }} />
                 </div>
-              ) : visibleNotifications.length ? (
-                <div className="divide-y divide-slate-100">
-                  {visibleNotifications.map((notification) => {
-                    const Icon = iconForType(notification.type);
-                    const actor = actorFor(notification);
-                    const avatar = avatarFor(notification);
-                    const verified = actorVerified(actor);
-                    return (
-                      <article
-                        key={notification._id}
-                        className={`p-3 transition duration-200 hover:bg-slate-50 ${notification.read ? "bg-white" : "bg-blue-50"}`}
-                      >
-                        <div className="flex items-start gap-3">
-                          {/* Icon badge */}
-                          <div className="relative h-10 w-10 shrink-0">
-                            <div className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${notification.read ? "bg-slate-200 text-slate-600" : "bg-blue-200 text-blue-600"}`}>
-                              {actor || avatar ? <SafeAvatar user={actor} src={avatar ? mediaUrl(avatar) : ""} className="h-full w-full object-cover" /> : <Icon className="h-5 w-5" />}
-                            </div>
-                            {verified && <BadgeCheck className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full fill-sky-500 text-white ring-2 ring-white" />}
-                          </div>
-
-                          {/* Content */}
-                          <button
-                            type="button"
-                            className="min-w-0 flex-1 text-left transition duration-200 hover:opacity-70"
-                            onClick={() => openNotification(notification)}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <p className="truncate text-sm font-semibold text-slate-900">{notification.title}</p>
-                              {!notification.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-600" />}
-                            </div>
-                            {actor?.username || actor?.name ? (
-                              <p className="mt-0.5 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p>
-                            ) : null}
-                            <p className="mt-0.5 line-clamp-2 text-sm text-slate-600">{notification.message}</p>
-                            <p className="mt-1 text-xs font-medium text-slate-400">
-                              {relativeTimeFor(notification.createdAt)}
-                            </p>
-                          </button>
-
-                          {/* Delete button */}
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              deleteNotification(notification._id);
-                            }}
-                            className="rounded-lg p-1 text-slate-400 transition duration-200 hover:bg-red-50 hover:text-red-600"
-                            aria-label="Delete notification"
-                            title="Delete"
-                          >
-                            <X className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
+              ) : notificationSections.length ? (
+                <div className="space-y-4">
+                  {notificationSections.map((section) => (
+                    <section key={section.id} className="space-y-2">
+                      <div className="flex items-center justify-between px-1">
+                        <h4 className="text-xs font-black uppercase tracking-wide text-slate-500">{section.label}</h4>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">{section.items.length}</span>
+                      </div>
+                      <div className="space-y-2">
+                        {section.items.map((notification) => <NotificationRow key={notification._id} notification={notification} />)}
+                      </div>
+                    </section>
+                  ))}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center">

@@ -320,6 +320,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const [torchEnabled, setTorchEnabled] = useState(false);
   const [cameraPreparing, setCameraPreparing] = useState(false);
   const [activeEditorPanel, setActiveEditorPanel] = useState("filters");
+  const [previewError, setPreviewError] = useState("");
+  const [previewMuted, setPreviewMuted] = useState(true);
 
   const isProfile = false;
   const isImage = type === "image";
@@ -330,6 +332,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const previewObjectFit = editor.crop === "fill" ? "cover" : "contain";
   const previewTransform = `rotate(${editor.rotation}deg) scale(${editor.effect === "zoom" ? 1.05 : 1})`;
   const selectedLabel = file ? `${file.name} - ${(file.size / (1024 * 1024)).toFixed(1)}MB` : "Choose a file or record in the app.";
+  const canPost = Boolean(file && !uploading && !success && !previewError && !(type === "video" && duration > MAX_VIDEO_SECONDS));
   const trimMax = Math.max(1, Math.round(duration || MAX_VIDEO_SECONDS));
   const editorToolTabs = useMemo(
     () =>
@@ -388,6 +391,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setDuration(0);
     setStatus("");
     setError("");
+    setPreviewError("");
+    setPreviewMuted(true);
     setProgress(0);
     setEditor(defaultEditor);
     setActiveEditorPanel("filters");
@@ -432,6 +437,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setDuration(0);
     setStatus("");
     setError("");
+    setPreviewError("");
+    setPreviewMuted(true);
     setProgress(0);
     setUploading(false);
     setEditor(defaultEditor);
@@ -483,8 +490,11 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
     video.playbackRate = Number(editor.speed || 1);
     video.defaultPlaybackRate = Number(editor.speed || 1);
-    video.muted = Boolean(editor.muted);
-  }, [editor.speed, editor.muted, previewSrc]);
+    video.muted = Boolean(previewMuted);
+    if (previewSrc && type === "video" && !previewError) {
+      video.play().catch(() => null);
+    }
+  }, [editor.speed, previewMuted, previewSrc, previewError, type]);
 
   useEffect(() => {
     if (!recording) {
@@ -534,6 +544,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const acceptSelectedFile = (selectedFile, forcedType = "") => {
     setError("");
     setStatus("");
+    setPreviewError("");
+    setPreviewMuted(true);
     setUploadedUrl("");
     setUploadedPath("");
     setProgress(0);
@@ -746,6 +758,39 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setUploading(false);
     setStatus("Upload canceled.");
     setProgress(0);
+  };
+
+  const removeSelectedMedia = () => {
+    if (uploading) {
+      return;
+    }
+
+    setFile(null);
+    setUploadedUrl("");
+    setUploadedPath("");
+    setDetectedOrientation("");
+    setDuration(0);
+    setStatus("");
+    setError("");
+    setPreviewError("");
+    setPreviewMuted(true);
+    setProgress(0);
+    setEditor(defaultEditor);
+    setActiveEditorPanel("filters");
+    setPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  };
+
+  const replayPreview = () => {
+    const video = videoPreviewRef.current;
+    if (!video) {
+      return;
+    }
+
+    video.currentTime = 0;
+    video.play().catch(() => null);
   };
 
   const handleUpload = async () => {
@@ -1153,12 +1198,14 @@ const Upload = ({ open, initialType = "image", onClose }) => {
           <main className="min-w-0 max-w-full overflow-x-hidden p-2 sm:p-5">
             <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.58fr)] xl:gap-5">
               <div className="min-w-0 space-y-4">
-                <div className="relative mx-auto flex h-[42dvh] min-h-[15rem] w-full max-w-sm items-center justify-center overflow-hidden rounded-lg bg-slate-950 sm:h-[58dvh] sm:max-h-[34rem] sm:min-h-[30rem] sm:max-w-none xl:h-auto xl:min-h-[34rem]">
+                <div className="relative mx-auto flex h-[46dvh] min-h-[16rem] w-full max-w-[22rem] items-center justify-center overflow-hidden rounded-xl bg-slate-950 shadow-2xl sm:h-[62dvh] sm:max-h-[38rem] xl:h-auto xl:min-h-[34rem]">
                   {previewSrc ? (
                     <>
                       {isImage ? (
                         <img src={previewSrc} alt="" className="absolute inset-0 h-full w-full scale-110 object-cover opacity-25 blur-2xl" />
-                      ) : null}
+                      ) : (
+                        <video src={previewSrc} className="absolute inset-0 h-full w-full scale-110 object-cover opacity-20 blur-2xl" muted playsInline preload="metadata" aria-hidden="true" />
+                      )}
                       <div className="relative z-10 flex h-full max-h-full w-full items-center justify-center p-2">
                         {isImage ? (
                           <img
@@ -1168,18 +1215,66 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                             style={{ filter: editorFilter, objectFit: previewObjectFit, transform: previewTransform, transition: "filter 160ms ease, transform 160ms ease" }}
                           />
                         ) : (
-                          <video
-                            ref={videoPreviewRef}
-                            src={previewSrc}
-                            className="max-h-full max-w-full rounded-lg bg-slate-950 shadow-2xl"
-                            style={{ filter: editorFilter, objectFit: previewObjectFit, transform: previewTransform, transition: "filter 160ms ease, transform 160ms ease" }}
-                            controls
-                            muted={editor.muted}
-                            playsInline
-                            preload="metadata"
-                          />
+                          previewError ? (
+                            <div className="mx-4 rounded-xl border border-red-400/40 bg-red-500/10 p-5 text-center text-white">
+                              <Video className="mx-auto h-9 w-9 text-red-200" />
+                              <p className="mt-3 text-sm font-black">Preview unavailable</p>
+                              <p className="mt-1 text-xs font-semibold text-white/70">{previewError}</p>
+                              <div className="mt-4 flex justify-center gap-2">
+                                <label className="rounded-full bg-white px-4 py-2 text-xs font-black text-navy">
+                                  Replace
+                                  <input className="hidden" type="file" accept={VIDEO_FILE_ACCEPT} onChange={(event) => handleSelect(event, "video")} disabled={uploading} />
+                                </label>
+                                <button type="button" className="rounded-full bg-white/10 px-4 py-2 text-xs font-black text-white" onClick={removeSelectedMedia}>
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <video
+                              ref={videoPreviewRef}
+                              src={previewSrc}
+                              className="h-full max-h-full w-full max-w-full rounded-xl bg-slate-950 object-contain shadow-2xl"
+                              style={{ filter: editorFilter, objectFit: previewObjectFit, transform: previewTransform, transition: "filter 160ms ease, transform 160ms ease" }}
+                              controls
+                              muted={previewMuted}
+                              loop
+                              autoPlay
+                              playsInline
+                              preload="metadata"
+                              poster=""
+                              onLoadedData={() => setPreviewError("")}
+                              onError={() => setPreviewError("This video could not be previewed. You can replace it or try another file.")}
+                            />
+                          )
                         )}
                       </div>
+                      {type === "video" && !previewError && (
+                        <div className="absolute inset-x-3 bottom-3 z-30 flex items-center justify-between gap-2">
+                          <div className="min-w-0 rounded-full bg-slate-950/60 px-3 py-1.5 text-xs font-black text-white backdrop-blur">
+                            {duration ? `${Math.round(duration)}s` : "Video preview"}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-navy shadow" onClick={replayPreview} aria-label="Replay preview">
+                              <Play className="h-4 w-4 fill-current" />
+                            </button>
+                            <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-navy shadow" onClick={() => setPreviewMuted((current) => !current)} aria-label={previewMuted ? "Unmute preview" : "Mute preview"}>
+                              {previewMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {file && (
+                        <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
+                          <label className="rounded-full bg-white/95 px-3 py-2 text-xs font-black text-navy shadow">
+                            Replace
+                            <input className="hidden" type="file" accept={type === "video" ? VIDEO_FILE_ACCEPT : IMAGE_FILE_ACCEPT} onChange={(event) => handleSelect(event, type)} disabled={uploading} />
+                          </label>
+                          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-red-600 shadow" onClick={removeSelectedMedia} disabled={uploading} aria-label="Remove selected media">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                       {(editor.effect === "vignette" || editor.vignette > 0) && (
                         <div
                           className="pointer-events-none absolute inset-0 z-20"
@@ -1187,6 +1282,11 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         />
                       )}
                       {editor.effect === "fade" && <div className="pointer-events-none absolute inset-0 z-20 bg-gradient-to-t from-slate-950/25 via-transparent to-white/10" />}
+                      {uploading && (
+                        <div className="absolute inset-x-4 top-4 z-30 rounded-full bg-slate-950/60 p-1 backdrop-blur">
+                          <div className="h-2 rounded-full bg-brand transition-all duration-300" style={{ width: `${Math.max(4, progress)}%` }} />
+                        </div>
+                      )}
                       {uploadedUrl && (
                         <button
                           type="button"
@@ -1324,7 +1424,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                         type="button"
                         className="w-full rounded-full bg-blue-600 px-6 py-3 text-base font-black text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-60"
                         onClick={handleUpload}
-                        disabled={uploading || !file || success || (type === "video" && duration > MAX_VIDEO_SECONDS)}
+                        disabled={!canPost}
                       >
                         {uploading ? (
                           <span className="inline-flex items-center justify-center gap-2">
@@ -1766,7 +1866,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                     type="button"
                     className="w-full rounded-xl bg-blue-600 px-6 py-3 text-base font-bold text-white shadow-lg transition-all duration-200 hover:bg-blue-700 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60 active:scale-95"
                     onClick={handleUpload}
-                    disabled={uploading || !file || success || (type === "video" && duration > MAX_VIDEO_SECONDS)}
+                    disabled={!canPost}
                   >
                     {uploading ? (
                       <span className="inline-flex items-center justify-center gap-2">
