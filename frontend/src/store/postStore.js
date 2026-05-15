@@ -4,9 +4,14 @@ const isCloudinaryUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(Str
 const isRenderableMediaUrl = (value) => {
   const url = String(value || "").trim();
 
-  return Boolean(url && (/^(https?:|blob:|data:)/i.test(url) || url.startsWith("/uploads") || url.startsWith("uploads/") || url.startsWith("/")));
+  return Boolean(url && (/^https?:/i.test(url) || url.startsWith("/uploads") || url.startsWith("uploads/") || url.startsWith("/")));
 };
-const isValidPost = (post) => isRenderableMediaUrl(post?.url);
+const stablePostUrl = (post = {}) => String(post?.url || post?.mediaUrl || post?.videoUrl || post?.imageUrl || "").trim();
+const normalizePost = (post = {}) => {
+  const url = stablePostUrl(post);
+  return url ? { ...post, url, mediaUrl: post.mediaUrl || url } : post;
+};
+const isValidPost = (post) => isRenderableMediaUrl(stablePostUrl(post));
 
 const newestFirst = (items) =>
   [...items].sort((left, right) => {
@@ -22,9 +27,9 @@ const newestFirst = (items) =>
 const mergeUniquePosts = (currentPosts, nextPosts) => {
   const byId = new Map();
 
-  [...currentPosts, ...nextPosts].forEach((post) => {
+  [...currentPosts, ...nextPosts].map(normalizePost).forEach((post) => {
     if (post?._id) {
-      byId.set(post._id, { ...(byId.get(post._id) || {}), ...post });
+      byId.set(post._id, { ...(byId.get(post._id) || {}), ...post, url: stablePostUrl(post) });
     }
   });
 
@@ -33,7 +38,7 @@ const mergeUniquePosts = (currentPosts, nextPosts) => {
 
 export const usePostStore = create((set) => ({
   posts: [],
-  setPosts: (posts) => set({ posts: newestFirst((Array.isArray(posts) ? posts : []).filter(isValidPost)) }),
+  setPosts: (posts) => set({ posts: newestFirst((Array.isArray(posts) ? posts : []).map(normalizePost).filter(isValidPost)) }),
   mergePosts: (posts) =>
     set((state) => ({
       posts: mergeUniquePosts(state.posts, Array.isArray(posts) ? posts : []),
@@ -60,4 +65,4 @@ export const usePostStore = create((set) => ({
     })),
 }));
 
-export { isCloudinaryUrl, isRenderableMediaUrl, isValidPost };
+export { isCloudinaryUrl, isRenderableMediaUrl, isValidPost, normalizePost, stablePostUrl };

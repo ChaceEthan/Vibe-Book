@@ -112,7 +112,7 @@ const userSchema = new mongoose.Schema({
   role: {
     type: String,
     enum: allowedRoles,
-    default: "dancer",
+    default: undefined,
   },
   protected: {
     type: Boolean,

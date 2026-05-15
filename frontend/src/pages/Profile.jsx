@@ -155,6 +155,11 @@ const badgeLabel = (badge = "") =>
     badge_founder: "Founder",
   }[badge] || String(badge || "").replace(/^badge_/, "").replace(/_/g, " "));
 
+const creatorRoleLabel = (role = "") => {
+  const value = String(role || "").trim();
+  return value && value.toLowerCase() !== "dancer" ? value : "";
+};
+
 const normalizeExternalHref = (value = "") => {
   const trimmed = String(value || "").trim();
 
@@ -1550,7 +1555,9 @@ const Profile = () => {
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
             <h1 className="text-3xl font-black text-navy sm:text-4xl">{user.name}</h1>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-500">{user.role || "Creator"}</span>
+            {creatorRoleLabel(user.role) && (
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black uppercase text-slate-500">{creatorRoleLabel(user.role)}</span>
+            )}
           </div>
           {equippedBadges.length > 0 && (
             <div className="mx-auto mt-3 flex max-w-2xl flex-wrap items-center justify-center gap-2">

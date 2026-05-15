@@ -34,7 +34,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import { feedApi, mediaUrl } from "../services/api";
-import { isValidPost, usePostStore } from "../store/postStore";
+import { isRenderableMediaUrl, isValidPost, normalizePost, stablePostUrl, usePostStore } from "../store/postStore";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
@@ -322,6 +322,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const [activeEditorPanel, setActiveEditorPanel] = useState("filters");
   const [previewError, setPreviewError] = useState("");
   const [previewMuted, setPreviewMuted] = useState(true);
+  const [mobileRecorderAvailable, setMobileRecorderAvailable] = useState(false);
 
   const isProfile = false;
   const isImage = type === "image";
@@ -356,6 +357,28 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
     return "Upload photos with lightweight editing, clean details, and the same reliable upload path.";
   }, [type]);
+
+  const attachCameraStream = async (stream = mediaStreamRef.current) => {
+    const video = cameraVideoRef.current;
+
+    if (!video || !stream) {
+      return;
+    }
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+    }
+
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+
+    try {
+      await video.play?.();
+    } catch {
+      // The user can still start recording once the browser allows playback.
+    }
+  };
 
   const stopCamera = () => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
@@ -467,6 +490,22 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
     };
   }, []);
+
+  useEffect(() => {
+    const query = "(max-width: 1024px), (pointer: coarse)";
+    const mediaQuery = window.matchMedia?.(query);
+    const update = () => setMobileRecorderAvailable(Boolean(mediaQuery?.matches));
+
+    update();
+    mediaQuery?.addEventListener?.("change", update);
+    return () => mediaQuery?.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (cameraOpen) {
+      attachCameraStream();
+    }
+  }, [cameraOpen]);
 
   useEffect(() => {
     if (open) {
@@ -638,6 +677,11 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   };
 
   const startCamera = async (preferredFacing = cameraFacing) => {
+    if (!mobileRecorderAvailable) {
+      setCameraError("Camera recording is available on mobile and tablet devices.");
+      return;
+    }
+
     setCameraError("");
     setCameraPreparing(true);
     setCaptureMode("camera");
@@ -669,12 +713,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
       mediaStreamRef.current = stream;
       setCameraOpen(true);
-      window.setTimeout(() => {
-        if (cameraVideoRef.current) {
-          cameraVideoRef.current.srcObject = stream;
-          cameraVideoRef.current.play?.().catch(() => undefined);
-        }
-      }, 0);
+      window.requestAnimationFrame(() => attachCameraStream(stream));
     } catch {
       setCameraError("Camera permission was denied or no camera was found.");
       addToast("Camera permission was denied or no camera was found.", "error");
@@ -884,17 +923,25 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
       const data = await withUploadRetry(() => uploadMedia(formData, uploadType, progressOptions));
 
-      const nextUrl = uploadUrl(data.url);
+      const nextUrl = uploadUrl(data.url || data.feedItem?.url || data.feedItem?.mediaUrl);
+      if (!isRenderableMediaUrl(nextUrl)) {
+        throw new Error("Upload finished, but the media URL was not ready. Please try again.");
+      }
       const nextPath = nextUrl;
       setUploadedUrl(nextUrl);
       setUploadedPath(nextPath);
+      setPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
       setProgress(100);
       setStatus("Upload complete");
 
       if (nextUrl && !data.feedItem) {
         const { data: feedData } = await feedApi.get({ page: 1, limit: 10 });
         const uploadedFeedItem = (Array.isArray(feedData?.posts) ? feedData.posts : Array.isArray(feedData?.feed) ? feedData.feed : [])
-          .find((post) => post?.url === nextUrl);
+          .map(normalizePost)
+          .find((post) => stablePostUrl(post) === nextUrl);
 
         if (uploadedFeedItem && isValidPost(uploadedFeedItem)) {
           prependPost(uploadedFeedItem);
@@ -903,10 +950,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       }
 
       if (data.feedItem && isValidPost(data.feedItem)) {
-        const uploadedPost = {
+        const uploadedPost = normalizePost({
           ...data.feedItem,
-          url: uploadUrl(data.feedItem.url) || nextUrl,
-        };
+          url: uploadUrl(data.feedItem.url || data.feedItem.mediaUrl) || nextUrl,
+        });
         prependPost(uploadedPost);
         window.dispatchEvent(new CustomEvent("vibebook:post-created", { detail: { post: uploadedPost } }));
       }
@@ -999,10 +1046,10 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   );
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:items-center sm:justify-center sm:p-3">
-      <div className="flex h-[100dvh] max-h-[100dvh] w-full min-w-0 flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] sm:max-w-5xl sm:rounded-2xl xl:max-w-6xl">
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:p-3">
+      <div className="flex min-h-[100dvh] w-full min-w-0 flex-col rounded-none bg-white shadow-2xl sm:my-0 sm:min-h-0 sm:max-w-5xl sm:rounded-2xl xl:max-w-6xl">
         {/* Header with step progress */}
-        <div className="z-40 shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 sm:py-3">
+        <div className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 sm:py-3">
           <div className="flex items-center justify-between gap-2 sm:gap-3">
             <button
               type="button"
@@ -1070,7 +1117,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
           </div>
         </div>
 
-        <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 gap-3 overflow-y-auto overflow-x-hidden overscroll-contain bg-surface p-3 sm:p-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-start lg:gap-3 xl:gap-4">
+        <div className="mx-auto grid min-h-0 w-full max-w-6xl flex-1 gap-3 overflow-visible bg-surface p-3 sm:p-4 lg:grid-cols-[1.1fr_0.9fr] lg:items-start lg:gap-3 xl:gap-4">
           <aside className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:col-start-1 lg:row-start-1">
             {/* Media type selector */}
             <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
@@ -1098,7 +1145,8 @@ const Upload = ({ open, initialType = "image", onClose }) => {
               })}
             </div>
 
-            <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
+            <div className={`mt-2.5 grid gap-2 ${mobileRecorderAvailable ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+              {mobileRecorderAvailable && (
                 <button
                   type="button"
                   className="group relative flex min-h-[3.75rem] items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md disabled:opacity-50"
@@ -1113,6 +1161,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
                     <span className="mt-0.5 block text-xs font-semibold text-slate-500">Capture in app.</span>
                   </div>
                 </button>
+              )}
 
                 <label className="group relative flex min-h-[3.75rem] cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-slate-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-blue-400 hover:shadow-md">
                   <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 transition group-hover:bg-blue-100">
@@ -1139,8 +1188,24 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
             {cameraOpen && (
               <div className="mx-auto mt-3 w-full max-w-[18rem] overflow-hidden rounded-xl border border-slate-200 bg-slate-950 shadow-lg">
-                <div className="relative aspect-[9/16] max-h-[54dvh]">
-                  <video ref={cameraVideoRef} className="h-full w-full object-contain" autoPlay muted playsInline />
+                <div className="relative aspect-[9/16] max-h-[62dvh]">
+                  <video
+                    ref={cameraVideoRef}
+                    className="h-full w-full bg-slate-950 object-cover"
+                    autoPlay
+                    muted
+                    playsInline
+                    onLoadedMetadata={(event) => event.currentTarget.play?.().catch(() => undefined)}
+                    onCanPlay={(event) => event.currentTarget.play?.().catch(() => undefined)}
+                  />
+                  {cameraPreparing && (
+                    <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/70 text-sm font-black text-white">
+                      <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 backdrop-blur">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Opening camera...
+                      </span>
+                    </div>
+                  )}
                   
                   {/* Recording indicator */}
                   <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-slate-950/80 to-transparent p-4">
@@ -1241,7 +1306,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
             <div className="grid min-w-0 gap-3 lg:contents">
               <div className="min-w-0 space-y-3 lg:col-start-1 lg:row-start-2">
                 <div
-                  className="relative mx-auto flex h-[46dvh] min-h-[18rem] w-full max-w-[19rem] items-center justify-center overflow-hidden rounded-xl bg-slate-950 shadow-2xl sm:h-[52dvh] sm:max-h-[30rem] sm:max-w-[20rem] lg:h-[min(50dvh,28rem)] lg:min-h-[21rem] lg:max-w-[18.5rem] xl:max-w-[19.5rem]"
+                  className="relative mx-auto flex h-[52dvh] min-h-[20rem] w-full max-w-[20rem] items-center justify-center overflow-hidden rounded-xl bg-slate-950 shadow-2xl sm:h-[56dvh] sm:max-h-[32rem] sm:max-w-[21rem] lg:h-[min(56dvh,31rem)] lg:min-h-[24rem] lg:max-w-[21rem] xl:max-w-[22rem]"
                   onDragOver={handlePreviewDragOver}
                   onDrop={handlePreviewDrop}
                 >

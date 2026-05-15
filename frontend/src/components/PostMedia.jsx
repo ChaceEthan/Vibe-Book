@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Heart, Volume2, VolumeX } from "lucide-react";
+import { Heart, Loader2, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../services/api";
@@ -37,12 +37,18 @@ const PostMedia = ({
   const lastTapRef = useRef(0);
   const tapTimerRef = useRef(null);
   const likeTimerRef = useRef(null);
+  const retryTimerRef = useRef(null);
   const [failed, setFailed] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
+  const [processing, setProcessing] = useState(false);
   const [isMuted, setIsMuted] = useState(Boolean(muted));
   const [progress, setProgress] = useState(0);
   const [likePulse, setLikePulse] = useState(false);
   const rawUrl = post?.url || "";
-  const src = rawUrl ? mediaUrl(rawUrl) : "";
+  const baseSrc = rawUrl ? mediaUrl(rawUrl) : "";
+  const src = retryCount && baseSrc && !/^(blob:|data:)/i.test(baseSrc)
+    ? `${baseSrc}${baseSrc.includes("?") ? "&" : "?"}vb_retry=${retryCount}`
+    : baseSrc;
   const looksLikeVideoUrl = /\.(mp4|mov|m4v|webm|avi|3gp|3g2|mpeg|mpg)(?:$|[?#])/i.test(rawUrl) || src.includes("/video/upload/");
   const isVideo = post?.type === "video" || looksLikeVideoUrl;
 
@@ -76,6 +82,8 @@ const PostMedia = ({
     lastTimeRef.current = 0;
     replaysRef.current = 0;
     setFailed(false);
+    setRetryCount(0);
+    setProcessing(false);
     setIsMuted(Boolean(muted));
     setProgress(0);
   }, [autoPlay, muted, post?._id, rawUrl]);
@@ -149,6 +157,10 @@ const PostMedia = ({
       if (likeTimerRef.current) {
         window.clearTimeout(likeTimerRef.current);
       }
+
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+      }
     };
   }, []);
 
@@ -159,8 +171,39 @@ const PostMedia = ({
       postId: post?._id,
       event,
     });
+
+    if (retryCount < 4) {
+      setProcessing(isVideo);
+      if (retryTimerRef.current) {
+        window.clearTimeout(retryTimerRef.current);
+      }
+      retryTimerRef.current = window.setTimeout(() => {
+        setRetryCount((current) => current + 1);
+        retryTimerRef.current = null;
+      }, isVideo ? 1800 + retryCount * 1200 : 900);
+      return;
+    }
+
     setFailed(true);
-    onInvalid?.();
+  };
+
+  const retryMedia = () => {
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    setFailed(false);
+    setProcessing(true);
+    setRetryCount((current) => current + 1);
+  };
+
+  const handleMediaReady = () => {
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    setFailed(false);
+    setProcessing(false);
   };
 
   const handleMuteToggle = (event) => {
@@ -293,8 +336,18 @@ const PostMedia = ({
 
   if (failed || !rawUrl) {
     return (
-      <div className={`flex min-h-48 items-center justify-center bg-slate-800 p-5 text-center text-sm font-bold text-white/70 ${placeholderClassName}`}>
-        Media unavailable
+      <div className={`flex min-h-48 flex-col items-center justify-center gap-3 bg-slate-800 p-5 text-center text-sm font-bold text-white/70 ${placeholderClassName}`}>
+        <span>{rawUrl ? "Media unavailable" : "Media is still preparing"}</span>
+        {rawUrl && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 text-xs font-black text-white transition hover:bg-white/20"
+            onClick={retryMedia}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </button>
+        )}
       </div>
     );
   }
@@ -310,6 +363,7 @@ const PostMedia = ({
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.16),rgba(15,23,42,0.82)_52%,#020617_100%)]" aria-hidden="true" />
         )}
         <video
+          key={`${post?._id || rawUrl}-${retryCount}`}
           ref={mediaRef}
           src={src}
           className={`relative z-10 h-full w-full object-contain ${videoClassName}`}
@@ -321,9 +375,11 @@ const PostMedia = ({
           preload={minimal ? "metadata" : preload}
           onError={handleMediaError}
           onLoadedMetadata={(event) => {
+            handleMediaReady();
             prepareVideo(event.currentTarget);
             setIsMuted(event.currentTarget.muted);
           }}
+          onLoadedData={handleMediaReady}
           onPlay={(event) => {
             prepareVideo(event.currentTarget);
           }}
@@ -349,6 +405,15 @@ const PostMedia = ({
           }}
           onEnded={(event) => markViewed(metricsFor(event.currentTarget, { completionRate: 1 }))}
         />
+
+        {processing && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/45 text-center text-sm font-black text-white">
+            <span className="inline-flex items-center gap-2 rounded-full bg-slate-950/70 px-4 py-2 backdrop-blur">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Processing video...
+            </span>
+          </div>
+        )}
 
         {interactive && !controls && likePulse && (
           <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
@@ -380,12 +445,14 @@ const PostMedia = ({
     <div className={`relative overflow-hidden bg-slate-950 ${className}`}>
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.14),rgba(15,23,42,0.88)_58%,#020617_100%)]" aria-hidden="true" />
       <img
+        key={`${post?._id || rawUrl}-${retryCount}`}
         ref={mediaRef}
         src={src}
         alt={alt}
         className={`relative z-10 h-full w-full object-contain ${imageClassName}`}
         onError={handleMediaError}
         onLoad={() => {
+          handleMediaReady();
           if (!window.IntersectionObserver) {
             markViewed({ watchTime: 1, duration: 1, completionRate: 1 });
           }
