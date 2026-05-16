@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   getConversation,
+  deleteMessage,
   getDrafts,
   getInbox,
   getMessageById,
@@ -14,6 +15,7 @@ const {
   updateDraft,
 } = require("../controllers/messageController");
 const authMiddleware = require("../middleware/authMiddleware");
+const { uploadChatAttachments } = require("../middleware/uploadMiddleware");
 
 const router = express.Router();
 
@@ -28,8 +30,10 @@ router.patch("/drafts/:id", updateDraft);
 router.get("/conversation/:userId", getConversation);
 router.post("/conversation/:userId", sendDirectMessage);
 router.post("/", sendDirectMessage);
+router.post("/with-attachments", uploadChatAttachments, sendDirectMessage);
 router.get("/id/:id", getMessageById);
 router.post("/:id/reply", replyToMessage);
+router.delete("/:id", deleteMessage);
 router.patch("/:id/read", markMessageRead);
 router.patch("/:id/unread", markMessageUnread);
 router.get("/:userId", getConversation);

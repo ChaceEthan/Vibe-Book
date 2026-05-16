@@ -209,6 +209,7 @@ export const feedApi = {
   save: (id) => API.post(`/posts/${id}/save`),
   feedback: (id, payload) => API.post(`/posts/${id}/feedback`, payload),
   edit: (id, payload) => API.patch(`/posts/${id}/edit`, payload),
+  delete: (id) => API.delete(`/posts/${id}`),
   recommendations: (userId, params = {}) => API.get(`/recommendations/${userId}`, { params }),
 };
 
@@ -254,6 +255,7 @@ export const notificationApi = {
   markRead: (id) => API.patch(`/notifications/${id}/read`),
   markAllRead: () => API.patch("/notifications/read/all"),
   delete: (id) => API.delete(`/notifications/${id}`),
+  clearAll: () => API.delete("/notifications"),
 };
 
 export const exploreApi = {
@@ -287,7 +289,9 @@ export const messageApi = {
   getById: (id) => API.get(`/messages/id/${id}`),
   getConversation: (userId) => API.get(`/messages/${userId}`),
   sendDirect: (userId, payload) => API.post("/messages", { ...payload, recipientId: userId }),
+  sendDirectWithAttachments: (formData, options = {}) => API.post("/messages/with-attachments", formData, { timeout: UPLOAD_TIMEOUT_MS, signal: options.signal }),
   sendMessage: (payload) => API.post("/messages", payload),
+  delete: (id) => API.delete(`/messages/${id}`),
   markRead: (id) => API.patch(`/messages/${id}/read`),
   markUnread: (id) => API.patch(`/messages/${id}/unread`),
   reply: (id, payload) => API.post(`/messages/${id}/reply`, payload),
@@ -300,10 +304,17 @@ export const groupChatApi = {
   create: (payload) => API.post("/groups/create", payload),
   getMessages: (groupId) => API.get(`/groups/${groupId}`),
   send: (groupId, payload) => API.post("/groups/message", { ...payload, groupId }),
+  sendWithAttachments: (groupId, formData, options = {}) => {
+    formData.set("groupId", groupId);
+    return API.post("/groups/message-with-attachments", formData, { timeout: UPLOAD_TIMEOUT_MS, signal: options.signal });
+  },
   join: (groupId) => API.post(`/groups/join/${groupId}`),
   joinById: (groupId) => API.post(`/groups/${groupId}/join`),
   invite: (groupId, payload = {}) => API.post(`/groups/${groupId}/invite`, payload),
   addMember: (groupId, payload = {}) => API.post(`/groups/${groupId}/add-member`, payload),
+  updateRole: (groupId, memberId, payload = {}) => API.patch(`/groups/${groupId}/members/${memberId}/role`, payload),
+  removeMember: (groupId, memberId) => API.delete(`/groups/${groupId}/members/${memberId}`),
+  deleteMessage: (groupId, messageId) => API.delete(`/groups/${groupId}/messages/${messageId}`),
   leave: (groupId) => API.post(`/groups/leave/${groupId}`),
   members: (groupId) => API.get(`/groups/${groupId}/members`),
 };

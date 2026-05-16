@@ -965,8 +965,52 @@ const editPost = async (req, res, next) => {
   }
 };
 
+const deletePost = async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Valid post id is required" });
+    }
+
+    const item = await Feed.findById(req.params.id);
+
+    if (!item || !hasMediaUrl(item.mediaUrl)) {
+      return res.status(404).json({ message: "Feed item not found" });
+    }
+
+    const userId = idOf(req.user._id);
+    const postOwner = idOf(item.userId);
+    const isAdmin = req.user?.role === "admin";
+
+    if (userId !== postOwner && !isAdmin) {
+      return res.status(403).json({ message: "You can only delete your own posts" });
+    }
+
+    const mediaUrl = normalizeStoredUploadPath(item.mediaUrl);
+    const mediaField = item.type === "video" ? "videos" : "images";
+    const mirrorField = item.type === "video" ? "videoUrls" : "gallery";
+    const descriptionField = item.type === "video" ? "videoDescriptions" : "imageDescriptions";
+
+    await Promise.all([
+      User.findByIdAndUpdate(postOwner, {
+        $pull: {
+          [mediaField]: mediaUrl,
+          [mirrorField]: mediaUrl,
+          [descriptionField]: { url: mediaUrl },
+        },
+      }).catch(() => null),
+      Feed.deleteOne({ _id: item._id }),
+    ]);
+
+    return res.json({ deletedId: item._id, mediaUrl, message: "Post deleted" });
+  } catch (error) {
+    console.error(`[post:delete] ${error.message}`);
+    return next(error);
+  }
+};
+
 module.exports = {
   addFeedComment,
+  deletePost,
   editPost,
   getFeed,
   getRecommendations,

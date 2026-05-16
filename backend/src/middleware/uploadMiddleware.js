@@ -7,6 +7,7 @@ const streamifier = require("streamifier");
 const cloudinary = require("../config/cloudinary");
 
 const imageMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const documentMimeTypes = ["application/pdf", "text/plain", "text/markdown"];
 const videoMimeTypes = [
   "video/mp4",
   "video/quicktime",
@@ -18,9 +19,11 @@ const videoMimeTypes = [
   "video/mpeg",
 ];
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+const documentExtensions = new Set([".pdf", ".txt", ".md"]);
 const videoExtensions = new Set([".mp4", ".mov", ".m4v", ".webm", ".avi", ".3gp", ".3g2", ".mpeg", ".mpg"]);
 const maxImageSize = 5 * 1024 * 1024;
 const maxVideoSize = 50 * 1024 * 1024;
+const maxChatAttachmentSize = 10 * 1024 * 1024;
 const maxUploadSize = 50 * 1024 * 1024;
 
 const storage = multer.memoryStorage();
@@ -70,12 +73,19 @@ const normalizeUploadMimeType = (file) => {
     return `image/${extension.slice(1)}`;
   }
 
+  if (documentExtensions.has(extension)) {
+    if (extension === ".pdf") return "application/pdf";
+    if (extension === ".md") return "text/markdown";
+    return "text/plain";
+  }
+
   return mimetype;
 };
 
 const isVideoFile = (file) => file?.mimetype?.startsWith("video/") || videoExtensions.has(extensionFor(file));
-const cloudinaryFolderFor = (file) => (isVideoFile(file) ? "vibebook/videos" : "vibebook/images");
-const cloudinaryResourceTypeFor = (file) => (isVideoFile(file) ? "video" : "image");
+const isDocumentFile = (file) => documentMimeTypes.includes(normalizeUploadMimeType(file)) || documentExtensions.has(extensionFor(file));
+const cloudinaryFolderFor = (file) => (isVideoFile(file) ? "vibebook/videos" : isDocumentFile(file) ? "vibebook/chat-files" : "vibebook/images");
+const cloudinaryResourceTypeFor = (file) => (isVideoFile(file) ? "video" : isDocumentFile(file) ? "raw" : "image");
 const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
 
 const buildVideoThumbnailUrl = (url) => {
@@ -266,13 +276,22 @@ const uploadVideos = withCloudinaryUpload(
   }).array("videos", 3)
 );
 
+const uploadChatAttachments = withCloudinaryUpload(
+  createMulter([...imageMimeTypes, ...documentMimeTypes], "image, PDF, or text", {
+    fileSize: maxChatAttachmentSize,
+    files: 4,
+  }).array("attachments", 4)
+);
+
 module.exports = {
   cloudinaryConfigured,
   ensureUploadFolders,
   uploadBufferToCloudinary,
   uploadFiles,
   maxImageSize,
+  maxChatAttachmentSize,
   maxVideoSize,
+  uploadChatAttachments,
   uploadFeedImage,
   uploadFeedVideo,
   uploadImages,

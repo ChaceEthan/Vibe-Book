@@ -105,6 +105,9 @@ const serializeDirectMessage = (message) => ({
   receiverId: message.receiverId || message.recipient?.toString?.() || message.receiver?.toString?.() || "",
   message: message.message,
   text: message.text || message.message,
+  attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  deletedAt: message.deletedAt,
+  deletedBy: message.deletedBy,
   createdAt: message.createdAt,
   deliveredAt: message.deliveredAt,
   readAt: message.readAt,
@@ -123,9 +126,12 @@ const serializeGroupMessage = (message) => ({
   groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
   sender: message.sender,
   senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
-  message: message.message,
-  text: message.message,
+  message: message.deletedAt ? "This message was deleted" : message.message,
+  text: message.deletedAt ? "This message was deleted" : message.message,
   type: message.type || "message",
+  attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  deletedAt: message.deletedAt,
+  deletedBy: message.deletedBy,
   createdAt: message.createdAt,
   timestamp: message.createdAt,
 });
@@ -136,6 +142,20 @@ const userIsGroupMember = (group, userId) => {
     const memberId = member?._id?.toString?.() || member?.toString?.() || "";
     return memberId === id;
   });
+};
+
+const roleForGroup = (group, userId) => {
+  const targetId = idOf(userId);
+
+  if (idOf(group?.owner || group?.createdBy || group?.adminId) === targetId) {
+    return "owner";
+  }
+
+  if ((group?.moderators || []).some((memberId) => idOf(memberId) === targetId)) {
+    return "moderator";
+  }
+
+  return "member";
 };
 
 const joinUserGroupRooms = async (socket, userId) => {
@@ -484,6 +504,45 @@ const initSocket = (server, corsOptions = {}) => {
       }
     });
 
+    socket.on("message:delete", async (payload = {}, callback) => {
+      try {
+        const messageId = normalizeObjectId(payload.messageId || payload.id || payload);
+
+        if (!messageId) {
+          callback?.({ success: false, message: "Valid message id is required" });
+          return;
+        }
+
+        const message = await Message.findOne({
+          _id: messageId,
+          sender: userId,
+          isDraft: false,
+        });
+
+        if (!message) {
+          callback?.({ success: false, message: "Message not found" });
+          return;
+        }
+
+        message.deletedAt = message.deletedAt || new Date();
+        message.deletedBy = userId;
+        message.deletedReason = "sender";
+        message.message = "This message was deleted";
+        message.text = "This message was deleted";
+        message.attachments = [];
+        await saveSocketDocument(message, "socket:message_delete");
+
+        const messagePayload = serializeDirectMessage(message);
+        ioInstance.to(idOf(message.sender)).emit("message:deleted", messagePayload);
+        ioInstance.to(idOf(message.recipient || message.receiver)).emit("message:deleted", messagePayload);
+        await emitUnreadCount(idOf(message.recipient || message.receiver));
+        callback?.({ success: true, message: "Message deleted", data: messagePayload });
+      } catch (error) {
+        logSocketError("socket:message_delete", error);
+        callback?.({ success: false, message: "Unable to delete message" });
+      }
+    });
+
     socket.on("join_group", async (payload = {}, callback) => {
       try {
         const groupId = normalizeObjectId(payload.groupId || payload);
@@ -611,6 +670,55 @@ const initSocket = (server, corsOptions = {}) => {
           logSocketError("socket:send_group_message", error);
         }
         callback?.({ success: false, message: "Group message failed" });
+      }
+    });
+
+    socket.on("group:message_delete", async (payload = {}, callback) => {
+      try {
+        const groupId = normalizeObjectId(payload.groupId);
+        const messageId = normalizeObjectId(payload.messageId || payload.id);
+
+        if (!groupId || !messageId) {
+          callback?.({ success: false, message: "Valid group and message ids are required" });
+          return;
+        }
+
+        const group = await ChatGroup.findOne({ _id: groupId, isActive: true, members: userId });
+
+        if (!group) {
+          callback?.({ success: false, message: "You are not a member of this group" });
+          return;
+        }
+
+        const groupMessage = await GroupMessage.findOne({ _id: messageId, group: group._id });
+
+        if (!groupMessage) {
+          callback?.({ success: false, message: "Message not found" });
+          return;
+        }
+
+        const isSender = idOf(groupMessage.sender) === userId;
+        const canModerate = ["owner", "moderator"].includes(roleForGroup(group, userId));
+
+        if (!isSender && !canModerate) {
+          callback?.({ success: false, message: "You cannot delete this message" });
+          return;
+        }
+
+        groupMessage.deletedAt = groupMessage.deletedAt || new Date();
+        groupMessage.deletedBy = userId;
+        groupMessage.deletedReason = isSender ? "sender" : "moderator";
+        groupMessage.message = "This message was deleted";
+        groupMessage.attachments = [];
+        await saveSocketDocument(groupMessage, "socket:group_message_delete");
+        await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
+
+        const messagePayload = serializeGroupMessage(groupMessage);
+        ioInstance.to(groupRoomFor(group._id)).emit("group:message_deleted", { groupId: group._id, message: messagePayload });
+        callback?.({ success: true, message: "Message deleted", data: messagePayload });
+      } catch (error) {
+        logSocketError("socket:group_message_delete", error);
+        callback?.({ success: false, message: "Unable to delete message" });
       }
     });
 

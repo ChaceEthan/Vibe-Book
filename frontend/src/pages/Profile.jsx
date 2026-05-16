@@ -27,6 +27,7 @@ import {
   Sparkles,
   Star,
   Tag,
+  Trash2,
   UserMinus,
   UserPlus,
   Video,
@@ -246,6 +247,7 @@ const ProfileMediaViewer = ({
   onViewed,
   onComment,
   onEdit,
+  onDelete,
   onBoost,
 }) => {
   const scrollerRef = useRef(null);
@@ -487,6 +489,11 @@ const ProfileMediaViewer = ({
           </ViewerActionButton>
         )}
         {canEdit && activeIsPost && (
+          <ViewerActionButton label="Delete post" onClick={() => onDelete(activeItem)}>
+            <Trash2 className="h-5 w-5 text-red-200" />
+          </ViewerActionButton>
+        )}
+        {canEdit && activeIsPost && (
           <ViewerActionButton label="Boost post" onClick={() => onBoost(activeItem)}>
             <Rocket className="h-5 w-5 text-brand" />
           </ViewerActionButton>
@@ -602,6 +609,7 @@ const Profile = () => {
   const storePosts = usePostStore((state) => state.posts);
   const mergePosts = usePostStore((state) => state.mergePosts);
   const replacePost = usePostStore((state) => state.replacePost);
+  const removePost = usePostStore((state) => state.removePost);
   const [user, setUser] = useState(null);
   const [activeImage, setActiveImage] = useState(0);
   const [previewImage, setPreviewImage] = useState("");
@@ -984,6 +992,57 @@ const Profile = () => {
       ...current,
       posts: (current?.posts || []).map((post) => (post._id === nextPost._id ? { ...post, ...nextPost } : post)),
     }));
+  };
+
+  const removeProfilePost = (postId) => {
+    removePost(postId);
+    setMediaViewer((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const nextItems = current.items.filter((item) => item?._id !== postId);
+
+      if (!nextItems.length) {
+        return null;
+      }
+
+      return {
+        ...current,
+        items: nextItems,
+        index: Math.min(current.index || 0, nextItems.length - 1),
+      };
+    });
+    setUser((current) => ({
+      ...current,
+      posts: (current?.posts || []).filter((post) => post._id !== postId),
+    }));
+  };
+
+  const handlePostDelete = async (post) => {
+    if (!currentUser) {
+      navigate("/login");
+      return;
+    }
+
+    if (!post?._id || !window.confirm("Delete this post?")) {
+      return;
+    }
+
+    const previousUser = user;
+    const previousViewer = mediaViewer;
+    removeProfilePost(post._id);
+    setLikeStatus("");
+
+    try {
+      await feedApi.delete(post._id);
+      setLikeStatus("Post deleted.");
+    } catch (requestError) {
+      setUser(previousUser);
+      setMediaViewer(previousViewer);
+      replacePost(post);
+      setLikeStatus(requestError.response?.data?.message || "Unable to delete post.");
+    }
   };
 
   const handlePostLike = async (post) => {
@@ -1880,9 +1939,14 @@ const Profile = () => {
                           <Share2 className="mx-auto h-3.5 w-3.5" />
                         </button>
                         {isOwnProfile ? (
-                          <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); setEditingPost(item); }} aria-label="Edit post">
-                            <Pencil className="mx-auto h-3.5 w-3.5" />
-                          </button>
+                          <div className="grid grid-cols-2 gap-1">
+                            <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); setEditingPost(item); }} aria-label="Edit post">
+                              <Pencil className="mx-auto h-3.5 w-3.5" />
+                            </button>
+                            <button type="button" className="rounded-md bg-red-500/80 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); handlePostDelete(item); }} aria-label="Delete post">
+                              <Trash2 className="mx-auto h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         ) : (
                           <span className="rounded-md bg-white/15 p-1.5 backdrop-blur">
                             <Eye className="mx-auto h-3.5 w-3.5" />
@@ -1987,6 +2051,7 @@ const Profile = () => {
           setMediaViewer(null);
           setEditingPost(post);
         }}
+        onDelete={handlePostDelete}
         onBoost={(post) => {
           setMediaViewer(null);
           handleBoostPost(post);

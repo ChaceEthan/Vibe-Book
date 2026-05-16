@@ -12,6 +12,20 @@ const memberSelect = "name username role profileImage profilePicture images gall
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 const isProduction = process.env.NODE_ENV === "production";
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
+const safeUrl = (value = "") => {
+  const url = trimText(value).slice(0, 500);
+
+  if (!url) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+};
 
 const queueNotification = (payload) => {
   createNotification(payload).catch((error) => {
@@ -89,6 +103,72 @@ const ensureMember = (group, userId) => {
   return members.some((member) => normalizeId(member) === targetId);
 };
 
+const roleFor = (group, userId) => {
+  const targetId = normalizeId(userId);
+
+  if (!targetId) {
+    return "member";
+  }
+
+  if (normalizeId(group?.owner || group?.createdBy || group?.adminId) === targetId) {
+    return "owner";
+  }
+
+  if ((group?.moderators || []).some((memberId) => normalizeId(memberId) === targetId)) {
+    return "moderator";
+  }
+
+  return "member";
+};
+
+const canModerateGroup = (group, userId) => ["owner", "moderator"].includes(roleFor(group, userId));
+const canRemoveMember = (group, actorId, targetId) => {
+  const actorRole = roleFor(group, actorId);
+  const targetRole = roleFor(group, targetId);
+
+  if (actorRole === "owner") {
+    return targetRole !== "owner";
+  }
+
+  return actorRole === "moderator" && targetRole === "member";
+};
+
+const attachmentFromFile = (file = {}) => ({
+  url: file.secure_url || file.path || "",
+  name: String(file.originalname || file.filename || "Attachment").slice(0, 180),
+  size: Number(file.size || 0),
+  mimeType: file.detected_mimetype || file.mimetype || "",
+  kind: String(file.detected_mimetype || file.mimetype || "").startsWith("image/") ? "image" : "file",
+});
+
+const attachmentsFromRequest = (req) => {
+  const files = Array.isArray(req.files) ? req.files : [];
+  const uploaded = files.map(attachmentFromFile).filter((attachment) => attachment.url);
+  const link = safeUrl(req.body?.link || req.body?.url);
+
+  if (link) {
+    uploaded.push({
+      url: link,
+      name: link.replace(/^https?:\/\//i, "").slice(0, 180),
+      size: 0,
+      mimeType: "text/uri-list",
+      kind: "link",
+    });
+  }
+
+  return uploaded.slice(0, 4);
+};
+
+const validateMessageBody = (text, attachments = []) => {
+  const cleanText = trimText(text);
+
+  if (!cleanText && attachments.length) {
+    return { message: "" };
+  }
+
+  return validateChatMessage(cleanText);
+};
+
 const serializeGroup = (group, viewerId = "") => {
   const members = Array.isArray(group.members) ? group.members : [];
   const pendingInvites = Array.isArray(group.pendingInvites) ? group.pendingInvites : [];
@@ -104,6 +184,10 @@ const serializeGroup = (group, viewerId = "") => {
     visibility: group.visibility || "public",
     createdBy: group.createdBy,
     adminId: group.adminId || group.createdBy,
+    owner: group.owner || group.createdBy || group.adminId,
+    moderators: Array.isArray(group.moderators) ? group.moderators : [],
+    viewerRole: viewer ? roleFor(group, viewer) : undefined,
+    roles: Object.fromEntries(members.map((member) => [normalizeId(member), roleFor(group, member)]).filter(([id]) => id)),
     members,
     memberCount: members.length,
     pendingInvites,
@@ -124,9 +208,12 @@ const serializeGroupMessage = (message) => ({
   groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
   sender: message.sender,
   senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
-  message: message.message,
-  text: message.message,
+  message: message.deletedAt ? "This message was deleted" : message.message,
+  text: message.deletedAt ? "This message was deleted" : message.message,
   type: message.type || "message",
+  attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  deletedAt: message.deletedAt,
+  deletedBy: message.deletedBy,
   createdAt: message.createdAt,
   timestamp: message.createdAt,
 });
@@ -182,6 +269,8 @@ const createGroup = async (req, res) => {
       name: groupName,
       createdBy: req.user._id,
       adminId: req.user._id,
+      owner: req.user._id,
+      moderators: [],
       members: activeMemberIds,
       description,
       visibility: body.visibility === "private" ? "private" : "public",
@@ -255,6 +344,9 @@ const joinGroup = async (req, res) => {
 
     if (!wasMember) {
       group.members = uniqueIds([...(group.members || []), req.user._id]);
+      if (!group.owner) {
+        group.owner = group.createdBy || group.adminId || req.user._id;
+      }
       group.pendingInvites = uniqueIds([...(group.pendingInvites || [])]).filter((memberId) => memberId !== normalizeId(req.user._id));
       group.updatedAt = new Date();
       await saveDocument(group, "group:join");
@@ -441,15 +533,21 @@ const leaveGroup = async (req, res) => {
 
     const leavingUserId = req.user._id.toString();
     const remainingMembers = (Array.isArray(group.members) ? group.members : []).filter((memberId) => memberId.toString() !== leavingUserId);
+    const isOwner = roleFor(group, leavingUserId) === "owner";
+
+    if (isOwner && remainingMembers.length) {
+      return res.status(403).json({ success: false, message: "Transfer ownership before leaving this group" });
+    }
+
     group.members = remainingMembers;
+    group.moderators = (group.moderators || []).filter((memberId) => normalizeId(memberId) !== leavingUserId);
 
     if (!remainingMembers.length) {
       group.isActive = false;
     }
 
-    if ((group.adminId || group.createdBy)?.toString() === leavingUserId && remainingMembers.length) {
-      group.adminId = remainingMembers[0];
-      group.createdBy = remainingMembers[0];
+    if (!remainingMembers.length) {
+      group.owner = undefined;
     }
 
     group.updatedAt = new Date();
@@ -516,7 +614,8 @@ const sendGroupMessage = async (req, res) => {
     }
 
     const body = req.body || {};
-    const validation = validateChatMessage(body.message || body.text);
+    const attachments = attachmentsFromRequest(req);
+    const validation = validateMessageBody(body.message || body.text, attachments);
 
     if (validation.error) {
       return res.status(400).json({ success: false, message: validation.error });
@@ -540,6 +639,7 @@ const sendGroupMessage = async (req, res) => {
       sender: req.user._id,
       clientId: trimText(body.clientId),
       message: validation.message,
+      attachments,
     });
 
     group.updatedAt = new Date();
@@ -583,14 +683,150 @@ const sendGroupMessage = async (req, res) => {
   }
 };
 
+const updateMemberRole = async (req, res) => {
+  try {
+    if (!isValidGroupId(req.params.groupId) || !isValidGroupId(req.params.memberId)) {
+      return res.status(400).json({ success: false, message: "Valid group and member ids are required" });
+    }
+
+    const group = await ChatGroup.findOne({ _id: req.params.groupId, isActive: true });
+
+    if (!group) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    if (roleFor(group, req.user._id) !== "owner") {
+      return res.status(403).json({ success: false, message: "Only the group owner can change moderators" });
+    }
+
+    const memberId = normalizeId(req.params.memberId);
+
+    if (!ensureMember(group, memberId)) {
+      return res.status(404).json({ success: false, message: "Member not found in this group" });
+    }
+
+    if (roleFor(group, memberId) === "owner") {
+      return res.status(400).json({ success: false, message: "The owner role cannot be changed here" });
+    }
+
+    const makeModerator = req.body?.role === "moderator" || req.body?.moderator === true;
+    group.moderators = makeModerator
+      ? uniqueIds([...(group.moderators || []), memberId])
+      : uniqueIds(group.moderators || []).filter((id) => id !== memberId);
+    group.updatedAt = new Date();
+    await saveDocument(group, "group:role");
+    await group.populate("members", memberSelect);
+
+    const serializedGroup = serializeGroup(group, req.user._id);
+    getIo()?.to(groupRoomFor(group._id)).emit("group:updated", { groupId: group._id, group: serializedGroup });
+
+    return res.json({ success: true, group: serializedGroup, message: makeModerator ? "Moderator added" : "Moderator removed" });
+  } catch (error) {
+    return sendGroupError(res, "group:role", error, "Unable to update member role");
+  }
+};
+
+const removeGroupMember = async (req, res) => {
+  try {
+    if (!isValidGroupId(req.params.groupId) || !isValidGroupId(req.params.memberId)) {
+      return res.status(400).json({ success: false, message: "Valid group and member ids are required" });
+    }
+
+    const group = await ChatGroup.findOne({ _id: req.params.groupId, isActive: true });
+
+    if (!group) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    const memberId = normalizeId(req.params.memberId);
+
+    if (!canRemoveMember(group, req.user._id, memberId)) {
+      return res.status(403).json({ success: false, message: "You do not have permission to remove this member" });
+    }
+
+    group.members = (group.members || []).filter((id) => normalizeId(id) !== memberId);
+    group.moderators = (group.moderators || []).filter((id) => normalizeId(id) !== memberId);
+    group.pendingInvites = (group.pendingInvites || []).filter((id) => normalizeId(id) !== memberId);
+    group.updatedAt = new Date();
+    await saveDocument(group, "group:remove-member");
+
+    const groupMessage = await GroupMessage.create({
+      group: group._id,
+      sender: req.user._id,
+      message: "A member was removed from the group",
+      type: "system",
+    });
+
+    await Promise.all([group.populate("members", memberSelect), groupMessage.populate("sender", memberSelect)]);
+    const serializedGroup = serializeGroup(group, req.user._id);
+    const messagePayload = serializeGroupMessage(groupMessage);
+
+    getIo()?.to(groupRoomFor(group._id)).emit("group:member-left", {
+      groupId: group._id,
+      userId: memberId,
+      group: serializedGroup,
+      message: messagePayload,
+    });
+    getIo()?.to(memberId).emit("group:removed", { groupId: group._id, group: serializedGroup });
+
+    return res.json({ success: true, group: serializedGroup, groupMessage: messagePayload, message: "Member removed" });
+  } catch (error) {
+    return sendGroupError(res, "group:remove-member", error, "Unable to remove member");
+  }
+};
+
+const deleteGroupMessage = async (req, res) => {
+  try {
+    if (!isValidGroupId(req.params.groupId) || !isValidGroupId(req.params.messageId)) {
+      return res.status(400).json({ success: false, message: "Valid group and message ids are required" });
+    }
+
+    const group = await ChatGroup.findOne({ _id: req.params.groupId, isActive: true });
+
+    if (!group || !ensureMember(group, req.user._id)) {
+      return res.status(404).json({ success: false, message: "Group not found" });
+    }
+
+    const groupMessage = await GroupMessage.findOne({ _id: req.params.messageId, group: group._id });
+
+    if (!groupMessage) {
+      return res.status(404).json({ success: false, message: "Message not found" });
+    }
+
+    const isSender = normalizeId(groupMessage.sender) === normalizeId(req.user._id);
+
+    if (!isSender && !canModerateGroup(group, req.user._id)) {
+      return res.status(403).json({ success: false, message: "You cannot delete this message" });
+    }
+
+    groupMessage.deletedAt = groupMessage.deletedAt || new Date();
+    groupMessage.deletedBy = req.user._id;
+    groupMessage.deletedReason = isSender ? "sender" : "moderator";
+    groupMessage.message = "This message was deleted";
+    groupMessage.attachments = [];
+    await saveDocument(groupMessage, "group:delete-message");
+    await groupMessage.populate("sender", memberSelect);
+
+    const messagePayload = serializeGroupMessage(groupMessage);
+    getIo()?.to(groupRoomFor(group._id)).emit("group:message_deleted", { groupId: group._id, message: messagePayload });
+
+    return res.json({ success: true, groupMessage: messagePayload, message: "Message deleted" });
+  } catch (error) {
+    return sendGroupError(res, "group:delete-message", error, "Unable to delete message");
+  }
+};
+
 module.exports = {
   createGroup,
   addGroupMember,
+  deleteGroupMessage,
   getGroupMessages,
   inviteToGroup,
   joinGroup,
   leaveGroup,
   listMembers,
   listGroups,
+  removeGroupMember,
   sendGroupMessage,
+  updateMemberRole,
 };

@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { AlertCircle, Check, CheckCheck, Clock3, Pin, Plus, Search, Send, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock3, FileText, Paperclip, Pin, Plus, Search, Send, ShieldCheck, Trash2, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -60,6 +60,8 @@ const normalizeSocketMessage = (item = {}) => ({
   receiver: item.receiver || item.recipient || item.receiverId,
   message: item.message || item.text || "",
   text: item.text || item.message || "",
+  attachments: Array.isArray(item.attachments) ? item.attachments : [],
+  deletedAt: item.deletedAt,
   createdAt: item.createdAt || new Date().toISOString(),
   deliveryStatus: messageStatus(item),
 });
@@ -75,6 +77,8 @@ const normalizeGroupMessage = (item = {}) => ({
   senderId: item.senderId || idOf(item.sender),
   sender: item.sender || item.senderId,
   message: item.message || "",
+  attachments: Array.isArray(item.attachments) ? item.attachments : [],
+  deletedAt: item.deletedAt,
   type: item.type || "message",
   createdAt: item.createdAt || new Date().toISOString(),
   deliveryStatus: messageStatus(item),
@@ -147,6 +151,78 @@ const memberCountLabel = (group = {}) => {
   return `${total} member${total === 1 ? "" : "s"} • ${online} online`;
 };
 
+const formatFileSize = (value = 0) => {
+  const size = Number(value || 0);
+
+  if (!size) return "";
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const roleForMember = (group = {}, memberId = "") => {
+  const roles = group.roles || {};
+  return roles[memberId] || (idOf(group.owner || group.createdBy || group.adminId) === memberId ? "owner" : (group.moderators || []).map(idOf).includes(memberId) ? "moderator" : "member");
+};
+
+const AttachmentList = ({ attachments = [] }) => {
+  if (!attachments.length) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 grid gap-2">
+      {attachments.map((attachment, index) => {
+        const isImage = attachment.kind === "image" || String(attachment.mimeType || "").startsWith("image/");
+        const href = mediaUrl(attachment.url);
+
+        return isImage ? (
+          <a key={`${attachment.url}-${index}`} href={href} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-black/5 bg-white/20">
+            <img src={href} alt={attachment.name || "Shared image"} className="max-h-56 w-full object-cover" loading="lazy" />
+          </a>
+        ) : (
+          <a key={`${attachment.url}-${index}`} href={href} target="_blank" rel="noreferrer" className="flex max-w-xs items-center gap-2 rounded-lg border border-black/5 bg-white/30 p-2 text-xs font-bold">
+            <FileText className="h-4 w-4 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">{attachment.name || "Attachment"}</span>
+              {formatFileSize(attachment.size) && <span className="block text-[11px] opacity-70">{formatFileSize(attachment.size)}</span>}
+            </span>
+          </a>
+        );
+      })}
+    </div>
+  );
+};
+
+const firstUrlIn = (text = "") => {
+  const match = String(text || "").match(/https?:\/\/[^\s]+/i);
+  return match ? match[0].replace(/[),.]+$/, "") : "";
+};
+
+const LinkPreview = ({ text = "" }) => {
+  const url = firstUrlIn(text);
+
+  if (!url) {
+    return null;
+  }
+
+  let label = url;
+  try {
+    label = new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    // Keep the original URL label if URL parsing fails.
+  }
+
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="mt-2 flex max-w-xs items-center gap-2 rounded-lg border border-black/5 bg-white/30 p-2 text-xs font-bold">
+      <Paperclip className="h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{label}</span>
+        <span className="block truncate text-[11px] opacity-70">{url}</span>
+      </span>
+    </a>
+  );
+};
+
 const Chat = () => {
   const { userId } = useParams();
   const { user, token, payAccess } = useAuth();
@@ -156,10 +232,12 @@ const Chat = () => {
   const [otherUser, setOtherUser] = useState(null);
   const [online, setOnline] = useState(false);
   const [message, setMessage] = useState("");
+  const [directAttachments, setDirectAttachments] = useState([]);
   const [groups, setGroups] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState("");
   const [groupMessages, setGroupMessages] = useState([]);
   const [groupMessage, setGroupMessage] = useState("");
+  const [groupAttachments, setGroupAttachments] = useState([]);
   const [groupName, setGroupName] = useState("");
   const [groupDescription, setGroupDescription] = useState("");
   const [memberOptions, setMemberOptions] = useState([]);
@@ -177,6 +255,8 @@ const Chat = () => {
   const [typingUser, setTypingUser] = useState("");
   const bottomRef = useRef(null);
   const groupBottomRef = useRef(null);
+  const directFileInputRef = useRef(null);
+  const groupFileInputRef = useRef(null);
   const typingTimerRef = useRef(null);
   const groupsLoadingRef = useRef(false);
   const groupMessagesRequestRef = useRef(0);
@@ -287,6 +367,39 @@ const Chat = () => {
         return { ...item, ...updates };
       })
     );
+  };
+
+  const filePreviewsFor = (files = []) =>
+    Array.from(files)
+      .slice(0, 4)
+      .map((file) => ({
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        previewUrl: file.type?.startsWith("image/") ? URL.createObjectURL(file) : "",
+      }));
+
+  const clearAttachmentPreviews = (items = []) => {
+    items.forEach((item) => {
+      if (item.previewUrl) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
+  };
+
+  const setDirectFiles = (files) => {
+    setDirectAttachments((current) => {
+      clearAttachmentPreviews(current);
+      return filePreviewsFor(files);
+    });
+  };
+
+  const setGroupFiles = (files) => {
+    setGroupAttachments((current) => {
+      clearAttachmentPreviews(current);
+      return filePreviewsFor(files);
+    });
   };
 
   const loadConversation = async ({ silent = false } = {}) => {
@@ -470,6 +583,13 @@ const Chat = () => {
   }, []);
 
   useEffect(() => {
+    return () => {
+      clearAttachmentPreviews(directAttachments);
+      clearAttachmentPreviews(groupAttachments);
+    };
+  }, [directAttachments, groupAttachments]);
+
+  useEffect(() => {
     if (activeTab !== "groups") {
       return undefined;
     }
@@ -580,6 +700,10 @@ const Chat = () => {
       setTypingUser(payload.typing ? payload.senderId : "");
     };
 
+    const handleDirectDeleted = (payload = {}) => {
+      applyDirectDeleted(payload);
+    };
+
     // Group message handlers
     const handleGroupMessage = (payload = {}) => {
       if (activeTabRef.current !== "groups") {
@@ -609,6 +733,13 @@ const Chat = () => {
       }
 
       scheduleGroupsRefresh();
+    };
+
+    const handleGroupDeleted = (payload = {}) => {
+      const messagePayload = payload.message || payload;
+      if (activeTabRef.current === "groups" && selectedGroupRef.current && normalizeGroupMessage(messagePayload).groupId === selectedGroupRef.current) {
+        applyGroupDeleted(messagePayload);
+      }
     };
 
     const handleGroupCreated = (payload = {}) => {
@@ -641,11 +772,14 @@ const Chat = () => {
     socket.io.on("reconnect", handleReconnect);
     socket.on("receive_message", handleReceiveMessage);
     socket.on("message:delivery", handleDeliveryUpdate);
+    socket.on("message:deleted", handleDirectDeleted);
     socket.on("typing", handleTyping);
     socket.on("receive_group_message", handleGroupMessage);
     socket.on("group:created", handleGroupCreated);
     socket.on("group:member-joined", handleGroupMembership);
     socket.on("group:member-left", handleGroupMembership);
+    socket.on("group:updated", handleGroupMembership);
+    socket.on("group:message_deleted", handleGroupDeleted);
     socket.on("global:stats", handleStats);
 
     // Initial registration on connection
@@ -661,11 +795,14 @@ const Chat = () => {
       socket.io.off("reconnect", handleReconnect);
       socket.off("receive_message", handleReceiveMessage);
       socket.off("message:delivery", handleDeliveryUpdate);
+      socket.off("message:deleted", handleDirectDeleted);
       socket.off("typing", handleTyping);
       socket.off("receive_group_message", handleGroupMessage);
       socket.off("group:created", handleGroupCreated);
       socket.off("group:member-joined", handleGroupMembership);
       socket.off("group:member-left", handleGroupMembership);
+      socket.off("group:updated", handleGroupMembership);
+      socket.off("group:message_deleted", handleGroupDeleted);
       socket.off("global:stats", handleStats);
       clearTimeout(typingTimerRef.current);
       if (userIdRef.current && userRef.current?._id) {
@@ -713,13 +850,13 @@ const Chat = () => {
 
     const text = message.trim();
 
-    await sendDirectText(text);
+    await sendDirectText(text, null, directAttachments);
   };
 
-  const sendDirectText = async (text, retryMessage = null) => {
+  const sendDirectText = async (text, retryMessage = null, attachments = []) => {
     const cleanText = String(text || "").trim();
 
-    if (!cleanText || !userId || !user?._id) {
+    if ((!cleanText && !attachments.length) || !userId || !user?._id) {
       return;
     }
 
@@ -736,6 +873,13 @@ const Chat = () => {
       receiver: userId,
       message: cleanText,
       text: cleanText,
+      attachments: attachments.map((item) => ({
+        url: item.previewUrl || "",
+        name: item.name,
+        size: item.size,
+        mimeType: item.type,
+        kind: item.type?.startsWith("image/") ? "image" : "file",
+      })),
       createdAt: retryMessage?.createdAt || new Date().toISOString(),
       pending: true,
       failed: false,
@@ -747,6 +891,7 @@ const Chat = () => {
     setError("");
     if (!retryMessage) {
       setMessage("");
+      setDirectFiles([]);
     }
     clearTimeout(typingTimerRef.current);
     connectSocket(token)?.emit("typing", {
@@ -760,7 +905,7 @@ const Chat = () => {
     try {
       const socket = connectSocket(token);
 
-      if (socket?.connected) {
+      if (socket?.connected && !attachments.length) {
         socket.emit(
           "send_message",
           {
@@ -781,7 +926,18 @@ const Chat = () => {
           }
         );
       } else {
-        const { data } = await messageApi.sendDirect(userId, { message: cleanText, chatId, clientId: pendingId });
+        let data;
+        if (attachments.length) {
+          const formData = new FormData();
+          formData.set("recipientId", userId);
+          formData.set("chatId", chatId);
+          formData.set("clientId", pendingId);
+          formData.set("message", cleanText);
+          attachments.forEach((item) => formData.append("attachments", item.file));
+          ({ data } = await messageApi.sendDirectWithAttachments(formData));
+        } else {
+          ({ data } = await messageApi.sendDirect(userId, { message: cleanText, chatId, clientId: pendingId }));
+        }
         appendDirectMessage(data.chatMessage || data.inboxMessage);
       }
     } catch (requestError) {
@@ -799,11 +955,11 @@ const Chat = () => {
   const handleGroupSend = async (event) => {
     event.preventDefault();
 
-    await sendGroupText(groupMessage);
+    await sendGroupText(groupMessage, null, groupAttachments);
   };
 
-  const sendGroupText = async (value, retryMessage = null) => {
-    if (!String(value || "").trim() || !selectedGroup || !selectedGroupIsMember) {
+  const sendGroupText = async (value, retryMessage = null, attachments = []) => {
+    if ((!String(value || "").trim() && !attachments.length) || !selectedGroup || !selectedGroupIsMember) {
       return;
     }
 
@@ -817,6 +973,13 @@ const Chat = () => {
       sender: user,
       senderId: user?._id,
       message: text,
+      attachments: attachments.map((item) => ({
+        url: item.previewUrl || "",
+        name: item.name,
+        size: item.size,
+        mimeType: item.type,
+        kind: item.type?.startsWith("image/") ? "image" : "file",
+      })),
       createdAt: retryMessage?.createdAt || new Date().toISOString(),
       pending: true,
       failed: false,
@@ -824,6 +987,7 @@ const Chat = () => {
     });
     if (!retryMessage) {
       setGroupMessage("");
+      setGroupFiles([]);
     }
     setSending(true);
     setStatus("");
@@ -832,7 +996,7 @@ const Chat = () => {
     try {
       const socket = connectSocket(token);
 
-      if (socket?.connected) {
+      if (socket?.connected && !attachments.length) {
         socket.emit("send_group_message", { groupId: selectedGroup, senderId: user?._id, clientId: pendingId, message: text }, (response) => {
           if (response?.success && response.data) {
             appendGroupMessage(response.data);
@@ -843,7 +1007,16 @@ const Chat = () => {
           }
         });
       } else {
-        const { data } = await groupChatApi.send(selectedGroup, { message: text, clientId: pendingId });
+        let data;
+        if (attachments.length) {
+          const formData = new FormData();
+          formData.set("clientId", pendingId);
+          formData.set("message", text);
+          attachments.forEach((item) => formData.append("attachments", item.file));
+          ({ data } = await groupChatApi.sendWithAttachments(selectedGroup, formData));
+        } else {
+          ({ data } = await groupChatApi.send(selectedGroup, { message: text, clientId: pendingId }));
+        }
         if (data?.groupMessage) {
           appendGroupMessage(data.groupMessage);
         }
@@ -858,6 +1031,86 @@ const Chat = () => {
 
   const retryGroupMessage = (item) => {
     sendGroupText(item.message, item);
+  };
+
+  const applyDirectDeleted = (nextMessage) => {
+    const normalized = normalizeSocketMessage(nextMessage);
+    setMessages((current) =>
+      current.map((item) =>
+        messageKey(item) === messageKey(normalized) || item._id === normalized._id
+          ? { ...item, ...normalized, message: "This message was deleted", text: "This message was deleted", attachments: [], deletedAt: normalized.deletedAt || new Date().toISOString() }
+          : item
+      )
+    );
+  };
+
+  const applyGroupDeleted = (nextMessage) => {
+    const normalized = normalizeGroupMessage(nextMessage);
+    setGroupMessages((current) =>
+      current.map((item) =>
+        groupMessageKey(item) === groupMessageKey(normalized) || item._id === normalized._id
+          ? { ...item, ...normalized, message: "This message was deleted", attachments: [], deletedAt: normalized.deletedAt || new Date().toISOString() }
+          : item
+      )
+    );
+  };
+
+  const handleDeleteDirectMessage = async (item) => {
+    if (!item?._id || item.pending || item.deletedAt || !window.confirm("Delete this message?")) {
+      return;
+    }
+
+    const previous = messages;
+    applyDirectDeleted({ ...item, deletedAt: new Date().toISOString() });
+
+    try {
+      const socket = connectSocket(token);
+      if (socket?.connected) {
+        socket.emit("message:delete", { messageId: item._id }, (response) => {
+          if (response?.success && response.data) {
+            applyDirectDeleted(response.data);
+          } else if (response && !response.success) {
+            setMessages(previous);
+            setError(response.message || "Unable to delete message.");
+          }
+        });
+      } else {
+        const { data } = await messageApi.delete(item._id);
+        applyDirectDeleted(data.chatMessage || data.inboxMessage || item);
+      }
+    } catch (requestError) {
+      setMessages(previous);
+      setError(requestMessage(requestError, "Unable to delete message."));
+    }
+  };
+
+  const handleDeleteGroupMessage = async (item) => {
+    if (!selectedGroup || !item?._id || item.pending || item.deletedAt || !window.confirm("Delete this message?")) {
+      return;
+    }
+
+    const previous = groupMessages;
+    applyGroupDeleted({ ...item, deletedAt: new Date().toISOString() });
+
+    try {
+      const socket = connectSocket(token);
+      if (socket?.connected) {
+        socket.emit("group:message_delete", { groupId: selectedGroup, messageId: item._id }, (response) => {
+          if (response?.success && response.data) {
+            applyGroupDeleted(response.data);
+          } else if (response && !response.success) {
+            setGroupMessages(previous);
+            setError(response.message || "Unable to delete message.");
+          }
+        });
+      } else {
+        const { data } = await groupChatApi.deleteMessage(selectedGroup, item._id);
+        applyGroupDeleted(data.groupMessage || item);
+      }
+    } catch (requestError) {
+      setGroupMessages(previous);
+      setError(requestMessage(requestError, "Unable to delete message."));
+    }
   };
 
   const handleCreateGroup = async (event) => {
@@ -982,6 +1235,61 @@ const Chat = () => {
     }
   };
 
+  const refreshSelectedGroup = async () => {
+    await loadGroups({ silent: true });
+    if (selectedGroup) {
+      await loadGroupMessages(selectedGroup, { silent: true, force: true });
+    }
+  };
+
+  const handleRoleChange = async (member, role) => {
+    const memberId = idOf(member);
+    if (!selectedGroup || !memberId) {
+      return;
+    }
+
+    setGroupActionLoading(`role:${memberId}`);
+    setError("");
+
+    try {
+      const { data } = await groupChatApi.updateRole(selectedGroup, memberId, { role });
+      if (data?.group) {
+        setGroups((current) => current.map((item) => (item._id === data.group._id ? data.group : item)));
+      }
+      setStatus(data?.message || "Role updated.");
+    } catch (requestError) {
+      setError(requestMessage(requestError, "Unable to update role."));
+    } finally {
+      setGroupActionLoading("");
+    }
+  };
+
+  const handleRemoveMember = async (member) => {
+    const memberId = idOf(member);
+    if (!selectedGroup || !memberId || !window.confirm(`Remove ${member.name || "this member"}?`)) {
+      return;
+    }
+
+    setGroupActionLoading(`remove:${memberId}`);
+    setError("");
+
+    try {
+      const { data } = await groupChatApi.removeMember(selectedGroup, memberId);
+      if (data?.group) {
+        setGroups((current) => current.map((item) => (item._id === data.group._id ? data.group : item)));
+      }
+      if (data?.groupMessage) {
+        appendGroupMessage(data.groupMessage);
+      }
+      setStatus(data?.message || "Member removed.");
+      await refreshSelectedGroup();
+    } catch (requestError) {
+      setError(requestMessage(requestError, "Unable to remove member."));
+    } finally {
+      setGroupActionLoading("");
+    }
+  };
+
   const handlePayAccess = async () => {
     setStatus("");
     setError("");
@@ -997,6 +1305,8 @@ const Chat = () => {
 
   const selectedGroupInfo = groups.find((item) => item._id === selectedGroup);
   const selectedGroupIsMember = selectedGroupInfo ? selectedGroupInfo.isMember !== false : false;
+  const viewerGroupRole = selectedGroupInfo?.viewerRole || roleForMember(selectedGroupInfo, user?._id);
+  const viewerCanModerate = ["owner", "moderator"].includes(viewerGroupRole);
   const selectedGroupMembers = new Set((selectedGroupInfo?.members || []).map(idOf));
   const selectedGroupPendingInvites = new Set((selectedGroupInfo?.pendingInvites || []).map(idOf));
   const memberSearch = groupMemberSearch.trim().toLowerCase();
@@ -1090,11 +1400,19 @@ const Chat = () => {
                         {!isMine && <Avatar profile={senderProfile} />}
                         <div className={`max-w-[78%] ${isMine ? "items-end" : "items-start"} flex flex-col`}>
                           <div className={`rounded-2xl px-3 py-2 ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}>
-                            <p className="whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
+                            <p className={`whitespace-pre-line break-words text-sm leading-6 ${item.deletedAt ? "italic opacity-70" : ""}`}>{item.message}</p>
+                            {!item.deletedAt && <LinkPreview text={item.message} />}
+                            <AttachmentList attachments={item.attachments || []} />
                           </div>
                           <p className="mt-1 flex items-center gap-2 truncate px-1 text-[11px] font-semibold text-slate-400">
                             <span>{formatTime(item.createdAt)}</span>
                             {isMine && <DeliveryState status={state} failed={item.failed} onRetry={() => retryDirectMessage(item)} />}
+                            {isMine && !item.deletedAt && !item.pending && (
+                              <button type="button" className="inline-flex items-center gap-1 text-red-500 hover:text-red-700" onClick={() => handleDeleteDirectMessage(item)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Delete
+                              </button>
+                            )}
                           </p>
                         </div>
                         {isMine && <Avatar profile={senderProfile} />}
@@ -1108,7 +1426,32 @@ const Chat = () => {
                 <div ref={bottomRef} />
               </div>
 
-              <form className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleSend}>
+              <form className="sticky bottom-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleSend}>
+                {directAttachments.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {directAttachments.map((item) => (
+                      <span key={item.name} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-surface px-2 py-1 text-xs font-bold text-slate-600">
+                        {item.previewUrl ? <img src={item.previewUrl} alt="" className="h-8 w-8 rounded object-cover" /> : <FileText className="h-4 w-4" />}
+                        <span className="max-w-40 truncate">{item.name}</span>
+                        <button type="button" onClick={() => setDirectFiles([])} aria-label="Remove attachment">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                <input
+                  ref={directFileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/markdown"
+                  multiple
+                  onChange={(event) => setDirectFiles(event.target.files)}
+                />
+                <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-slate-600 transition hover:text-navy" onClick={() => directFileInputRef.current?.click()} aria-label="Attach file">
+                  <Paperclip className="h-4 w-4" />
+                </button>
                 <input
                   className="field min-h-10 flex-1 rounded-full px-4 py-2"
                   value={message}
@@ -1138,9 +1481,10 @@ const Chat = () => {
                   }}
                   placeholder="Write a message"
                 />
-                <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || !message.trim()} aria-label="Send message">
+                <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || (!message.trim() && !directAttachments.length)} aria-label="Send message">
                   {sending ? <Clock3 className="h-4 w-4" /> : <Send className="h-4 w-4" />}
                 </button>
+                </div>
               </form>
             </>
           ) : (
@@ -1305,6 +1649,58 @@ const Chat = () => {
                   Active now: {selectedGroupInfo.activeUsers.map((member) => member.name || "Member").join(", ")}
                 </p>
               ) : null}
+              {selectedGroupInfo?.members?.length ? (
+                <div className="mt-3 rounded-lg border border-slate-100 bg-surface p-2">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-xs font-black uppercase tracking-wide text-slate-500">Members</p>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-500">{viewerGroupRole}</span>
+                  </div>
+                  <div className="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                    {selectedGroupInfo.members.map((member) => {
+                      const memberId = idOf(member);
+                      const memberRole = roleForMember(selectedGroupInfo, memberId);
+                      const canPromote = viewerGroupRole === "owner" && memberRole !== "owner";
+                      const canRemove =
+                        memberId !== user?._id &&
+                        ((viewerGroupRole === "owner" && memberRole !== "owner") || (viewerGroupRole === "moderator" && memberRole === "member"));
+
+                      return (
+                        <div key={memberId} className="flex min-w-0 items-center gap-2 rounded-lg bg-white p-2">
+                          <Avatar profile={member} size="h-8 w-8" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-black text-navy">{member.name || member.username || "Member"}</span>
+                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black capitalize text-slate-500">
+                              {memberRole !== "member" && <ShieldCheck className="h-3 w-3" />}
+                              {memberRole}
+                            </span>
+                          </span>
+                          {canPromote && (
+                            <button
+                              type="button"
+                              className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black text-navy disabled:opacity-50"
+                              onClick={() => handleRoleChange(member, memberRole === "moderator" ? "member" : "moderator")}
+                              disabled={groupActionLoading === `role:${memberId}`}
+                            >
+                              {memberRole === "moderator" ? "Demote" : "Mod"}
+                            </button>
+                          )}
+                          {canRemove && (
+                            <button
+                              type="button"
+                              className="rounded-md bg-red-50 p-1.5 text-red-600 disabled:opacity-50"
+                              onClick={() => handleRemoveMember(member)}
+                              disabled={groupActionLoading === `remove:${memberId}`}
+                              aria-label="Remove member"
+                            >
+                              <UserMinus className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div className="h-[calc(100dvh-22rem)] min-h-80 space-y-3 overflow-y-auto scroll-smooth p-3 sm:h-[520px] sm:p-4">
               {!selectedGroup ? (
@@ -1352,11 +1748,19 @@ const Chat = () => {
                           >
                             {item.sender?.name || "User"}
                           </button>
-                          <p className="mt-1 whitespace-pre-line break-words text-sm leading-6">{item.message}</p>
+                          <p className={`mt-1 whitespace-pre-line break-words text-sm leading-6 ${item.deletedAt ? "italic opacity-70" : ""}`}>{item.message}</p>
+                          {!item.deletedAt && <LinkPreview text={item.message} />}
+                          <AttachmentList attachments={item.attachments || []} />
                         </div>
                         <p className="mt-1 flex items-center gap-2 truncate px-1 text-[11px] font-semibold text-slate-400">
                           <span>{formatTime(item.createdAt)}</span>
                           {isMine && <DeliveryState status={messageStatus(item)} failed={item.failed} onRetry={() => retryGroupMessage(item)} />}
+                          {(isMine || viewerCanModerate) && !item.deletedAt && !item.pending && (
+                            <button type="button" className="inline-flex items-center gap-1 text-red-500 hover:text-red-700" onClick={() => handleDeleteGroupMessage(item)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Delete
+                            </button>
+                          )}
                         </p>
                       </div>
                       {isMine && <Avatar profile={user} />}
@@ -1376,7 +1780,32 @@ const Chat = () => {
               )}
               <div ref={groupBottomRef} />
             </div>
-            <form className="sticky bottom-0 flex items-center gap-2 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
+            <form className="sticky bottom-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
+              {groupAttachments.length > 0 && (
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {groupAttachments.map((item) => (
+                    <span key={item.name} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-surface px-2 py-1 text-xs font-bold text-slate-600">
+                      {item.previewUrl ? <img src={item.previewUrl} alt="" className="h-8 w-8 rounded object-cover" /> : <FileText className="h-4 w-4" />}
+                      <span className="max-w-40 truncate">{item.name}</span>
+                      <button type="button" onClick={() => setGroupFiles([])} aria-label="Remove attachment">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+              <input
+                ref={groupFileInputRef}
+                type="file"
+                className="hidden"
+                accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain,text/markdown"
+                multiple
+                onChange={(event) => setGroupFiles(event.target.files)}
+              />
+              <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-slate-600 transition hover:text-navy disabled:opacity-50" onClick={() => groupFileInputRef.current?.click()} disabled={!selectedGroup || !selectedGroupIsMember} aria-label="Attach file">
+                <Paperclip className="h-4 w-4" />
+              </button>
               <input
                 className="field min-h-10 flex-1 rounded-full px-4 py-2"
                 value={groupMessage}
@@ -1384,9 +1813,10 @@ const Chat = () => {
                 placeholder={selectedGroupIsMember ? "Write a group message" : "Join the group to chat"}
                 disabled={!selectedGroup || !selectedGroupIsMember}
               />
-              <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || !groupMessage.trim() || !selectedGroup || !selectedGroupIsMember} aria-label="Send group message">
+              <button type="submit" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand text-navy shadow-sm transition hover:bg-green-400 disabled:opacity-50" disabled={sending || (!groupMessage.trim() && !groupAttachments.length) || !selectedGroup || !selectedGroupIsMember} aria-label="Send group message">
                 {sending ? <Clock3 className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </button>
+              </div>
             </form>
           </div>
         </div>

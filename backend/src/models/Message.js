@@ -1,6 +1,39 @@
 // @ts-nocheck
 const mongoose = require("mongoose");
 
+const attachmentSchema = new mongoose.Schema(
+  {
+    url: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+    name: {
+      type: String,
+      trim: true,
+      maxlength: 180,
+      default: "",
+    },
+    size: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: "",
+    },
+    kind: {
+      type: String,
+      enum: ["image", "file", "link"],
+      default: "file",
+    },
+  },
+  { _id: false }
+);
+
 const messageSchema = new mongoose.Schema(
   {
     chatId: {
@@ -50,7 +83,7 @@ const messageSchema = new mongoose.Schema(
     message: {
       type: String,
       trim: true,
-      required: true,
+      default: "",
     },
     text: {
       type: String,
@@ -87,6 +120,22 @@ const messageSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    attachments: {
+      type: [attachmentSchema],
+      default: [],
+    },
+    deletedAt: {
+      type: Date,
+    },
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    deletedReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
   {
     timestamps: true,

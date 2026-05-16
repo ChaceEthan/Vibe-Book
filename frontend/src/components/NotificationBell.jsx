@@ -113,7 +113,9 @@ export function NotificationBell() {
         setUnreadCount(Number(detail.unreadCount || 0));
       }
 
-      if (detail.allRead) {
+      if (detail.cleared) {
+        setNotifications([]);
+      } else if (detail.allRead) {
         setNotifications((current) => current.map((item) => ({ ...item, read: true })));
       } else if (detail.readId) {
         setNotifications((current) => current.map((item) => (item._id === detail.readId ? { ...item, read: true } : item)));
@@ -251,6 +253,20 @@ export function NotificationBell() {
     }
   };
 
+  const clearAllNotifications = async () => {
+    const previous = notifications;
+    setNotifications([]);
+    setUnreadCount(0);
+    broadcastNotificationSync({ unreadCount: 0, allRead: true, cleared: true });
+
+    try {
+      await notificationApi.clearAll();
+    } catch {
+      setNotifications(previous);
+      fetchNotifications();
+    }
+  };
+
   const openNotification = (notification) => {
     markAsRead(notification);
     setOpen(false);
@@ -264,7 +280,7 @@ export function NotificationBell() {
     const verified = actorVerified(actor);
 
     return (
-      <article className={`rounded-xl border p-2.5 transition duration-200 hover:-translate-y-0.5 hover:shadow-md ${notification.read ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"}`}>
+      <article className={`rounded-xl border p-3 transition duration-200 hover:-translate-y-0.5 hover:shadow-md ${notification.read ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"}`}>
         <div className="flex items-start gap-3">
           <div className="relative h-10 w-10 shrink-0">
             <div className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${notification.read ? "bg-slate-100 text-slate-600" : "bg-blue-100 text-blue-700"}`}>
@@ -275,12 +291,12 @@ export function NotificationBell() {
 
           <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openNotification(notification)}>
             <div className="flex items-start justify-between gap-2">
-              <p className="truncate text-sm font-black text-slate-900">{notification.title || "Notification"}</p>
+              <p className="line-clamp-1 text-sm font-black text-slate-900">{notification.title || "Notification"}</p>
               {!notification.read && <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-600" />}
             </div>
             {actor?.username || actor?.name ? <p className="mt-0.5 truncate text-xs font-black text-slate-500">@{actor.username || actor.name}</p> : null}
             <p className="mt-1 line-clamp-2 text-sm leading-5 text-slate-600">{notification.message || "Open VibeBook to view this update."}</p>
-            <p className="mt-1 text-xs font-semibold text-slate-400">{relativeNotificationTime(notification.createdAt)}</p>
+            <p className="mt-2 text-xs font-semibold text-slate-400">{relativeNotificationTime(notification.createdAt)}</p>
           </button>
 
           <button
@@ -360,6 +376,16 @@ export function NotificationBell() {
                   disabled={unreadCount === 0}
                 >
                   <CheckCheck className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg p-2 text-slate-600 transition duration-200 hover:bg-red-50 hover:text-red-600 disabled:opacity-40"
+                  onClick={clearAllNotifications}
+                  aria-label="Clear all notifications"
+                  title="Clear all"
+                  disabled={!notifications.length}
+                >
+                  <X className="h-4 w-4" />
                 </button>
                 <button
                   type="button"

@@ -124,6 +124,21 @@ const deleteNotification = async (req, res, next) => {
   }
 };
 
+const clearNotifications = async (req, res, next) => {
+  try {
+    const result = await Notification.deleteMany({ userId: req.user._id });
+
+    return res.json({
+      deleted: result.deletedCount,
+      unreadCount: 0,
+      message: "Notifications cleared",
+    });
+  } catch (error) {
+    console.error("[notification:clear-all]", error);
+    return next(error);
+  }
+};
+
 const getUnreadCount = async (req, res, next) => {
   try {
     const unreadCount = await Notification.countDocuments({ userId: req.user._id, read: false });
@@ -156,6 +171,7 @@ const createNotification = async (userIdOrPayload, type, title, message, actorId
 };
 
 module.exports = {
+  clearNotifications,
   createNotification,
   deleteNotification,
   getNotifications,

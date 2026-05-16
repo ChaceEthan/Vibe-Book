@@ -23,6 +23,16 @@ const chatGroupSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
     },
+    owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    moderators: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
     members: [
       {
         type: mongoose.Schema.Types.ObjectId,
@@ -80,11 +90,25 @@ chatGroupSchema.methods.syncGroupAliases = function () {
     this.adminId = this.createdBy;
   }
 
+  if (!this.owner && (this.createdBy || this.adminId)) {
+    this.owner = this.createdBy || this.adminId;
+  }
+
+  if (!this.createdBy && this.owner) {
+    this.createdBy = this.owner;
+  }
+
   if (!Array.isArray(this.members)) {
     this.members = [];
   }
 
   this.members = Array.from(new Set(this.members.map(idOf).filter(Boolean)));
+  if (this.owner && !this.members.some((memberId) => memberId === idOf(this.owner))) {
+    this.members.unshift(idOf(this.owner));
+  }
+  this.moderators = Array.from(new Set((this.moderators || []).map(idOf).filter(Boolean))).filter(
+    (memberId) => memberId !== idOf(this.owner) && this.members.includes(memberId)
+  );
   this.pendingInvites = Array.from(new Set((this.pendingInvites || []).map(idOf).filter(Boolean)));
 };
 

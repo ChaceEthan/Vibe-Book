@@ -12,6 +12,46 @@ const {
 
 const trimText = (value) => (typeof value === "string" ? value.trim() : "");
 const getMessageText = (body = {}) => trimText(body.message || body.text);
+const safeUrl = (value = "") => {
+  const url = trimText(value).slice(0, 500);
+
+  if (!url) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(url);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+};
+
+const attachmentFromFile = (file = {}) => ({
+  url: file.secure_url || file.path || "",
+  name: String(file.originalname || file.filename || "Attachment").slice(0, 180),
+  size: Number(file.size || 0),
+  mimeType: file.detected_mimetype || file.mimetype || "",
+  kind: String(file.detected_mimetype || file.mimetype || "").startsWith("image/") ? "image" : "file",
+});
+
+const attachmentsFromRequest = (req) => {
+  const files = Array.isArray(req.files) ? req.files : [];
+  const uploaded = files.map(attachmentFromFile).filter((attachment) => attachment.url);
+  const link = safeUrl(req.body?.link || req.body?.url);
+
+  if (link) {
+    uploaded.push({
+      url: link,
+      name: link.replace(/^https?:\/\//i, "").slice(0, 180),
+      size: 0,
+      mimeType: "text/uri-list",
+      kind: "link",
+    });
+  }
+
+  return uploaded.slice(0, 4);
+};
 
 const queueNotification = (payload) => {
   createNotification(payload).catch((error) => {
@@ -131,8 +171,11 @@ const serializeRealtimeMessage = (message) => ({
   clientId: message.clientId,
   senderId: message.senderId || idOf(message.sender),
   receiverId: message.receiverId || idOf(message.recipient || message.receiver),
-  message: message.message,
-  text: message.text || message.message,
+  message: message.deletedAt ? "This message was deleted" : message.message,
+  text: message.deletedAt ? "This message was deleted" : message.text || message.message,
+  attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  deletedAt: message.deletedAt,
+  deletedBy: message.deletedBy,
   createdAt: message.createdAt,
   deliveredAt: message.deliveredAt,
   readAt: message.readAt,
@@ -246,8 +289,9 @@ const getConversation = async (req, res, next) => {
 const sendDirectMessage = async (req, res, next) => {
   try {
     const text = getMessageText(req.body);
+    const attachments = attachmentsFromRequest(req);
 
-    if (!text) {
+    if (!text && !attachments.length) {
       return res.status(400).json({ message: "Message is required" });
     }
 
@@ -285,6 +329,7 @@ const sendDirectMessage = async (req, res, next) => {
       subject: "VibeBook chat",
       message: text,
       text,
+      attachments,
       type: "reply",
       deliveryStatus: recipientOnline ? "delivered" : "sent",
       deliveredAt: recipientOnline ? new Date() : undefined,
@@ -447,6 +492,49 @@ const replyToMessage = async (req, res, next) => {
   }
 };
 
+const deleteMessage = async (req, res, next) => {
+  try {
+    if (!requireMessageAccess(req, res)) {
+      return null;
+    }
+
+    const message = await populateMessage(
+      Message.findOne({
+        _id: req.params.id,
+        ...participantFilter(req.user._id),
+        isDraft: false,
+      })
+    );
+
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    if (idOf(message.sender) !== idOf(req.user._id)) {
+      return res.status(403).json({ message: "You can only delete messages you sent" });
+    }
+
+    message.deletedAt = message.deletedAt || new Date();
+    message.deletedBy = req.user._id;
+    message.deletedReason = "sender";
+    message.message = "This message was deleted";
+    message.text = "This message was deleted";
+    message.attachments = [];
+    await message.save();
+
+    const realtimeMessage = serializeRealtimeMessage(message);
+    const io = getIo();
+
+    io?.to(idOf(message.sender)).emit("message:deleted", realtimeMessage);
+    io?.to(idOf(message.recipient || message.receiver)).emit("message:deleted", realtimeMessage);
+    await emitUnreadCount(idOf(message.recipient || message.receiver));
+
+    return res.json({ chatMessage: message, inboxMessage: message, message: "Message deleted" });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const markMessageRead = async (req, res, next) => {
   try {
     if (!requireMessageAccess(req, res)) {
@@ -589,6 +677,7 @@ const updateDraft = async (req, res, next) => {
 };
 
 module.exports = {
+  deleteMessage,
   getDrafts,
   getInbox,
   getConversation,
