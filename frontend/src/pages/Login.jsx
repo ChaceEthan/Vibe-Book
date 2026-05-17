@@ -13,7 +13,7 @@ const Login = () => {
   const navigate = useNavigate();
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const handleChange = (event) => {
@@ -28,7 +28,7 @@ const Login = () => {
     try {
       const identifier = form.email.trim();
       await login({ ...form, email: identifier, identifier });
-      navigate("/dashboard", { replace: true });
+      navigate("/", { replace: true });
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, "Login failed. Please check your details."));
     } finally {

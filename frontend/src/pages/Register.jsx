@@ -2,6 +2,7 @@
 import {
   AtSign,
   CalendarDays,
+  Camera,
   Loader2,
   LockKeyhole,
   Mail,
@@ -9,9 +10,10 @@ import {
   QrCode,
   ShieldCheck,
   UserRound,
+  X,
 } from "lucide-react";
-import { Html5QrcodeScanner } from "html5-qrcode";
-import { useEffect, useState } from "react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { useAuth } from "../context/AuthContext.jsx";
@@ -51,16 +53,33 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const usernamePattern = /^[a-z0-9_][a-z0-9_-]{2,29}$/;
 const isAbortError = (error) => error?.code === "ERR_CANCELED" || error?.name === "CanceledError" || error?.name === "AbortError";
 const today = () => new Date().toISOString().slice(0, 10);
+const sanitizeReferralCode = (value = "") => String(value || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
 const extractReferralCode = (value = "") => {
   const raw = String(value || "").trim();
   if (!raw) return "";
+  const paramMatch = raw.match(/[?&](?:ref|referralCode)=([^&#\s]+)/i) || raw.match(/^(?:ref|referralCode)=([^&#\s]+)/i);
 
-  try {
-    const url = new URL(raw);
-    return String(url.searchParams.get("ref") || url.searchParams.get("referralCode") || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
-  } catch {
-    return raw.replace(/^ref=/i, "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
+  if (paramMatch?.[1]) {
+    try {
+      return sanitizeReferralCode(decodeURIComponent(paramMatch[1]));
+    } catch {
+      return sanitizeReferralCode(paramMatch[1]);
+    }
   }
+
+  const looksLikeUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || /^www\./i.test(raw) || /^[\w.-]+\.[a-z]{2,}(?:[/:?]|$)/i.test(raw);
+
+  if (looksLikeUrl) {
+    try {
+      const normalized = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw.replace(/^\/+/, "")}`;
+      const url = new URL(normalized);
+      return sanitizeReferralCode(url.searchParams.get("ref") || url.searchParams.get("referralCode") || "");
+    } catch {
+      return "";
+    }
+  }
+
+  return sanitizeReferralCode(raw.replace(/^#?ref(?:erralCode)?[:=\s-]*/i, ""));
 };
 
 const statusClass = (status) => {
@@ -86,7 +105,11 @@ const Register = () => {
   const [submitting, setSubmitting] = useState(false);
   const [availability, setAvailability] = useState(emptyAvailability);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerError, setScannerError] = useState("");
+  const [referralLocked, setReferralLocked] = useState(false);
+  const [referralSource, setReferralSource] = useState("");
   const navigate = useNavigate();
+  const referralParam = searchParams.get("ref") || searchParams.get("referralCode") || "";
 
   const contactValue = form.contactMethod === "email" ? form.email.trim().toLowerCase() : form.phoneNumber;
   const contactAvailability = form.contactMethod === "email" ? availability.email : availability.phone;
@@ -114,38 +137,111 @@ const Register = () => {
     contactAvailability.status !== "taken" &&
     contactAvailability.status !== "invalid";
 
-  useEffect(() => {
-    const ref = extractReferralCode(searchParams.get("ref") || searchParams.get("referralCode") || "");
-    if (ref) {
-      setForm((current) => ({ ...current, referralCode: ref }));
+  const applyReferralCode = useCallback((value, source = "manual") => {
+    const code = extractReferralCode(value);
+
+    if (!code) {
+      return false;
     }
-  }, [searchParams]);
+
+    setForm((current) => ({ ...current, referralCode: code }));
+    setReferralLocked(source !== "manual");
+    setReferralSource(source);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    const ref = extractReferralCode(referralParam);
+    if (ref) {
+      applyReferralCode(ref, "link");
+      setStatus("Invite applied.");
+    }
+  }, [applyReferralCode, referralParam]);
 
   useEffect(() => {
     if (!scannerOpen) return undefined;
 
-    const scanner = new Html5QrcodeScanner(
-      "referral-qr-reader",
-      { fps: 10, qrbox: { width: 220, height: 220 }, rememberLastUsedCamera: true },
-      false
-    );
+    let active = true;
+    let started = false;
+    const scanner = new Html5Qrcode("referral-qr-reader", {
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      verbose: false,
+    });
 
-    scanner.render(
-      (decodedText) => {
-        const code = extractReferralCode(decodedText);
-        if (code) {
-          setForm((current) => ({ ...current, referralCode: code }));
-          setStatus("Referral code applied from QR.");
-          setScannerOpen(false);
+    const stopScanner = async () => {
+      try {
+        if (started) {
+          await scanner.stop();
         }
-      },
-      () => undefined
-    );
+        await scanner.clear();
+      } catch {
+        // Camera cleanup is best-effort.
+      }
+    };
+
+    setScannerError("");
+
+    Html5Qrcode.getCameras()
+      .then((cameras) => {
+        if (!active) {
+          return undefined;
+        }
+
+        if (!Array.isArray(cameras) || !cameras.length) {
+          throw new Error("NO_CAMERA");
+        }
+
+        const preferredCamera = cameras.find((camera) => /back|rear|environment/i.test(camera.label || "")) || cameras[0];
+
+        return scanner
+          .start(
+            { deviceId: { exact: preferredCamera.id } },
+            {
+              fps: 10,
+              aspectRatio: 1,
+              qrbox: (width, height) => {
+                const size = Math.floor(Math.min(width, height) * 0.72);
+                return { width: Math.max(180, size), height: Math.max(180, size) };
+              },
+            },
+            (decodedText) => {
+              const applied = applyReferralCode(decodedText, "qr");
+
+              if (!applied) {
+                setScannerError("That QR code does not contain a VibeBook referral code.");
+                return;
+              }
+
+              setStatus("Invite applied from QR.");
+              setScannerError("");
+              setScannerOpen(false);
+            },
+            () => undefined
+          )
+          .then(() => {
+            started = true;
+            if (!active) {
+              stopScanner();
+            }
+          });
+      })
+      .catch((scanError) => {
+        if (!active) {
+          return;
+        }
+
+        setScannerError(
+          scanError?.message === "NO_CAMERA"
+            ? "No camera was found on this device."
+            : "Camera permission is needed to scan a referral QR code."
+        );
+      });
 
     return () => {
-      scanner.clear().catch(() => undefined);
+      active = false;
+      stopScanner();
     };
-  }, [scannerOpen]);
+  }, [applyReferralCode, scannerOpen]);
 
   useEffect(() => {
     const username = cleanUsername(form.username);
@@ -289,12 +385,18 @@ const Register = () => {
   }, [form.contactMethod, form.country, form.countryCode, form.phoneNumber]);
 
   if (isAuthenticated) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const updateField = (name, value) => {
     setError("");
     setStatus("");
+    const manualReferralCode = name === "referralCode" ? extractReferralCode(value).replace(/\s+/g, "") : "";
+
+    if (name === "referralCode") {
+      setReferralLocked(false);
+      setReferralSource(manualReferralCode ? "manual" : "");
+    }
 
     setForm((current) => {
       if (name === "country") {
@@ -315,11 +417,19 @@ const Register = () => {
       }
 
       if (name === "referralCode") {
-        return { ...current, referralCode: extractReferralCode(value).replace(/\s+/g, "") };
+        return { ...current, referralCode: manualReferralCode };
       }
 
       return { ...current, [name]: value };
     });
+  };
+
+  const clearReferralCode = () => {
+    setError("");
+    setStatus("");
+    setReferralLocked(false);
+    setReferralSource("");
+    setForm((current) => ({ ...current, referralCode: "" }));
   };
 
   const validateForm = () => {
@@ -373,7 +483,7 @@ const Register = () => {
         acceptedTerms: true,
         referralCode: form.referralCode,
       });
-      navigate("/dashboard", { replace: true });
+      navigate("/", { replace: true });
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Registration failed. Please review your details.");
       setSuggestions(requestError.response?.data?.suggestions || []);
@@ -533,23 +643,54 @@ const Register = () => {
             <ValidationLine state={birthdayState} />
           </label>
 
-          <label className="space-y-2">
-            <span className="label">Referral code</span>
-            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-              <input
-                className="field"
-                name="referralCode"
-                value={form.referralCode}
-                onChange={(event) => updateField("referralCode", event.target.value)}
-                placeholder="Optional invite code"
-                autoComplete="off"
-              />
-              <button type="button" className="btn-secondary gap-2 py-3" onClick={() => setScannerOpen(true)}>
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="label">Referral code</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400">Optional invite reward code.</p>
+              </div>
+              {form.referralCode && referralSource !== "manual" ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-100 px-2.5 py-1 text-[11px] font-black uppercase text-green-700 dark:bg-green-500/15 dark:text-green-300">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  {referralSource === "qr" ? "QR applied" : "Invite applied"}
+                </span>
+              ) : null}
+            </div>
+            <div className="mt-3 grid gap-2">
+              <div className="flex rounded-xl border border-slate-200 bg-white transition focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/20 dark:border-slate-700 dark:bg-slate-950">
+                <input
+                  className="min-w-0 flex-1 rounded-xl border-0 bg-transparent px-3 py-3 text-sm font-bold uppercase tracking-[0.08em] text-slate-900 outline-none placeholder:normal-case placeholder:font-semibold placeholder:tracking-normal placeholder:text-slate-400 read-only:text-slate-600 dark:text-white dark:read-only:text-slate-300"
+                  name="referralCode"
+                  value={form.referralCode}
+                  onChange={(event) => updateField("referralCode", event.target.value)}
+                  placeholder="Optional invite code"
+                  autoComplete="off"
+                  readOnly={referralLocked}
+                />
+                {form.referralCode ? (
+                  <button
+                    type="button"
+                    className="m-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-white"
+                    onClick={clearReferralCode}
+                    aria-label="Remove referral code"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-navy transition hover:border-brand hover:bg-brand/10 active:scale-[0.99] dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:hover:border-brand"
+                onClick={() => setScannerOpen(true)}
+              >
                 <QrCode className="h-4 w-4" />
-                Scan
+                Scan referral QR
               </button>
             </div>
-          </label>
+            {referralLocked ? (
+              <p className="mt-2 text-xs font-semibold text-green-700 dark:text-green-300">This invite is preserved. Remove it to enter a different code.</p>
+            ) : null}
+          </div>
 
           <button type="submit" className="btn-primary mt-2 w-full py-3.5" disabled={submitting || !canSubmit}>
             {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />}
@@ -567,17 +708,37 @@ const Register = () => {
 
       {scannerOpen && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/70 p-3 sm:items-center">
-          <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-2xl">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl dark:bg-slate-950">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-black text-navy">Scan referral QR</h2>
-                <p className="text-sm font-semibold text-slate-500">Allow camera access and point it at a VibeBook invite code.</p>
+              <div className="min-w-0 p-4 pb-1">
+                <h2 className="flex items-center gap-2 text-lg font-black text-navy dark:text-white">
+                  <Camera className="h-5 w-5 text-brand" />
+                  Scan referral QR
+                </h2>
+                <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">Point the camera at a QR code that contains an invite code or referral link.</p>
               </div>
-              <button type="button" className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-black text-slate-600" onClick={() => setScannerOpen(false)}>
-                Close
+              <button
+                type="button"
+                className="mr-3 mt-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
+                onClick={() => setScannerOpen(false)}
+                aria-label="Close scanner"
+              >
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <div id="referral-qr-reader" className="overflow-hidden rounded-lg border border-slate-200" />
+            <div className="px-4 pb-4">
+              <div
+                id="referral-qr-reader"
+                className="min-h-[280px] overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 text-white dark:border-slate-700"
+              />
+              {scannerError ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                  {scannerError}
+                </div>
+              ) : (
+                <p className="mt-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400">QR codes only. VibeBook will not open scanned links.</p>
+              )}
+            </div>
           </div>
         </div>
       )}

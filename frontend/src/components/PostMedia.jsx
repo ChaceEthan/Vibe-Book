@@ -165,12 +165,14 @@ const PostMedia = ({
   }, []);
 
   const handleMediaError = (event) => {
-    console.error("Media failed to render:", {
-      url: src,
-      rawUrl,
-      postId: post?._id,
-      event,
-    });
+    if (import.meta.env?.DEV) {
+      console.error("Media failed to render:", {
+        url: src,
+        rawUrl,
+        postId: post?._id,
+        event,
+      });
+    }
 
     if (retryCount < 4) {
       setProcessing(isVideo);

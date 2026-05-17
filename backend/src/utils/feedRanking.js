@@ -349,6 +349,22 @@ const trendScoreFor = (post, trendMap) => {
   );
 };
 
+const newestFirstValueFor = (entry, now = Date.now()) => {
+  const created = new Date(entry?.post?.createdAt || 0).getTime();
+
+  if (!created) {
+    return 0;
+  }
+
+  const ageHours = Math.max(0, (now - created) / 36e5);
+  const isVideo = entry?.post?.type === "video" || String(entry?.post?.mediaUrl || "").includes("/video/upload/");
+  const scoreBoostMs = clamp(safeNumber(entry?.sortScore), 0, 240) * 1000;
+  const velocityBoostMs = clamp(safeNumber(entry?.ranking?.velocityScore), 0, 120) * 1500;
+  const freshVideoBoostMs = isVideo && ageHours <= 48 ? 90 * 1000 : 0;
+
+  return created + scoreBoostMs + velocityBoostMs + freshVideoBoostMs;
+};
+
 const rankingFieldsForPost = (post, options = {}) => {
   const viralScore = viralScoreFor(post);
   const trendScore = trendScoreFor(post, options.trendMap);
@@ -422,13 +438,10 @@ const rankFeedItems = (items = [], viewer = null, options = {}) => {
     })
     .sort((left, right) => {
       if (options.newestFirst) {
-        const leftCreated = new Date(left.post?.createdAt || 0).getTime();
-        const rightCreated = new Date(right.post?.createdAt || 0).getTime();
-        const leftRecent = now - leftCreated <= 12 * 60 * 60 * 1000;
-        const rightRecent = now - rightCreated <= 12 * 60 * 60 * 1000;
+        const newestDelta = newestFirstValueFor(right, now) - newestFirstValueFor(left, now);
 
-        if (leftRecent || rightRecent) {
-          return rightCreated - leftCreated;
+        if (newestDelta !== 0) {
+          return newestDelta;
         }
       }
 
@@ -450,13 +463,10 @@ const rankFeedItems = (items = [], viewer = null, options = {}) => {
     })
     .sort((left, right) => {
       if (options.newestFirst) {
-        const leftCreated = new Date(left.post?.createdAt || 0).getTime();
-        const rightCreated = new Date(right.post?.createdAt || 0).getTime();
-        const leftRecent = now - leftCreated <= 12 * 60 * 60 * 1000;
-        const rightRecent = now - rightCreated <= 12 * 60 * 60 * 1000;
+        const newestDelta = newestFirstValueFor(right, now) - newestFirstValueFor(left, now);
 
-        if (leftRecent || rightRecent) {
-          return rightCreated - leftCreated;
+        if (newestDelta !== 0) {
+          return newestDelta;
         }
       }
 

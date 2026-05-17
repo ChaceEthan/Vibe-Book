@@ -10,7 +10,7 @@ import {
   User,
   Wallet,
 } from "lucide-react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import Upload from "./Upload.jsx";
@@ -38,6 +38,7 @@ const Navbar = () => {
   const { isAuthenticated, user, token } = useAuth();
   const { language, languages, setLanguage } = useLanguage();
   const navigate = useNavigate();
+  const location = useLocation();
   const notificationCacheRef = useRef(new Map());
   const audioContextRef = useRef(null);
 
@@ -197,11 +198,17 @@ const Navbar = () => {
     setUploadOpen(true);
   };
 
+  const refreshHomeIfActive = () => {
+    if (location.pathname === "/") {
+      window.dispatchEvent(new CustomEvent("vibebook:home-refresh", { detail: { source: "home-tab" } }));
+    }
+  };
+
   return (
     <>
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
         <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
-          <Link to="/" className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+          <Link to="/" className="flex shrink-0 items-center gap-1.5 sm:gap-3" onClick={refreshHomeIfActive}>
             <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
             <span className="whitespace-nowrap text-base font-black text-navy sm:text-lg">VibeBook</span>
           </Link>
@@ -267,7 +274,7 @@ const Navbar = () => {
           {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
-              <NavLink key={item.label} to={item.to} className={navClass}>
+              <NavLink key={item.label} to={item.to} className={navClass} onClick={item.to === "/" ? refreshHomeIfActive : undefined}>
                 <Icon className="h-5 w-5" />
                 <span>{item.label}</span>
               </NavLink>

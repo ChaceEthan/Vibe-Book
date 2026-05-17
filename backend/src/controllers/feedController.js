@@ -25,7 +25,7 @@ const {
   uniqueTopics,
 } = require("../utils/feedRanking");
 
-const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt profileTheme creatorBadges marketplace creatorLevel creatorTier";
+const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt updatedAt profileTheme creatorBadges marketplace creatorLevel creatorTier";
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 30;
 
@@ -405,7 +405,7 @@ const ensureMediaPosts = async (users = []) => {
               emotion: "neutral",
               distributionStage: "test",
               comments: [],
-              createdAt: user.createdAt || new Date(),
+              createdAt: user.updatedAt || user.createdAt || new Date(),
             },
           },
           { returnDocument: "after", upsert: true, runValidators: true }

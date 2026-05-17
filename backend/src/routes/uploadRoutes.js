@@ -76,7 +76,9 @@ const sendUploadError = (res, error) => {
 
 const createFeedUpload = async (req, res, next, expectedType = null) => {
   const file = getUploadedFile(req);
-  console.log("UPLOAD FILE:", file?.originalname);
+  if (process.env.NODE_ENV !== "production") {
+    console.log("UPLOAD FILE:", file?.originalname);
+  }
 
   try {
     if (!file) {

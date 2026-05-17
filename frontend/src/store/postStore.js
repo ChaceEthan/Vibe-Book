@@ -12,13 +12,25 @@ const normalizePost = (post = {}) => {
   return url ? { ...post, url, mediaUrl: post.mediaUrl || url } : post;
 };
 const isValidPost = (post) => isRenderableMediaUrl(stablePostUrl(post));
+const timestampFor = (value) => {
+  const timestamp = new Date(value || 0).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+const isVideoPost = (post = {}) => post?.type === "video" || String(stablePostUrl(post)).includes("/video/upload/");
+const freshnessScoreFor = (post = {}) => {
+  const createdAt = timestampFor(post.createdAt);
+  const cappedEngagementBoost = Math.min(Math.max(Number(post.score || 0), 0), 180) * 1000;
+  const videoBoost = isVideoPost(post) ? 45 * 1000 : 0;
+
+  return createdAt + cappedEngagementBoost + videoBoost;
+};
 
 const newestFirst = (items) =>
   [...items].sort((left, right) => {
-    const scoreDelta = Number(right.score || 0) - Number(left.score || 0);
+    const freshnessDelta = freshnessScoreFor(right) - freshnessScoreFor(left);
 
-    if (scoreDelta !== 0) {
-      return scoreDelta;
+    if (freshnessDelta !== 0) {
+      return freshnessDelta;
     }
 
     return new Date(right.createdAt || 0) - new Date(left.createdAt || 0);

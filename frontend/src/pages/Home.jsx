@@ -4,6 +4,7 @@ import {
   Bookmark,
   Heart,
   MessageCircle,
+  RefreshCw,
   Search,
   Send,
   Share2,
@@ -175,6 +176,7 @@ const FeedItem = memo(
           loop
           autoPlay={isActive}
           controls={false}
+          preload={isActive ? "auto" : "metadata"}
           interactive
           managedPlayback
           muted={!soundEnabled}
@@ -417,6 +419,8 @@ const Home = () => {
   const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
   const [error, setError] = useState("");
   const [activePostId, setActivePostId] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(readFeedAudioPreference);
@@ -429,14 +433,24 @@ const Home = () => {
   const viewedPostsRef = useRef(new Set());
   const retryTimerRef = useRef(null);
   const retryAttemptRef = useRef(0);
+  const pullStartYRef = useRef(0);
+  const pullDistanceRef = useRef(0);
+  const isPullingRef = useRef(false);
   const navigate = useNavigate();
 
   const replaceFeedItem = useCallback((nextItem) => {
     replacePost(nextItem);
   }, [replacePost]);
 
+  const setPullProgress = useCallback((nextDistance) => {
+    const clamped = Math.max(0, Math.min(104, Number(nextDistance || 0)));
+    pullDistanceRef.current = clamped;
+    setPullDistance(clamped);
+  }, []);
+
   const loadFeed = useCallback(async (nextPage = 1, options = {}) => {
     const append = Boolean(options.append);
+    const quietReplace = Boolean(options.refresh || options.reconnect || options.silent);
     const requestKey = `${feedMode}:${nextPage}:${append ? "append" : "replace"}`;
 
     if (feedRequestRef.current === requestKey) {
@@ -447,7 +461,7 @@ const Home = () => {
 
     if (append) {
       setLoadingMore(true);
-    } else {
+    } else if (!quietReplace) {
       setLoading(true);
     }
 
@@ -468,7 +482,9 @@ const Home = () => {
         mergePosts(nextPosts);
       } else {
         setPosts(nextPosts);
-        scrollerRef.current?.scrollTo?.({ top: 0, behavior: "auto" });
+        if (!options.preserveScroll) {
+          scrollerRef.current?.scrollTo?.({ top: 0, behavior: options.refresh ? "smooth" : "auto" });
+        }
       }
 
       setPage(nextPage);
@@ -482,13 +498,15 @@ const Home = () => {
       const message = getApiErrorMessage(requestError, "Unable to load feed.");
       const canRetry = !append && isRetryableApiError(requestError) && retryAttemptRef.current < 2;
 
-      console.warn("[feed] load failed", {
-        page: nextPage,
-        append,
-        status: requestError?.response?.status,
-        code: requestError?.code || "REQUEST_FAILED",
-        message: requestError?.message,
-      });
+      if (import.meta.env?.DEV) {
+        console.warn("[feed] load failed", {
+          page: nextPage,
+          append,
+          status: requestError?.response?.status,
+          code: requestError?.code || "REQUEST_FAILED",
+          message: requestError?.message,
+        });
+      }
 
       if (canRetry) {
         retryAttemptRef.current += 1;
@@ -514,6 +532,28 @@ const Home = () => {
       setLoadingMore(false);
     }
   }, [feedMode, mergePosts, setPosts]);
+
+  const refreshFeed = useCallback(async (source = "manual") => {
+    if (refreshing) {
+      return;
+    }
+
+    retryAttemptRef.current = 0;
+    if (retryTimerRef.current) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+
+    setRefreshing(true);
+    setError("");
+
+    try {
+      await loadFeed(1, { refresh: true, source });
+    } finally {
+      setRefreshing(false);
+      setPullProgress(0);
+    }
+  }, [loadFeed, refreshing, setPullProgress]);
 
   useEffect(() => {
     setPage(1);
@@ -596,12 +636,21 @@ const Home = () => {
   useEffect(() => {
     const handleOnline = () => {
       retryAttemptRef.current = 0;
-      loadFeed(1, { reconnect: true });
+      loadFeed(1, { reconnect: true, preserveScroll: true });
     };
 
     window.addEventListener("online", handleOnline);
     return () => window.removeEventListener("online", handleOnline);
   }, [loadFeed]);
+
+  useEffect(() => {
+    const handleHomeRefresh = () => {
+      refreshFeed("home-tab");
+    };
+
+    window.addEventListener("vibebook:home-refresh", handleHomeRefresh);
+    return () => window.removeEventListener("vibebook:home-refresh", handleHomeRefresh);
+  }, [refreshFeed]);
 
   const validPosts = useMemo(() => posts.filter(isValidPost), [posts]);
 
@@ -938,10 +987,65 @@ const Home = () => {
     loadFeed(1, { manual: true });
   }, [loadFeed]);
 
+  const handlePointerDown = useCallback((event) => {
+    if (event.pointerType === "mouse" || loading || refreshing) {
+      return;
+    }
+
+    const scroller = scrollerRef.current;
+
+    if (!scroller || scroller.scrollTop > 2) {
+      return;
+    }
+
+    isPullingRef.current = true;
+    pullStartYRef.current = event.clientY;
+    setPullProgress(0);
+  }, [loading, refreshing, setPullProgress]);
+
+  const handlePointerMove = useCallback((event) => {
+    if (!isPullingRef.current) {
+      return;
+    }
+
+    const scroller = scrollerRef.current;
+    const delta = event.clientY - pullStartYRef.current;
+
+    if (!scroller || scroller.scrollTop > 2 || delta <= 0) {
+      setPullProgress(0);
+      return;
+    }
+
+    const nextDistance = Math.min(104, delta * 0.48);
+    setPullProgress(nextDistance);
+
+    if (delta > 12 && event.cancelable) {
+      event.preventDefault();
+    }
+  }, [setPullProgress]);
+
+  const handlePointerEnd = useCallback(() => {
+    if (!isPullingRef.current) {
+      return;
+    }
+
+    isPullingRef.current = false;
+
+    if (pullDistanceRef.current >= 72) {
+      refreshFeed("pull");
+      return;
+    }
+
+    setPullProgress(0);
+  }, [refreshFeed, setPullProgress]);
+
   if (loading) {
     return (
-      <section className="home-feed-viewport bg-slate-950">
-        <div className="h-full w-full animate-pulse bg-slate-800" />
+      <section className="home-feed-viewport flex items-center justify-center bg-slate-950 text-white">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-24 w-24 animate-pulse rounded-full bg-slate-800" />
+          <p className="text-xs font-black uppercase tracking-[0.18em] text-white/55">Loading fresh videos</p>
+        </div>
       </section>
     );
   }
@@ -986,10 +1090,27 @@ const Home = () => {
         </div>
       </div>
 
+      {(refreshing || pullDistance > 4) && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-12 z-40 flex justify-center transition duration-200"
+          style={{ transform: `translateY(${Math.min(pullDistance, 72)}px)`, opacity: refreshing ? 1 : Math.min(1, pullDistance / 72) }}
+        >
+          <span className="inline-flex items-center gap-2 rounded-full bg-white/92 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-navy shadow-xl backdrop-blur">
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            {refreshing ? "Refreshing" : pullDistance >= 72 ? "Release" : "Pull"}
+          </span>
+        </div>
+      )}
+
       <div
         ref={scrollerRef}
         className="home-feed-scroll home-feed-viewport w-full snap-y snap-mandatory overflow-y-auto bg-slate-950"
-        style={{ overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch" }}
+        style={{ overscrollBehaviorY: "contain", WebkitOverflowScrolling: "touch", touchAction: pullDistance > 0 ? "none" : "pan-y" }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onPointerLeave={handlePointerEnd}
       >
         {visibleFeed.length ? (
           <>
@@ -1028,10 +1149,17 @@ const Home = () => {
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-white">
             <Search className="h-10 w-10 text-brand" />
-            <h1 className="mt-4 text-2xl font-black">No uploads yet</h1>
-            <Link to="/search" className="btn-primary mt-5">
-              Explore
-            </Link>
+            <h1 className="mt-4 text-2xl font-black">No fresh uploads yet</h1>
+            <p className="mt-2 max-w-xs text-sm font-semibold text-white/60">Refresh for new videos or explore creators while the feed warms up.</p>
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <button type="button" className="btn-primary" onClick={() => refreshFeed("empty-state")} disabled={refreshing}>
+                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                Refresh
+              </button>
+              <Link to="/search" className="btn-secondary bg-white/10 text-white hover:bg-white/20">
+                Explore
+              </Link>
+            </div>
           </div>
         )}
       </div>
