@@ -43,7 +43,7 @@ const PostMedia = ({
   const [processing, setProcessing] = useState(false);
   const [isMuted, setIsMuted] = useState(Boolean(muted));
   const [progress, setProgress] = useState(0);
-  const [likePulse, setLikePulse] = useState(false);
+  const [likePulse, setLikePulse] = useState(null);
   const rawUrl = post?.url || "";
   const baseSrc = rawUrl ? mediaUrl(rawUrl) : "";
   const src = retryCount && baseSrc && !/^(blob:|data:)/i.test(baseSrc)
@@ -258,15 +258,18 @@ const PostMedia = ({
       }
 
       lastTapRef.current = 0;
-      setLikePulse(true);
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const x = bounds.width ? ((event.clientX - bounds.left) / bounds.width) * 100 : 50;
+      const y = bounds.height ? ((event.clientY - bounds.top) / bounds.height) * 100 : 50;
+      setLikePulse({ id: now, x: Math.min(88, Math.max(12, x)), y: Math.min(82, Math.max(16, y)) });
       if (likeTimerRef.current) {
         window.clearTimeout(likeTimerRef.current);
       }
       likeTimerRef.current = window.setTimeout(() => {
-        setLikePulse(false);
+        setLikePulse(null);
         likeTimerRef.current = null;
-      }, 520);
-      onDoubleTap?.();
+      }, 720);
+      onDoubleTap?.({ x, y, clientX: event.clientX, clientY: event.clientY });
       return;
     }
 
@@ -418,8 +421,12 @@ const PostMedia = ({
         )}
 
         {interactive && !controls && likePulse && (
-          <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-            <Heart className="h-24 w-24 animate-ping fill-red-500 text-red-500 drop-shadow-2xl" />
+          <div
+            key={likePulse.id}
+            className="double-tap-heart pointer-events-none absolute z-30"
+            style={{ left: `${likePulse.x}%`, top: `${likePulse.y}%` }}
+          >
+            <Heart className="h-24 w-24 fill-white text-red-500 drop-shadow-2xl sm:h-28 sm:w-28" />
           </div>
         )}
 

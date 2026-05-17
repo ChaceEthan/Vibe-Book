@@ -574,50 +574,68 @@ const toggleFeedLike = async (req, res, next) => {
       return res.status(404).json({ message: "Feed item not found" });
     }
 
-    const userId = req.user._id.toString();
+    const action = String(req.body?.action || req.body?.intent || "toggle").trim().toLowerCase();
+    const userId = idOf(req.user._id);
     item.likedBy = Array.isArray(item.likedBy) ? item.likedBy : [];
-    const liked = item.likedBy.some((id) => id.toString() === userId);
+    const wasLiked = item.likedBy.some((id) => idOf(id) === userId);
+    const nextLiked = action === "like" ? true : action === "unlike" ? false : !wasLiked;
 
-    if (liked) {
-      item.likedBy = item.likedBy.filter((id) => id.toString() !== userId);
-    } else {
-      item.likedBy.push(req.user._id);
+    let responseItem = item;
+
+    if (nextLiked !== wasLiked) {
+      await Feed.updateOne(
+        { _id: item._id },
+        nextLiked
+          ? { $addToSet: { likedBy: req.user._id }, $set: { lastEngagementAt: new Date() } }
+          : { $pull: { likedBy: req.user._id }, $set: { lastEngagementAt: new Date() } }
+      );
+
+      responseItem = await Feed.findById(item._id);
+
+      if (!responseItem) {
+        return res.status(404).json({ message: "Feed item not found" });
+      }
     }
 
-    item.likes = item.likedBy.length;
-    updateRankingFields(item);
-    await item.save();
-    await item.populate("userId", userSelect);
+    responseItem.likedBy = Array.isArray(responseItem.likedBy) ? responseItem.likedBy : [];
+    responseItem.likes = responseItem.likedBy.length;
+    updateRankingFields(responseItem);
+    await responseItem.save();
+    await responseItem.populate("userId", userSelect);
 
-    if (!liked && idOf(item.userId) !== userId) {
+    if (nextLiked && !wasLiked && idOf(responseItem.userId) !== userId) {
       await Promise.all([
-        addMonetizationScore(item.userId, "like"),
-        updateViewerInterests(req.user, item, 8, { addLikedTopics: true }),
+        addMonetizationScore(responseItem.userId, "like"),
+        updateViewerInterests(req.user, responseItem, 8, { addLikedTopics: true }),
       ]);
 
-      if (Number(item.likes || 0) > 0 && Number(item.likes || 0) % 10 === 0) {
+      if (Number(responseItem.likes || 0) > 0 && Number(responseItem.likes || 0) % 10 === 0) {
         queueEngagementReward({
           actorId: req.user._id,
-          recipientId: idOf(item.userId),
+          recipientId: idOf(responseItem.userId),
           actionType: "like",
-          targetId: item._id,
-          metrics: { count: Number(item.likes || 0) },
-          dedupeKey: `like:${item._id}:${Math.floor(Number(item.likes || 0) / 10)}`,
+          targetId: responseItem._id,
+          metrics: { count: Number(responseItem.likes || 0) },
+          dedupeKey: `like:${responseItem._id}:${Math.floor(Number(responseItem.likes || 0) / 10)}`,
         });
       }
 
       queueNotification({
-        userId: idOf(item.userId),
+        userId: idOf(responseItem.userId),
         type: "like",
         title: "New like",
         message: `${req.user.name || "Someone"} liked your post`,
         actorId: req.user._id,
-        postId: item._id,
-        dedupeKey: `post-like:${item._id}:${req.user._id}`,
+        postId: responseItem._id,
+        dedupeKey: `post-like:${responseItem._id}:${req.user._id}`,
       });
     }
 
-    return res.json({ feedItem: serializeFeedItem(item, req.user, false, { req }), message: liked ? "Like removed" : "Liked" });
+    return res.json({
+      feedItem: serializeFeedItem(responseItem, req.user, false, { req }),
+      liked: nextLiked,
+      message: nextLiked ? "Liked" : "Like removed",
+    });
   } catch (error) {
     return next(error);
   }

@@ -202,7 +202,7 @@ export const userApi = {
 
 export const feedApi = {
   get: (params = {}) => API.get("/posts", { params }),
-  toggleLike: (id) => API.post(`/posts/${id}/like`),
+  toggleLike: (id, payload = {}) => API.post(`/posts/${id}/like`, payload),
   addComment: (id, payload) => API.post(`/posts/${id}/comments`, payload),
   recordView: (id, payload = {}) => API.post(`/posts/${id}/view`, payload),
   share: (id) => API.post(`/posts/${id}/share`),

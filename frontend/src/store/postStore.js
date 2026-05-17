@@ -36,6 +36,32 @@ const newestFirst = (items) =>
     return new Date(right.createdAt || 0) - new Date(left.createdAt || 0);
   });
 
+const countFor = (post = {}, fields = []) => {
+  const value = fields.map((field) => post?.[field]).find((item) => item !== undefined && item !== null);
+  const count = Number(value || 0);
+  return Number.isFinite(count) ? count : 0;
+};
+
+const mergePost = (current = {}, incoming = {}, options = {}) => {
+  const next = { ...current, ...normalizePost(incoming) };
+
+  if (options.preserveLikeState && typeof current.likedByViewer === "boolean") {
+    const likes = countFor(current, ["likes", "likeCount"]);
+    next.likedByViewer = current.likedByViewer;
+    next.likes = likes;
+    next.likeCount = likes;
+  }
+
+  if (options.preserveSaveState && typeof current.savedByViewer === "boolean") {
+    const saves = countFor(current, ["saveCount", "saves"]);
+    next.savedByViewer = current.savedByViewer;
+    next.saves = saves;
+    next.saveCount = saves;
+  }
+
+  return next;
+};
+
 const mergeUniquePosts = (currentPosts, nextPosts) => {
   const byId = new Map();
 
@@ -59,11 +85,29 @@ export const usePostStore = create((set) => ({
     set((state) => ({
       posts: isValidPost(post) ? mergeUniquePosts([post], state.posts) : state.posts,
     })),
-  replacePost: (post) =>
+  replacePost: (post, options = {}) =>
     set((state) => ({
       posts: state.posts
-        .map((item) => (item._id === post?._id ? { ...item, ...post } : item))
+        .map((item) => (item._id === post?._id ? mergePost(item, post, options) : item))
         .filter(isValidPost),
+    })),
+  applyPostLike: (postId, liked, nextCount) =>
+    set((state) => ({
+      posts: state.posts.map((post) => {
+        if (post._id !== postId) {
+          return post;
+        }
+
+        const currentCount = countFor(post, ["likes", "likeCount"]);
+        const likes = Math.max(0, Number.isFinite(Number(nextCount)) ? Number(nextCount) : currentCount + (liked ? 1 : -1));
+
+        return {
+          ...post,
+          likedByViewer: Boolean(liked),
+          likes,
+          likeCount: likes,
+        };
+      }),
     })),
   removePost: (postId) =>
     set((state) => ({

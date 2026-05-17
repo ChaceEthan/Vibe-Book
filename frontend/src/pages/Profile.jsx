@@ -135,6 +135,11 @@ const formatCompactNumber = (value = 0) =>
     maximumFractionDigits: 1,
   }).format(Number(value || 0));
 
+const safeCount = (value = 0) => {
+  const count = Number(value || 0);
+  return Number.isFinite(count) ? count : 0;
+};
+
 const frameClassFor = (frame = "") => ({
   frame_neon_glow: "from-emerald-300 via-cyan-300 to-lime-300",
   frame_gold_elite: "from-yellow-200 via-amber-400 to-orange-500",
@@ -242,6 +247,7 @@ const ProfileMediaViewer = ({
   canEdit,
   onClose,
   onLike,
+  onDoubleTapLike,
   onSave,
   onShare,
   onViewed,
@@ -426,6 +432,7 @@ const ProfileMediaViewer = ({
                     interactive={itemIsVideo && isActive}
                     managedPlayback
                     preload={shouldPreload ? "auto" : "metadata"}
+                    onDoubleTap={itemIsPost ? () => onDoubleTapLike(item) : undefined}
                     onViewed={itemIsPost ? (metrics) => onViewed(item, metrics) : undefined}
                   />
                 )}
@@ -609,6 +616,7 @@ const Profile = () => {
   const storePosts = usePostStore((state) => state.posts);
   const mergePosts = usePostStore((state) => state.mergePosts);
   const replacePost = usePostStore((state) => state.replacePost);
+  const applyPostLike = usePostStore((state) => state.applyPostLike);
   const removePost = usePostStore((state) => state.removePost);
   const [user, setUser] = useState(null);
   const [activeImage, setActiveImage] = useState(0);
@@ -652,6 +660,7 @@ const Profile = () => {
   const [avatarSaving, setAvatarSaving] = useState(false);
   const avatarInputRef = useRef(null);
   const profileActionsRef = useRef(null);
+  const likeRequestsRef = useRef(new Map());
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -664,11 +673,6 @@ const Profile = () => {
         setUser(data.user);
         if (Array.isArray(data.user?.posts)) {
           mergePosts(data.user.posts);
-          console.log("[VibeBook profile] fetched profile posts", {
-            userId: data.user?._id,
-            count: data.user.posts.length,
-            posts: data.user.posts,
-          });
         }
       } catch (requestError) {
         const status = requestError.response?.status;
@@ -684,6 +688,7 @@ const Profile = () => {
 
   useEffect(() => {
     return () => {
+      likeRequestsRef.current.clear();
       if (avatarPreview) {
         URL.revokeObjectURL(avatarPreview);
       }
@@ -716,6 +721,51 @@ const Profile = () => {
     setProfileShareStatus("");
     setQrProfileOpen(false);
   }, [id, currentUser]);
+
+  useEffect(() => {
+    const handlePostLikeUpdated = (event) => {
+      const { postId, likedByViewer, likes, likeCount, feedItem } = event.detail || {};
+
+      if (!postId) {
+        return;
+      }
+
+      const nextCount = Math.max(0, safeCount(likeCount ?? likes ?? feedItem?.likeCount ?? feedItem?.likes));
+      const patchPost = (post) => {
+        if (post?._id !== postId) {
+          return post;
+        }
+
+        return {
+          ...post,
+          ...(feedItem || {}),
+          likedByViewer: Boolean(likedByViewer),
+          likes: nextCount,
+          likeCount: nextCount,
+        };
+      };
+
+      setMediaViewer((current) =>
+        current
+          ? {
+              ...current,
+              items: current.items.map(patchPost),
+            }
+          : current
+      );
+      setUser((current) =>
+        current
+          ? {
+              ...current,
+              posts: (current.posts || []).map(patchPost),
+            }
+          : current
+      );
+    };
+
+    window.addEventListener("vibebook:post-like-updated", handlePostLikeUpdated);
+    return () => window.removeEventListener("vibebook:post-like-updated", handlePostLikeUpdated);
+  }, []);
 
   useEffect(() => {
     if (!profileMenuOpen) {
@@ -977,23 +1027,55 @@ const Profile = () => {
     }
   };
 
-  const replaceProfilePost = (nextPost) => {
+  const broadcastPostLike = (postId, likedByViewer, likeCount, feedItem = null) => {
+    window.dispatchEvent(
+      new CustomEvent("vibebook:post-like-updated", {
+        detail: { postId, likedByViewer, likes: likeCount, likeCount, feedItem },
+      })
+    );
+  };
+
+  const replaceProfilePost = (nextPost, options = {}) => {
     if (!nextPost?._id) {
       return;
     }
 
-    replacePost(nextPost);
+    const mergeLocalPost = (item) => {
+      if (item?._id !== nextPost._id) {
+        return item;
+      }
+
+      const merged = { ...item, ...nextPost };
+
+      if (options.preserveLikeState && typeof item.likedByViewer === "boolean") {
+        const likes = Math.max(0, safeCount(item.likes ?? item.likeCount));
+        merged.likedByViewer = item.likedByViewer;
+        merged.likes = likes;
+        merged.likeCount = likes;
+      }
+
+      if (options.preserveSaveState && typeof item.savedByViewer === "boolean") {
+        const saves = Math.max(0, safeCount(item.saveCount ?? item.saves));
+        merged.savedByViewer = item.savedByViewer;
+        merged.saves = saves;
+        merged.saveCount = saves;
+      }
+
+      return merged;
+    };
+
+    replacePost(nextPost, options);
     setMediaViewer((current) =>
       current
         ? {
             ...current,
-            items: current.items.map((item) => (item?._id === nextPost._id ? { ...item, ...nextPost } : item)),
+            items: current.items.map(mergeLocalPost),
           }
         : current
     );
     setUser((current) => ({
       ...current,
-      posts: (current?.posts || []).map((post) => (post._id === nextPost._id ? { ...post, ...nextPost } : post)),
+      posts: (current?.posts || []).map(mergeLocalPost),
     }));
   };
 
@@ -1054,17 +1136,43 @@ const Profile = () => {
     }
   };
 
-  const handlePostLike = async (post) => {
+  const handlePostLike = async (post, options = {}) => {
     if (!currentUser) {
       navigate("/login");
       return;
     }
 
+    if (!post?._id || likeRequestsRef.current.has(post._id)) {
+      return;
+    }
+
+    const forceLike = Boolean(options.forceLike);
+    const wasLiked = Boolean(post.likedByViewer);
+
+    if (forceLike && wasLiked) {
+      return;
+    }
+
+    const previousCount = Math.max(0, safeCount(post.likes ?? post.likeCount));
+    const nextLiked = forceLike ? true : !wasLiked;
+    const nextCount = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+
+    likeRequestsRef.current.set(post._id, { likedByViewer: wasLiked, likes: previousCount });
+    applyPostLike(post._id, nextLiked, nextCount);
+    broadcastPostLike(post._id, nextLiked, nextCount);
+
     try {
-      const { data } = await feedApi.toggleLike(post._id);
-      replaceProfilePost(data.feedItem);
-    } catch {
-      setLikeStatus("Unable to update post like.");
+      const { data } = await feedApi.toggleLike(post._id, { action: nextLiked ? "like" : "unlike" });
+      if (data.feedItem) {
+        replaceProfilePost(data.feedItem);
+        broadcastPostLike(data.feedItem._id, Boolean(data.feedItem.likedByViewer), Math.max(0, safeCount(data.feedItem.likes ?? data.feedItem.likeCount)), data.feedItem);
+      }
+    } catch (requestError) {
+      applyPostLike(post._id, wasLiked, previousCount);
+      broadcastPostLike(post._id, wasLiked, previousCount);
+      setLikeStatus(requestError.response?.data?.message || "Unable to update post like.");
+    } finally {
+      likeRequestsRef.current.delete(post._id);
     }
   };
 
@@ -1080,7 +1188,7 @@ const Profile = () => {
 
     try {
       const { data } = await feedApi.save(post._id);
-      replaceProfilePost(data.feedItem);
+      replaceProfilePost(data.feedItem, { preserveLikeState: true });
     } catch (requestError) {
       setLikeStatus(requestError.response?.data?.message || "Unable to save this post.");
     }
@@ -1099,7 +1207,7 @@ const Profile = () => {
 
     try {
       const { data } = await feedApi.recordView(post._id, metrics);
-      replaceProfilePost(data.feedItem);
+      replaceProfilePost(data.feedItem, { preserveLikeState: true, preserveSaveState: true });
     } catch {
       // View tracking is best-effort and should not interrupt media playback.
     }
@@ -1121,7 +1229,7 @@ const Profile = () => {
       }
 
       const { data } = await feedApi.share(post._id);
-      replaceProfilePost(data.feedItem);
+      replaceProfilePost(data.feedItem, { preserveLikeState: true, preserveSaveState: true });
     } catch (requestError) {
       if (requestError.name !== "AbortError") {
         setLikeStatus("Unable to share post.");
@@ -1185,7 +1293,7 @@ const Profile = () => {
 
     try {
       const { data } = await feedApi.addComment(post._id, { message: message.trim() });
-      replaceProfilePost(data.feedItem);
+      replaceProfilePost(data.feedItem, { preserveLikeState: true, preserveSaveState: true });
       setProfileCommentText("");
       return data.feedItem;
     } catch {
@@ -2061,6 +2169,7 @@ const Profile = () => {
         canEdit={isOwnProfile}
         onClose={() => setMediaViewer(null)}
         onLike={handlePostLike}
+        onDoubleTapLike={(post) => handlePostLike(post, { forceLike: true })}
         onSave={handlePostSave}
         onShare={handlePostShare}
         onViewed={handlePostViewed}

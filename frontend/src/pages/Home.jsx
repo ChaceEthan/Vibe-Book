@@ -52,6 +52,11 @@ const formatCount = (value) => {
   return number.toLocaleString();
 };
 
+const numericCount = (value) => {
+  const count = Number(value || 0);
+  return Number.isFinite(count) ? count : 0;
+};
+
 const initialsFor = (value = "VibeBook") =>
   String(value)
     .trim()
@@ -103,6 +108,7 @@ const FeedItem = memo(
     onFollow,
     onInvalid,
     onLike,
+    onDoubleTapLike,
     onOpenComments,
     onSave,
     onShare,
@@ -140,8 +146,15 @@ const FeedItem = memo(
     };
 
     const handleLikePress = () => {
-      addActivityBurst("like");
+      if (!item.likedByViewer) {
+        addActivityBurst("like");
+      }
       onLike(item);
+    };
+
+    const handleDoubleTapLike = () => {
+      addActivityBurst("like");
+      onDoubleTapLike(item);
     };
 
     useEffect(() => {
@@ -183,7 +196,7 @@ const FeedItem = memo(
           soundEnabled={soundEnabled}
           onAudioPreferenceChange={onAudioPreferenceChange}
           onAutoplayBlocked={onAutoplayBlocked}
-          onDoubleTap={handleLikePress}
+          onDoubleTap={handleDoubleTapLike}
           onViewed={(metrics) => onViewed(item, metrics)}
           onInvalid={() => onInvalid(item._id)}
         />
@@ -409,6 +422,7 @@ const Home = () => {
   const mergePosts = usePostStore((state) => state.mergePosts);
   const prependPost = usePostStore((state) => state.prependPost);
   const replacePost = usePostStore((state) => state.replacePost);
+  const applyPostLike = usePostStore((state) => state.applyPostLike);
   const removePost = usePostStore((state) => state.removePost);
   const updatePostsByUser = usePostStore((state) => state.updatePostsByUser);
   const [feedMode, setFeedMode] = useState("for-you");
@@ -431,6 +445,7 @@ const Home = () => {
   const activeRatiosRef = useRef(new Map());
   const lastAudioUnlockRef = useRef(0);
   const viewedPostsRef = useRef(new Set());
+  const likeRequestsRef = useRef(new Map());
   const retryTimerRef = useRef(null);
   const retryAttemptRef = useRef(0);
   const pullStartYRef = useRef(0);
@@ -438,9 +453,17 @@ const Home = () => {
   const isPullingRef = useRef(false);
   const navigate = useNavigate();
 
-  const replaceFeedItem = useCallback((nextItem) => {
-    replacePost(nextItem);
+  const replaceFeedItem = useCallback((nextItem, options = {}) => {
+    replacePost(nextItem, options);
   }, [replacePost]);
+
+  const broadcastPostLike = useCallback((postId, likedByViewer, likeCount, feedItem = null) => {
+    window.dispatchEvent(
+      new CustomEvent("vibebook:post-like-updated", {
+        detail: { postId, likedByViewer, likes: likeCount, likeCount, feedItem },
+      })
+    );
+  }, []);
 
   const setPullProgress = useCallback((nextDistance) => {
     const clamped = Math.max(0, Math.min(104, Number(nextDistance || 0)));
@@ -567,6 +590,7 @@ const Home = () => {
         window.clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
       }
+      likeRequestsRef.current.clear();
       feedRequestRef.current = "";
     };
   }, []);
@@ -810,14 +834,20 @@ const Home = () => {
     };
   }, [nextVideoPreloadUrl]);
 
-  const handleLike = useCallback(async (item) => {
+  const handleLike = useCallback(async (item, options = {}) => {
     if (!isAuthenticated) {
       navigate("/login");
       return;
     }
 
+    const forceLike = Boolean(options.forceLike);
+
     try {
       if (item.virtual) {
+        if (forceLike && item.likedByViewer) {
+          return;
+        }
+
         const { data } = item.likedByViewer
           ? await userApi.unlikeProfile(item.userId._id)
           : await userApi.likeProfile(item.userId._id);
@@ -836,12 +866,41 @@ const Home = () => {
         return;
       }
 
-      const { data } = await feedApi.toggleLike(item._id);
-      replaceFeedItem(data.feedItem);
-    } catch {
-      navigate(`/profile/${item.userId?._id}`);
+      if (!item?._id || likeRequestsRef.current.has(item._id)) {
+        return;
+      }
+
+      const wasLiked = Boolean(item.likedByViewer);
+
+      if (forceLike && wasLiked) {
+        return;
+      }
+
+      const previousCount = numericCount(item.likes ?? item.likeCount);
+      const nextLiked = forceLike ? true : !wasLiked;
+      const nextCount = Math.max(0, previousCount + (nextLiked ? 1 : -1));
+
+      likeRequestsRef.current.set(item._id, { likedByViewer: wasLiked, likes: previousCount });
+      applyPostLike(item._id, nextLiked, nextCount);
+      broadcastPostLike(item._id, nextLiked, nextCount);
+
+      try {
+        const { data } = await feedApi.toggleLike(item._id, { action: nextLiked ? "like" : "unlike" });
+        if (data.feedItem) {
+          replaceFeedItem(data.feedItem);
+          broadcastPostLike(data.feedItem._id, Boolean(data.feedItem.likedByViewer), numericCount(data.feedItem.likes ?? data.feedItem.likeCount), data.feedItem);
+        }
+      } catch (requestError) {
+        applyPostLike(item._id, wasLiked, previousCount);
+        broadcastPostLike(item._id, wasLiked, previousCount);
+        setError(requestError.response?.data?.message || "Unable to update like.");
+      } finally {
+        likeRequestsRef.current.delete(item._id);
+      }
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Unable to update like.");
     }
-  }, [isAuthenticated, navigate, replaceFeedItem, updatePostsByUser]);
+  }, [applyPostLike, broadcastPostLike, isAuthenticated, navigate, replaceFeedItem, updatePostsByUser]);
 
   const handleSave = useCallback(async (item) => {
     if (!isAuthenticated) {
@@ -855,7 +914,7 @@ const Home = () => {
 
     try {
       const { data } = await feedApi.save(item._id);
-      replaceFeedItem(data.feedItem);
+      replaceFeedItem(data.feedItem, { preserveLikeState: true });
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to save this post.");
     }
@@ -913,7 +972,7 @@ const Home = () => {
 
     try {
       const { data } = await feedApi.recordView(item._id, metrics);
-      replaceFeedItem(data.feedItem);
+      replaceFeedItem(data.feedItem, { preserveLikeState: true, preserveSaveState: true });
     } catch {
       // View tracking should never interrupt playback.
     }
@@ -936,7 +995,7 @@ const Home = () => {
 
       if (!item.virtual && item._id) {
         const { data } = await feedApi.share(item._id);
-        replaceFeedItem(data.feedItem);
+        replaceFeedItem(data.feedItem, { preserveLikeState: true, preserveSaveState: true });
       }
     } catch (requestError) {
       if (requestError.name !== "AbortError") {
@@ -959,7 +1018,7 @@ const Home = () => {
 
     try {
       const { data } = await feedApi.addComment(item._id, { message: commentText.trim() });
-      replaceFeedItem(data.feedItem);
+      replaceFeedItem(data.feedItem, { preserveLikeState: true, preserveSaveState: true });
       setCommentText("");
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to add comment.");
@@ -1128,6 +1187,7 @@ const Home = () => {
                 onFollow={handleFollow}
                 onInvalid={removePost}
                 onLike={handleLike}
+                onDoubleTapLike={(post) => handleLike(post, { forceLike: true })}
                 onOpenComments={(postId) => {
                   setCommentOpen(postId);
                   setCommentText("");
