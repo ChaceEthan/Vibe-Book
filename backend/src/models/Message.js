@@ -124,6 +124,32 @@ const messageSchema = new mongoose.Schema(
       type: [attachmentSchema],
       default: [],
     },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Message",
+    },
+    replyPreview: {
+      messageId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Message",
+      },
+      senderName: {
+        type: String,
+        trim: true,
+        maxlength: 120,
+        default: "",
+      },
+      snippet: {
+        type: String,
+        trim: true,
+        maxlength: 180,
+        default: "",
+      },
+      deleted: {
+        type: Boolean,
+        default: false,
+      },
+    },
     deletedAt: {
       type: Date,
     },

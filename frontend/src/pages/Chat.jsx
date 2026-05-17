@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { AlertCircle, Check, CheckCheck, Clock3, FileText, Paperclip, Pin, Plus, Search, Send, ShieldCheck, Trash2, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock3, Copy, FileText, MoreVertical, Paperclip, Plus, Reply, Search, Send, ShieldCheck, Trash2, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -61,6 +61,8 @@ const normalizeSocketMessage = (item = {}) => ({
   message: item.message || item.text || "",
   text: item.text || item.message || "",
   attachments: Array.isArray(item.attachments) ? item.attachments : [],
+  replyTo: item.replyTo,
+  replyPreview: item.replyPreview,
   deletedAt: item.deletedAt,
   createdAt: item.createdAt || new Date().toISOString(),
   deliveryStatus: messageStatus(item),
@@ -78,6 +80,8 @@ const normalizeGroupMessage = (item = {}) => ({
   sender: item.sender || item.senderId,
   message: item.message || "",
   attachments: Array.isArray(item.attachments) ? item.attachments : [],
+  replyTo: item.replyTo,
+  replyPreview: item.replyPreview,
   deletedAt: item.deletedAt,
   type: item.type || "message",
   createdAt: item.createdAt || new Date().toISOString(),
@@ -223,6 +227,19 @@ const LinkPreview = ({ text = "" }) => {
   );
 };
 
+const ReplyPreview = ({ preview }) => {
+  if (!preview?.messageId && !preview?.snippet) {
+    return null;
+  }
+
+  return (
+    <div className="mb-2 border-l-2 border-current/40 bg-white/20 px-2 py-1 text-xs">
+      <p className="truncate font-black opacity-80">{preview.senderName || "User"}</p>
+      <p className="line-clamp-2 opacity-70">{preview.deleted ? "Original message was deleted" : preview.snippet || "Message"}</p>
+    </div>
+  );
+};
+
 const Chat = () => {
   const { userId } = useParams();
   const { user, token, payAccess } = useAuth();
@@ -247,6 +264,11 @@ const Chat = () => {
   const [groupMemberSearch, setGroupMemberSearch] = useState("");
   const [groupMemberSelection, setGroupMemberSelection] = useState([]);
   const [groupActionLoading, setGroupActionLoading] = useState("");
+  const [messageAction, setMessageAction] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [directReply, setDirectReply] = useState(null);
+  const [groupReply, setGroupReply] = useState(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -267,6 +289,9 @@ const Chat = () => {
   const userRef = useRef(user);
   const registeredUserRef = useRef("");
   const joinedGroupRef = useRef("");
+  const longPressTimerRef = useRef(null);
+  const directScrollRef = useRef(null);
+  const groupScrollRef = useRef(null);
 
   activeTabRef.current = activeTab;
   selectedGroupRef.current = selectedGroup;
@@ -838,11 +863,15 @@ const Chat = () => {
   }, [activeTab, selectedGroup, token, user?._id]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = directScrollRef.current;
+    const nearBottom = !container || container.scrollHeight - container.scrollTop - container.clientHeight < 180;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
   useEffect(() => {
-    groupBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = groupScrollRef.current;
+    const nearBottom = !container || container.scrollHeight - container.scrollTop - container.clientHeight < 180;
+    if (nearBottom) groupBottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [groupMessages.length]);
 
   const handleSend = async (event) => {
@@ -880,6 +909,15 @@ const Chat = () => {
         mimeType: item.type,
         kind: item.type?.startsWith("image/") ? "image" : "file",
       })),
+      replyTo: directReply?._id,
+      replyPreview: directReply
+        ? {
+            messageId: directReply._id,
+            senderName: (messageSenderId(directReply) === user._id ? user : otherUser)?.name || "User",
+            snippet: directReply.deletedAt ? "This message was deleted" : String(directReply.message || directReply.text || "").slice(0, 180),
+            deleted: Boolean(directReply.deletedAt),
+          }
+        : undefined,
       createdAt: retryMessage?.createdAt || new Date().toISOString(),
       pending: true,
       failed: false,
@@ -892,6 +930,7 @@ const Chat = () => {
     if (!retryMessage) {
       setMessage("");
       setDirectFiles([]);
+      setDirectReply(null);
     }
     clearTimeout(typingTimerRef.current);
     connectSocket(token)?.emit("typing", {
@@ -914,6 +953,7 @@ const Chat = () => {
             chatId,
             clientId: pendingId,
             message: cleanText,
+            replyTo: directReply?._id,
           },
           (response) => {
             if (!response?.success) {
@@ -933,10 +973,11 @@ const Chat = () => {
           formData.set("chatId", chatId);
           formData.set("clientId", pendingId);
           formData.set("message", cleanText);
+          if (directReply?._id) formData.set("replyTo", directReply._id);
           attachments.forEach((item) => formData.append("attachments", item.file));
           ({ data } = await messageApi.sendDirectWithAttachments(formData));
         } else {
-          ({ data } = await messageApi.sendDirect(userId, { message: cleanText, chatId, clientId: pendingId }));
+          ({ data } = await messageApi.sendDirect(userId, { message: cleanText, chatId, clientId: pendingId, replyTo: directReply?._id }));
         }
         appendDirectMessage(data.chatMessage || data.inboxMessage);
       }
@@ -980,6 +1021,15 @@ const Chat = () => {
         mimeType: item.type,
         kind: item.type?.startsWith("image/") ? "image" : "file",
       })),
+      replyTo: groupReply?._id,
+      replyPreview: groupReply
+        ? {
+            messageId: groupReply._id,
+            senderName: groupReply.sender?.name || (groupReply.senderId === user?._id ? user?.name : "User"),
+            snippet: groupReply.deletedAt ? "This message was deleted" : String(groupReply.message || "").slice(0, 180),
+            deleted: Boolean(groupReply.deletedAt),
+          }
+        : undefined,
       createdAt: retryMessage?.createdAt || new Date().toISOString(),
       pending: true,
       failed: false,
@@ -988,6 +1038,7 @@ const Chat = () => {
     if (!retryMessage) {
       setGroupMessage("");
       setGroupFiles([]);
+      setGroupReply(null);
     }
     setSending(true);
     setStatus("");
@@ -997,7 +1048,7 @@ const Chat = () => {
       const socket = connectSocket(token);
 
       if (socket?.connected && !attachments.length) {
-        socket.emit("send_group_message", { groupId: selectedGroup, senderId: user?._id, clientId: pendingId, message: text }, (response) => {
+        socket.emit("send_group_message", { groupId: selectedGroup, senderId: user?._id, clientId: pendingId, message: text, replyTo: groupReply?._id }, (response) => {
           if (response?.success && response.data) {
             appendGroupMessage(response.data);
           } else if (response && !response.success) {
@@ -1012,10 +1063,11 @@ const Chat = () => {
           const formData = new FormData();
           formData.set("clientId", pendingId);
           formData.set("message", text);
+          if (groupReply?._id) formData.set("replyTo", groupReply._id);
           attachments.forEach((item) => formData.append("attachments", item.file));
           ({ data } = await groupChatApi.sendWithAttachments(selectedGroup, formData));
         } else {
-          ({ data } = await groupChatApi.send(selectedGroup, { message: text, clientId: pendingId }));
+          ({ data } = await groupChatApi.send(selectedGroup, { message: text, clientId: pendingId, replyTo: groupReply?._id }));
         }
         if (data?.groupMessage) {
           appendGroupMessage(data.groupMessage);
@@ -1031,6 +1083,40 @@ const Chat = () => {
 
   const retryGroupMessage = (item) => {
     sendGroupText(item.message, item);
+  };
+
+  const closeMessageAction = () => {
+    setMessageAction(null);
+    clearTimeout(longPressTimerRef.current);
+  };
+
+  const openMessageAction = (event, kind, item, canDelete) => {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (!item || item.type === "system") return;
+    setMessageAction({ kind, item, canDelete: Boolean(canDelete) });
+  };
+
+  const startLongPress = (kind, item, canDelete) => {
+    clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = setTimeout(() => setMessageAction({ kind, item, canDelete: Boolean(canDelete) }), 420);
+  };
+
+  const copyMessage = async (item) => {
+    const text = item?.message || item?.text || "";
+    if (!text) return;
+    await navigator.clipboard?.writeText(text).catch(() => undefined);
+    setStatus("Message copied.");
+    closeMessageAction();
+  };
+
+  const replyToMessage = (kind, item) => {
+    if (kind === "group") {
+      setGroupReply(item);
+    } else {
+      setDirectReply(item);
+    }
+    closeMessageAction();
   };
 
   const applyDirectDeleted = (nextMessage) => {
@@ -1056,7 +1142,7 @@ const Chat = () => {
   };
 
   const handleDeleteDirectMessage = async (item) => {
-    if (!item?._id || item.pending || item.deletedAt || !window.confirm("Delete this message?")) {
+    if (!item?._id || item.pending || item.deletedAt) {
       return;
     }
 
@@ -1085,7 +1171,7 @@ const Chat = () => {
   };
 
   const handleDeleteGroupMessage = async (item) => {
-    if (!selectedGroup || !item?._id || item.pending || item.deletedAt || !window.confirm("Delete this message?")) {
+    if (!selectedGroup || !item?._id || item.pending || item.deletedAt) {
       return;
     }
 
@@ -1110,6 +1196,19 @@ const Chat = () => {
     } catch (requestError) {
       setGroupMessages(previous);
       setError(requestMessage(requestError, "Unable to delete message."));
+    }
+  };
+
+  const confirmDeleteMessage = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    closeMessageAction();
+
+    if (!target?.item) return;
+    if (target.kind === "group") {
+      await handleDeleteGroupMessage(target.item);
+    } else {
+      await handleDeleteDirectMessage(target.item);
     }
   };
 
@@ -1307,6 +1406,7 @@ const Chat = () => {
   const selectedGroupIsMember = selectedGroupInfo ? selectedGroupInfo.isMember !== false : false;
   const viewerGroupRole = selectedGroupInfo?.viewerRole || roleForMember(selectedGroupInfo, user?._id);
   const viewerCanModerate = ["owner", "moderator"].includes(viewerGroupRole);
+  const viewerCanAddMembers = viewerGroupRole === "owner";
   const selectedGroupMembers = new Set((selectedGroupInfo?.members || []).map(idOf));
   const selectedGroupPendingInvites = new Set((selectedGroupInfo?.pendingInvites || []).map(idOf));
   const memberSearch = groupMemberSearch.trim().toLowerCase();
@@ -1374,7 +1474,7 @@ const Chat = () => {
       )}
 
       {activeTab === "direct" ? (
-        <div className="rounded-lg border border-slate-200 bg-white shadow-soft">
+        <div className="flex max-h-[calc(100dvh-9rem)] min-h-[560px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
           {userId ? (
             <>
               <div className="flex items-center gap-3 border-b border-slate-100 p-4">
@@ -1387,7 +1487,7 @@ const Chat = () => {
                 </div>
               </div>
 
-              <div className="h-[calc(100dvh-22rem)] min-h-80 space-y-3 overflow-y-auto scroll-smooth p-3 sm:h-[520px] sm:p-4">
+              <div ref={directScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-smooth p-3 pb-5 sm:p-4">
                 {loading ? (
                   <div className="h-40 animate-pulse rounded-lg bg-slate-200" />
                 ) : messages.length ? (
@@ -1396,10 +1496,17 @@ const Chat = () => {
                     const senderProfile = isMine ? user : otherUser;
                     const state = messageStatus(item);
                     return (
-                      <div key={messageKey(item)} className={`flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
+                      <div key={messageKey(item)} className={`group/message flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
                         {!isMine && <Avatar profile={senderProfile} />}
                         <div className={`max-w-[78%] ${isMine ? "items-end" : "items-start"} flex flex-col`}>
-                          <div className={`rounded-2xl px-3 py-2 ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}>
+                          <div
+                            className={`relative rounded-2xl px-3 py-2 transition active:scale-[0.99] ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}
+                            onContextMenu={(event) => openMessageAction(event, "direct", item, isMine && !item.deletedAt && !item.pending)}
+                            onPointerDown={(event) => event.pointerType === "touch" && startLongPress("direct", item, isMine && !item.deletedAt && !item.pending)}
+                            onPointerUp={() => clearTimeout(longPressTimerRef.current)}
+                            onPointerCancel={() => clearTimeout(longPressTimerRef.current)}
+                          >
+                            <ReplyPreview preview={item.replyPreview} />
                             <p className={`whitespace-pre-line break-words text-sm leading-6 ${item.deletedAt ? "italic opacity-70" : ""}`}>{item.message}</p>
                             {!item.deletedAt && <LinkPreview text={item.message} />}
                             <AttachmentList attachments={item.attachments || []} />
@@ -1407,10 +1514,9 @@ const Chat = () => {
                           <p className="mt-1 flex items-center gap-2 truncate px-1 text-[11px] font-semibold text-slate-400">
                             <span>{formatTime(item.createdAt)}</span>
                             {isMine && <DeliveryState status={state} failed={item.failed} onRetry={() => retryDirectMessage(item)} />}
-                            {isMine && !item.deletedAt && !item.pending && (
-                              <button type="button" className="inline-flex items-center gap-1 text-red-500 hover:text-red-700" onClick={() => handleDeleteDirectMessage(item)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                                Delete
+                            {!item.pending && !item.deletedAt && (
+                              <button type="button" className="inline-flex items-center text-slate-400 opacity-100 hover:text-navy sm:opacity-0 sm:group-hover/message:opacity-100" onClick={(event) => openMessageAction(event, "direct", item, isMine)}>
+                                <MoreVertical className="h-3.5 w-3.5" />
                               </button>
                             )}
                           </p>
@@ -1426,7 +1532,14 @@ const Chat = () => {
                 <div ref={bottomRef} />
               </div>
 
-              <form className="sticky bottom-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleSend}>
+              <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleSend}>
+                {directReply && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-xs text-slate-600">
+                    <Reply className="h-4 w-4 text-brand" />
+                    <span className="min-w-0 flex-1 truncate">Replying to {directReply.senderId === user?._id ? "yourself" : otherUser?.name || "User"}: {directReply.message}</span>
+                    <button type="button" onClick={() => setDirectReply(null)} aria-label="Dismiss reply"><X className="h-4 w-4" /></button>
+                  </div>
+                )}
                 {directAttachments.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
                     {directAttachments.map((item) => (
@@ -1452,8 +1565,9 @@ const Chat = () => {
                 <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-slate-600 transition hover:text-navy" onClick={() => directFileInputRef.current?.click()} aria-label="Attach file">
                   <Paperclip className="h-4 w-4" />
                 </button>
-                <input
-                  className="field min-h-10 flex-1 rounded-full px-4 py-2"
+                <textarea
+                  rows={1}
+                  className="field max-h-32 min-h-10 flex-1 resize-none rounded-2xl px-4 py-2"
                   value={message}
                   onChange={(event) => {
                     const nextValue = event.target.value;
@@ -1578,10 +1692,10 @@ const Chat = () => {
             </div>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-white shadow-soft">
-            <div className="border-b border-slate-100 p-4">
+          <div className="flex max-h-[calc(100dvh-9rem)] min-h-[560px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+            <div className="shrink-0 border-b border-slate-100 p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="flex min-w-0 flex-1 gap-3">
+                <button type="button" className="flex min-w-0 flex-1 gap-3 text-left" onClick={() => selectedGroupInfo && setDetailsModalOpen(true)}>
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-black text-white">
                     {selectedGroupInfo?.avatar ? (
                       <img src={mediaUrl(selectedGroupInfo.avatar)} alt="" className="h-full w-full rounded-lg object-cover" onError={handleAvatarError} />
@@ -1592,13 +1706,8 @@ const Chat = () => {
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-black text-navy">{selectedGroupInfo?.groupName || selectedGroupInfo?.name || "Group messages"}</p>
                     {selectedGroupInfo && <p className="mt-1 text-xs font-bold text-slate-500">{memberCountLabel(selectedGroupInfo)}</p>}
-                    {selectedGroupInfo?.description && <p className="mt-1 line-clamp-2 text-xs font-semibold text-slate-500">{selectedGroupInfo.description}</p>}
-                    <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-surface px-2 py-1 text-[11px] font-black text-slate-500">
-                      <Pin className="h-3 w-3" />
-                      Pinned messages coming soon
-                    </p>
                   </div>
-                </div>
+                </button>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
                   {selectedGroup && !selectedGroupIsMember && (
                     <button
@@ -1617,10 +1726,10 @@ const Chat = () => {
                         <UserPlus className="h-4 w-4" />
                         Invite
                       </button>
-                      <button type="button" className="btn-secondary gap-2" onClick={() => openMemberModal("add")}>
+                      {viewerCanAddMembers && <button type="button" className="btn-secondary gap-2" onClick={() => openMemberModal("add")}>
                         <UserCheck className="h-4 w-4" />
                         Add
-                      </button>
+                      </button>}
                       <button type="button" className="btn-secondary gap-2 text-red-700" onClick={handleLeaveGroup}>
                         <UserMinus className="h-4 w-4" />
                         Leave
@@ -1629,80 +1738,8 @@ const Chat = () => {
                   )}
                 </div>
               </div>
-              {selectedGroupInfo?.members?.length ? (
-                <div className="mt-3 flex max-w-full flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500">
-                  <Users className="h-3.5 w-3.5 shrink-0" />
-                  {selectedGroupInfo.members.slice(0, 8).map((member) => (
-                    <Link
-                      key={member._id || member}
-                      to={idOf(member) === user?._id ? "/dashboard" : `/chat/${idOf(member)}`}
-                      className="max-w-28 truncate rounded-full bg-surface px-2 py-1 font-bold text-slate-600 hover:text-navy"
-                    >
-                      {member.name || "Member"}
-                    </Link>
-                  ))}
-                  {selectedGroupInfo.members.length > 8 && <span className="px-1">+{selectedGroupInfo.members.length - 8}</span>}
-                </div>
-              ) : null}
-              {selectedGroupInfo?.activeUsers?.length ? (
-                <p className="mt-2 truncate text-xs font-bold text-green-700">
-                  Active now: {selectedGroupInfo.activeUsers.map((member) => member.name || "Member").join(", ")}
-                </p>
-              ) : null}
-              {selectedGroupInfo?.members?.length ? (
-                <div className="mt-3 rounded-lg border border-slate-100 bg-surface p-2">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-xs font-black uppercase tracking-wide text-slate-500">Members</p>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-black text-slate-500">{viewerGroupRole}</span>
-                  </div>
-                  <div className="grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
-                    {selectedGroupInfo.members.map((member) => {
-                      const memberId = idOf(member);
-                      const memberRole = roleForMember(selectedGroupInfo, memberId);
-                      const canPromote = viewerGroupRole === "owner" && memberRole !== "owner";
-                      const canRemove =
-                        memberId !== user?._id &&
-                        ((viewerGroupRole === "owner" && memberRole !== "owner") || (viewerGroupRole === "moderator" && memberRole === "member"));
-
-                      return (
-                        <div key={memberId} className="flex min-w-0 items-center gap-2 rounded-lg bg-white p-2">
-                          <Avatar profile={member} size="h-8 w-8" />
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-black text-navy">{member.name || member.username || "Member"}</span>
-                            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black capitalize text-slate-500">
-                              {memberRole !== "member" && <ShieldCheck className="h-3 w-3" />}
-                              {memberRole}
-                            </span>
-                          </span>
-                          {canPromote && (
-                            <button
-                              type="button"
-                              className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-black text-navy disabled:opacity-50"
-                              onClick={() => handleRoleChange(member, memberRole === "moderator" ? "member" : "moderator")}
-                              disabled={groupActionLoading === `role:${memberId}`}
-                            >
-                              {memberRole === "moderator" ? "Demote" : "Mod"}
-                            </button>
-                          )}
-                          {canRemove && (
-                            <button
-                              type="button"
-                              className="rounded-md bg-red-50 p-1.5 text-red-600 disabled:opacity-50"
-                              onClick={() => handleRemoveMember(member)}
-                              disabled={groupActionLoading === `remove:${memberId}`}
-                              aria-label="Remove member"
-                            >
-                              <UserMinus className="h-3.5 w-3.5" />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
             </div>
-            <div className="h-[calc(100dvh-22rem)] min-h-80 space-y-3 overflow-y-auto scroll-smooth p-3 sm:h-[520px] sm:p-4">
+            <div ref={groupScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-smooth p-3 pb-5 sm:p-4">
               {!selectedGroup ? (
                 <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg bg-surface p-6 text-center">
                   <Users className="h-8 w-8 text-brand" />
@@ -1733,14 +1770,20 @@ const Chat = () => {
                   }
 
                   return (
-                    <div key={groupMessageKey(item)} className={`flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
+                    <div key={groupMessageKey(item)} className={`group/message flex items-end gap-2 ${isMine ? "justify-end" : "justify-start"}`}>
                       {!isMine && (
                         <button type="button" onClick={() => item.sender?._id && navigate(`/chat/${item.sender._id}`)} aria-label="Open direct chat">
                           <Avatar profile={item.sender} />
                         </button>
                       )}
                       <div className={`max-w-[78%] ${isMine ? "items-end" : "items-start"} flex flex-col`}>
-                        <div className={`rounded-2xl px-3 py-2 ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}>
+                        <div
+                          className={`relative rounded-2xl px-3 py-2 transition active:scale-[0.99] ${isMine ? "rounded-br-md bg-brand text-navy" : "rounded-bl-md bg-surface text-slate-700"}`}
+                          onContextMenu={(event) => openMessageAction(event, "group", item, (isMine || viewerCanModerate) && !item.deletedAt && !item.pending)}
+                          onPointerDown={(event) => event.pointerType === "touch" && startLongPress("group", item, (isMine || viewerCanModerate) && !item.deletedAt && !item.pending)}
+                          onPointerUp={() => clearTimeout(longPressTimerRef.current)}
+                          onPointerCancel={() => clearTimeout(longPressTimerRef.current)}
+                        >
                           <button
                             type="button"
                             className="block max-w-full truncate text-xs font-black opacity-70"
@@ -1748,6 +1791,7 @@ const Chat = () => {
                           >
                             {item.sender?.name || "User"}
                           </button>
+                          <ReplyPreview preview={item.replyPreview} />
                           <p className={`mt-1 whitespace-pre-line break-words text-sm leading-6 ${item.deletedAt ? "italic opacity-70" : ""}`}>{item.message}</p>
                           {!item.deletedAt && <LinkPreview text={item.message} />}
                           <AttachmentList attachments={item.attachments || []} />
@@ -1755,10 +1799,9 @@ const Chat = () => {
                         <p className="mt-1 flex items-center gap-2 truncate px-1 text-[11px] font-semibold text-slate-400">
                           <span>{formatTime(item.createdAt)}</span>
                           {isMine && <DeliveryState status={messageStatus(item)} failed={item.failed} onRetry={() => retryGroupMessage(item)} />}
-                          {(isMine || viewerCanModerate) && !item.deletedAt && !item.pending && (
-                            <button type="button" className="inline-flex items-center gap-1 text-red-500 hover:text-red-700" onClick={() => handleDeleteGroupMessage(item)}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Delete
+                          {!item.pending && !item.deletedAt && (
+                            <button type="button" className="inline-flex items-center text-slate-400 opacity-100 hover:text-navy sm:opacity-0 sm:group-hover/message:opacity-100" onClick={(event) => openMessageAction(event, "group", item, isMine || viewerCanModerate)}>
+                              <MoreVertical className="h-3.5 w-3.5" />
                             </button>
                           )}
                         </p>
@@ -1780,7 +1823,14 @@ const Chat = () => {
               )}
               <div ref={groupBottomRef} />
             </div>
-            <form className="sticky bottom-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
+            <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
+              {groupReply && (
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-xs text-slate-600">
+                  <Reply className="h-4 w-4 text-brand" />
+                  <span className="min-w-0 flex-1 truncate">Replying to {groupReply.sender?.name || "User"}: {groupReply.message}</span>
+                  <button type="button" onClick={() => setGroupReply(null)} aria-label="Dismiss reply"><X className="h-4 w-4" /></button>
+                </div>
+              )}
               {groupAttachments.length > 0 && (
                 <div className="mb-2 flex flex-wrap gap-2">
                   {groupAttachments.map((item) => (
@@ -1806,8 +1856,9 @@ const Chat = () => {
               <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-slate-600 transition hover:text-navy disabled:opacity-50" onClick={() => groupFileInputRef.current?.click()} disabled={!selectedGroup || !selectedGroupIsMember} aria-label="Attach file">
                 <Paperclip className="h-4 w-4" />
               </button>
-              <input
-                className="field min-h-10 flex-1 rounded-full px-4 py-2"
+              <textarea
+                rows={1}
+                className="field max-h-32 min-h-10 flex-1 resize-none rounded-2xl px-4 py-2"
                 value={groupMessage}
                 onChange={(event) => setGroupMessage(event.target.value)}
                 placeholder={selectedGroupIsMember ? "Write a group message" : "Join the group to chat"}
@@ -1818,6 +1869,80 @@ const Chat = () => {
               </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {messageAction && (
+        <div className="fixed inset-0 z-50 flex items-end bg-slate-950/30 p-3 backdrop-blur-sm sm:items-center sm:justify-center" onClick={closeMessageAction}>
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            {[
+              { label: "Reply", icon: Reply, action: () => replyToMessage(messageAction.kind, messageAction.item) },
+              { label: "Copy", icon: Copy, action: () => copyMessage(messageAction.item) },
+              ...(messageAction.canDelete ? [{ label: "Delete message", icon: Trash2, danger: true, action: () => setDeleteTarget(messageAction) }] : []),
+            ].map((action) => (
+              <button key={action.label} type="button" className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-black ${action.danger ? "text-red-600" : "text-navy"} hover:bg-surface`} onClick={action.action}>
+                <action.icon className="h-4 w-4" />
+                {action.label}
+              </button>
+            ))}
+            <button type="button" className="flex w-full items-center gap-3 border-t border-slate-100 px-4 py-3 text-left text-sm font-black text-slate-500 hover:bg-surface" onClick={closeMessageAction}>
+              <X className="h-4 w-4" />
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[60] flex items-end bg-slate-950/40 p-4 backdrop-blur-sm sm:items-center sm:justify-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
+            <h2 className="text-lg font-black text-navy">Delete this message?</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-500">Everyone will see "This message was deleted".</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button type="button" className="btn-primary bg-red-500 text-white hover:bg-red-600" onClick={confirmDeleteMessage}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {detailsModalOpen && selectedGroupInfo && (
+        <div className="fixed inset-0 z-50 flex items-end bg-slate-950/50 p-0 backdrop-blur-sm sm:items-center sm:justify-center sm:p-6" role="dialog" aria-modal="true">
+          <div className="max-h-[86dvh] w-full overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:max-w-xl sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">{memberCountLabel(selectedGroupInfo)}</p>
+                <h2 className="text-lg font-black text-navy">{selectedGroupInfo.groupName || selectedGroupInfo.name}</h2>
+              </div>
+              <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-surface text-slate-600" onClick={() => setDetailsModalOpen(false)} aria-label="Close members">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[64dvh] space-y-2 overflow-y-auto p-4">
+              {selectedGroupInfo.members?.map((member) => {
+                const memberId = idOf(member);
+                const memberRole = roleForMember(selectedGroupInfo, memberId);
+                const onlineNow = selectedGroupInfo.activeUsers?.some((active) => idOf(active) === memberId);
+                const canPromote = viewerGroupRole === "owner" && memberRole !== "owner";
+                const canRemove = memberId !== user?._id && ((viewerGroupRole === "owner" && memberRole !== "owner") || (viewerGroupRole === "moderator" && memberRole === "member"));
+
+                return (
+                  <div key={memberId} className="flex min-w-0 items-center gap-3 rounded-lg bg-surface p-3">
+                    <button type="button" className="relative" onClick={() => navigate(memberId === user?._id ? "/dashboard" : `/chat/${memberId}`)}>
+                      <Avatar profile={member} size="h-10 w-10" />
+                      <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${onlineNow ? "bg-green-500" : "bg-slate-300"}`} />
+                    </button>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-black text-navy">{member.name || member.username || "Member"}</span>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-0.5 text-[10px] font-black capitalize text-slate-500">
+                        {memberRole !== "member" && <ShieldCheck className="h-3 w-3" />}
+                        {memberRole}
+                      </span>
+                    </span>
+                    {canPromote && <button type="button" className="rounded-md bg-white px-2 py-1 text-[10px] font-black text-navy disabled:opacity-50" onClick={() => handleRoleChange(member, memberRole === "moderator" ? "member" : "moderator")} disabled={groupActionLoading === `role:${memberId}`}>{memberRole === "moderator" ? "Demote" : "Mod"}</button>}
+                    {canRemove && <button type="button" className="rounded-md bg-red-50 p-2 text-red-600 disabled:opacity-50" onClick={() => handleRemoveMember(member)} disabled={groupActionLoading === `remove:${memberId}`} aria-label="Remove member"><UserMinus className="h-4 w-4" /></button>}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

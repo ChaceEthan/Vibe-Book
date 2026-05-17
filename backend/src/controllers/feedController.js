@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const Feed = require("../models/Feed");
 const User = require("../models/User");
+const cloudinary = require("../config/cloudinary");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { addMonetizationScore } = require("../utils/monetization");
 const { createNotification } = require("../utils/notifications");
@@ -48,6 +49,11 @@ const normalizeDescriptionFor = (items = [], mediaUrl = "") => {
 const inferOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
 const hasMediaUrl = (value) => isCloudinarySecureUrl(normalizeStoredUploadPath(value));
 const cloudinaryMediaQuery = { $regex: /^https:\/\/res\.cloudinary\.com\//i };
+const cloudinaryPublicIdFromUrl = (url = "") => {
+  const value = String(url || "");
+  const match = value.match(/\/(?:image|video)\/upload\/(?:v\d+\/)?(.+?)(?:\.[a-z0-9]+)?(?:[?#].*)?$/i);
+  return match ? decodeURIComponent(match[1]) : "";
+};
 
 const parsePositiveInt = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number.parseInt(value, 10);
@@ -999,6 +1005,11 @@ const deletePost = async (req, res, next) => {
         },
       }).catch(() => null),
       Feed.deleteOne({ _id: item._id }),
+      cloudinaryPublicIdFromUrl(mediaUrl)
+        ? cloudinary.uploader.destroy(cloudinaryPublicIdFromUrl(mediaUrl), { resource_type: item.type === "video" ? "video" : "image", invalidate: true }).catch((error) => {
+            console.error(`[post:delete:media-cleanup] ${error.message}`);
+          })
+        : null,
     ]);
 
     return res.json({ deletedId: item._id, mediaUrl, message: "Post deleted" });

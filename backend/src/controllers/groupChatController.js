@@ -122,6 +122,7 @@ const roleFor = (group, userId) => {
 };
 
 const canModerateGroup = (group, userId) => ["owner", "moderator"].includes(roleFor(group, userId));
+const canAddMembers = (group, userId) => roleFor(group, userId) === "owner";
 const canRemoveMember = (group, actorId, targetId) => {
   const actorRole = roleFor(group, actorId);
   const targetRole = roleFor(group, targetId);
@@ -168,6 +169,31 @@ const validateMessageBody = (text, attachments = []) => {
 
   return validateChatMessage(cleanText);
 };
+const deletedMessageText = "This message was deleted";
+const snippetFor = (message = {}) => String(message.deletedAt ? deletedMessageText : message.message || "").trim().slice(0, 180);
+const buildGroupReplyPreview = async (groupId, replyToId) => {
+  const id = normalizeId(replyToId);
+
+  if (!id) {
+    return {};
+  }
+
+  const original = await GroupMessage.findOne({ _id: id, group: groupId }).populate("sender", memberSelect);
+
+  if (!original) {
+    return {};
+  }
+
+  return {
+    replyTo: original._id,
+    replyPreview: {
+      messageId: original._id,
+      senderName: original.sender?.name || "User",
+      snippet: snippetFor(original),
+      deleted: Boolean(original.deletedAt),
+    },
+  };
+};
 
 const serializeGroup = (group, viewerId = "") => {
   const members = Array.isArray(group.members) ? group.members : [];
@@ -212,6 +238,8 @@ const serializeGroupMessage = (message) => ({
   text: message.deletedAt ? "This message was deleted" : message.message,
   type: message.type || "message",
   attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  replyTo: message.replyTo,
+  replyPreview: message.replyPreview,
   deletedAt: message.deletedAt,
   deletedBy: message.deletedBy,
   createdAt: message.createdAt,
@@ -452,8 +480,8 @@ const addGroupMember = async (req, res) => {
       return res.status(404).json({ success: false, message: "Group not found" });
     }
 
-    if (!ensureMember(group, req.user._id)) {
-      return res.status(403).json({ success: false, message: "Join the group before adding members" });
+    if (!canAddMembers(group, req.user._id)) {
+      return res.status(403).json({ success: false, message: "Only the group owner can add members" });
     }
 
     const requestedIds = uniqueIds([...normalizeMembers(req.body?.members), req.body?.userId, req.body?.memberId]).filter((id) => id !== normalizeId(req.user._id));
@@ -634,12 +662,14 @@ const sendGroupMessage = async (req, res) => {
       return res.status(403).json({ success: false, message: "You are not a member of this group" });
     }
 
+    const replyData = await buildGroupReplyPreview(group._id, body.replyTo || body.replyToId);
     const groupMessage = await GroupMessage.create({
       group: group._id,
       sender: req.user._id,
       clientId: trimText(body.clientId),
       message: validation.message,
       attachments,
+      ...replyData,
     });
 
     group.updatedAt = new Date();

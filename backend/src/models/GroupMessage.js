@@ -62,6 +62,32 @@ const groupMessageSchema = new mongoose.Schema(
       type: [attachmentSchema],
       default: [],
     },
+    replyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "GroupMessage",
+    },
+    replyPreview: {
+      messageId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "GroupMessage",
+      },
+      senderName: {
+        type: String,
+        trim: true,
+        maxlength: 120,
+        default: "",
+      },
+      snippet: {
+        type: String,
+        trim: true,
+        maxlength: 180,
+        default: "",
+      },
+      deleted: {
+        type: Boolean,
+        default: false,
+      },
+    },
     type: {
       type: String,
       enum: ["message", "system"],

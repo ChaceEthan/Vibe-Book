@@ -101,6 +101,43 @@ const idOf = (value) => {
 };
 
 const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
+const deletedMessageText = "This message was deleted";
+const snippetFor = (message = {}) => String(message.deletedAt ? deletedMessageText : message.message || message.text || "").trim().slice(0, 180);
+const buildReplyPreview = async (replyToId, userId, recipientId) => {
+  const id = idOf(replyToId);
+
+  if (!id) {
+    return {};
+  }
+
+  const original = await populateMessage(
+    Message.findOne({
+      _id: id,
+      isDraft: false,
+      hiddenFor: { $ne: userId },
+      $or: [
+        { sender: userId, recipient: recipientId },
+        { sender: userId, receiver: recipientId },
+        { sender: recipientId, recipient: userId },
+        { sender: recipientId, receiver: userId },
+      ],
+    })
+  );
+
+  if (!original) {
+    return {};
+  }
+
+  return {
+    replyTo: original._id,
+    replyPreview: {
+      messageId: original._id,
+      senderName: original.sender?.name || "User",
+      snippet: snippetFor(original),
+      deleted: Boolean(original.deletedAt),
+    },
+  };
+};
 
 const unreadCountFor = (userId) =>
   Message.countDocuments({
@@ -174,6 +211,8 @@ const serializeRealtimeMessage = (message) => ({
   message: message.deletedAt ? "This message was deleted" : message.message,
   text: message.deletedAt ? "This message was deleted" : message.text || message.message,
   attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  replyTo: message.replyTo,
+  replyPreview: message.replyPreview,
   deletedAt: message.deletedAt,
   deletedBy: message.deletedBy,
   createdAt: message.createdAt,
@@ -320,6 +359,7 @@ const sendDirectMessage = async (req, res, next) => {
     }
 
     const recipientOnline = isUserOnline(recipient._id);
+    const replyData = await buildReplyPreview(req.body.replyTo || req.body.replyToId, req.user._id, recipient._id);
     const message = await Message.create({
       chatId: req.body.chatId || chatIdFor(req.user._id, recipient._id),
       clientId: trimText(req.body.clientId),
@@ -330,6 +370,7 @@ const sendDirectMessage = async (req, res, next) => {
       message: text,
       text,
       attachments,
+      ...replyData,
       type: "reply",
       deliveryStatus: recipientOnline ? "delivered" : "sent",
       deliveredAt: recipientOnline ? new Date() : undefined,
@@ -454,6 +495,15 @@ const replyToMessage = async (req, res, next) => {
         : original.sender;
     const recipientOnline = isUserOnline(recipient);
 
+    const replyData = {
+      replyTo: original._id,
+      replyPreview: {
+        messageId: original._id,
+        senderName: original.sender?.name || "User",
+        snippet: snippetFor(original),
+        deleted: Boolean(original.deletedAt),
+      },
+    };
     const reply = await Message.create({
       chatId: chatIdFor(req.user._id, recipient),
       clientId: trimText(req.body.clientId),
@@ -464,6 +514,7 @@ const replyToMessage = async (req, res, next) => {
       subject: original.subject ? `Re: ${original.subject.replace(/^Re:\s*/i, "")}` : "VibeBook reply",
       message: text,
       text,
+      ...replyData,
       type: "reply",
       deliveryStatus: recipientOnline ? "delivered" : "sent",
       deliveredAt: recipientOnline ? new Date() : undefined,

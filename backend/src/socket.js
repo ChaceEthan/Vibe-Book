@@ -103,9 +103,11 @@ const serializeDirectMessage = (message) => ({
   clientId: message.clientId,
   senderId: message.senderId || message.sender?.toString?.() || "",
   receiverId: message.receiverId || message.recipient?.toString?.() || message.receiver?.toString?.() || "",
-  message: message.message,
-  text: message.text || message.message,
+  message: message.deletedAt ? "This message was deleted" : message.message,
+  text: message.deletedAt ? "This message was deleted" : message.text || message.message,
   attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  replyTo: message.replyTo,
+  replyPreview: message.replyPreview,
   deletedAt: message.deletedAt,
   deletedBy: message.deletedBy,
   createdAt: message.createdAt,
@@ -130,6 +132,8 @@ const serializeGroupMessage = (message) => ({
   text: message.deletedAt ? "This message was deleted" : message.message,
   type: message.type || "message",
   attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
+  replyTo: message.replyTo,
+  replyPreview: message.replyPreview,
   deletedAt: message.deletedAt,
   deletedBy: message.deletedBy,
   createdAt: message.createdAt,
@@ -156,6 +160,55 @@ const roleForGroup = (group, userId) => {
   }
 
   return "member";
+};
+const deletedMessageText = "This message was deleted";
+const snippetFor = (message = {}) => String(message.deletedAt ? deletedMessageText : message.message || message.text || "").trim().slice(0, 180);
+const buildDirectReplyPreview = async (replyToId, userId, receiverId) => {
+  const id = normalizeObjectId(replyToId);
+
+  if (!id) return {};
+
+  const original = await Message.findOne({
+    _id: id,
+    isDraft: false,
+    $or: [
+      { sender: userId, recipient: receiverId },
+      { sender: userId, receiver: receiverId },
+      { sender: receiverId, recipient: userId },
+      { sender: receiverId, receiver: userId },
+    ],
+  }).populate("sender", "name");
+
+  if (!original) return {};
+
+  return {
+    replyTo: original._id,
+    replyPreview: {
+      messageId: original._id,
+      senderName: original.sender?.name || "User",
+      snippet: snippetFor(original),
+      deleted: Boolean(original.deletedAt),
+    },
+  };
+};
+const buildGroupReplyPreview = async (groupId, replyToId) => {
+  const id = normalizeObjectId(replyToId);
+
+  if (!id) return {};
+
+  const original = await GroupMessage.findOne({ _id: id, group: groupId }).populate("sender", "name");
+
+  if (!original) return {};
+
+  return {
+    replyTo: original._id,
+    replyPreview: {
+      messageId: original._id,
+      senderName: original.sender?.name || "User",
+      snippet: snippetFor(original),
+      deleted: Boolean(original.deletedAt),
+    },
+  };
 };
 
 const joinUserGroupRooms = async (socket, userId) => {
@@ -385,6 +438,7 @@ const initSocket = (server, corsOptions = {}) => {
         }
 
         const receiverOnline = isUserOnline(receiver._id);
+        const replyData = await buildDirectReplyPreview(payload.replyTo || payload.replyToId, userId, receiver._id);
         const directMessage = await Message.create({
           chatId: payload.chatId || chatIdFor(userId, receiverId),
           clientId: payload.clientId,
@@ -399,6 +453,7 @@ const initSocket = (server, corsOptions = {}) => {
           type: "reply",
           deliveryStatus: receiverOnline ? "delivered" : "sent",
           deliveredAt: receiverOnline ? new Date() : undefined,
+          ...replyData,
         });
 
         await directMessage.populate([
@@ -625,11 +680,13 @@ const initSocket = (server, corsOptions = {}) => {
           return;
         }
 
+        const replyData = await buildGroupReplyPreview(group._id, payload.replyTo || payload.replyToId);
         const groupMessage = await GroupMessage.create({
           group: group._id,
           sender: socket.user._id,
           clientId: payload.clientId,
           message: validation.message,
+          ...replyData,
         });
 
         group.updatedAt = new Date();

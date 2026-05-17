@@ -555,10 +555,19 @@ const Home = () => {
       prependPost(post);
       scrollerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
     };
+    const handlePostDeleted = (event) => {
+      if (event.detail?.postId) {
+        removePost(event.detail.postId);
+      }
+    };
 
     window.addEventListener("vibebook:post-created", handlePostCreated);
-    return () => window.removeEventListener("vibebook:post-created", handlePostCreated);
-  }, [prependPost]);
+    window.addEventListener("vibebook:post-deleted", handlePostDeleted);
+    return () => {
+      window.removeEventListener("vibebook:post-created", handlePostCreated);
+      window.removeEventListener("vibebook:post-deleted", handlePostDeleted);
+    };
+  }, [prependPost, removePost]);
 
   useEffect(() => {
     const syncCurrentUserInFeed = (nextUser = currentUser) => {

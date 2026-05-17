@@ -638,6 +638,9 @@ const Profile = () => {
   const [profileCommentOpen, setProfileCommentOpen] = useState("");
   const [profileCommentText, setProfileCommentText] = useState("");
   const [editingPost, setEditingPost] = useState(null);
+  const [postActionMenu, setPostActionMenu] = useState(null);
+  const [deletePostTarget, setDeletePostTarget] = useState(null);
+  const [deletingPostId, setDeletingPostId] = useState("");
   const [activeProfileTab, setActiveProfileTab] = useState("Videos");
   const [mediaViewer, setMediaViewer] = useState(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -1025,23 +1028,29 @@ const Profile = () => {
       return;
     }
 
-    if (!post?._id || !window.confirm("Delete this post?")) {
+    if (!post?._id) {
       return;
     }
 
     const previousUser = user;
     const previousViewer = mediaViewer;
+    setDeletingPostId(post._id);
     removeProfilePost(post._id);
     setLikeStatus("");
 
     try {
       await feedApi.delete(post._id);
       setLikeStatus("Post deleted.");
+      window.dispatchEvent(new CustomEvent("vibebook:post-deleted", { detail: { postId: post._id } }));
     } catch (requestError) {
       setUser(previousUser);
       setMediaViewer(previousViewer);
       replacePost(post);
       setLikeStatus(requestError.response?.data?.message || "Unable to delete post.");
+    } finally {
+      setDeletingPostId("");
+      setDeletePostTarget(null);
+      setPostActionMenu(null);
     }
   };
 
@@ -1939,14 +1948,9 @@ const Profile = () => {
                           <Share2 className="mx-auto h-3.5 w-3.5" />
                         </button>
                         {isOwnProfile ? (
-                          <div className="grid grid-cols-2 gap-1">
-                            <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); setEditingPost(item); }} aria-label="Edit post">
-                              <Pencil className="mx-auto h-3.5 w-3.5" />
-                            </button>
-                            <button type="button" className="rounded-md bg-red-500/80 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); handlePostDelete(item); }} aria-label="Delete post">
-                              <Trash2 className="mx-auto h-3.5 w-3.5" />
-                            </button>
-                          </div>
+                          <button type="button" className="rounded-md bg-white/15 p-1.5 backdrop-blur" onClick={(event) => { event.stopPropagation(); setPostActionMenu(postActionMenu === item._id ? null : item._id); }} aria-label="Post actions">
+                            <Menu className="mx-auto h-3.5 w-3.5" />
+                          </button>
                         ) : (
                           <span className="rounded-md bg-white/15 p-1.5 backdrop-blur">
                             <Eye className="mx-auto h-3.5 w-3.5" />
@@ -1957,17 +1961,31 @@ const Profile = () => {
                   </div>
 
                   {isOwnProfile && itemIsPost && (
-                    <button
-                      type="button"
-                      className="absolute right-2 top-10 z-40 rounded-full bg-slate-950/45 p-2 text-brand opacity-0 shadow backdrop-blur transition group-hover:opacity-100"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleBoostPost(item);
-                      }}
-                      aria-label="Boost post"
-                    >
-                      <Rocket className="h-4 w-4" />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="absolute right-2 top-10 z-40 rounded-full bg-slate-950/45 p-2 text-brand opacity-0 shadow backdrop-blur transition group-hover:opacity-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleBoostPost(item);
+                        }}
+                        aria-label="Boost post"
+                      >
+                        <Rocket className="h-4 w-4" />
+                      </button>
+                      {postActionMenu === item._id && (
+                        <div className="absolute right-2 top-20 z-50 w-40 overflow-hidden rounded-lg bg-white text-sm font-black text-navy shadow-2xl">
+                          <button type="button" className="flex w-full items-center gap-2 px-3 py-2 hover:bg-slate-50" onClick={(event) => { event.stopPropagation(); setEditingPost(item); setPostActionMenu(null); }}>
+                            <Pencil className="h-4 w-4" />
+                            Edit
+                          </button>
+                          <button type="button" className="flex w-full items-center gap-2 px-3 py-2 text-red-600 hover:bg-red-50" disabled={deletingPostId === item._id} onClick={(event) => { event.stopPropagation(); setDeletePostTarget(item); setPostActionMenu(null); }}>
+                            <Trash2 className="h-4 w-4" />
+                            {deletingPostId === item._id ? "Deleting..." : "Delete"}
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </article>
               );
@@ -2068,6 +2086,21 @@ const Profile = () => {
             }
           }}
         />
+      )}
+
+      {deletePostTarget && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/60 p-4 backdrop-blur-sm sm:items-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
+            <h2 className="text-lg font-black text-navy">Delete this post?</h2>
+            <p className="mt-2 text-sm font-semibold text-slate-500">It will disappear from your profile and the feed immediately.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button type="button" className="btn-secondary" onClick={() => setDeletePostTarget(null)} disabled={Boolean(deletingPostId)}>Cancel</button>
+              <button type="button" className="btn-primary bg-red-500 text-white hover:bg-red-600" onClick={() => handlePostDelete(deletePostTarget)} disabled={Boolean(deletingPostId)}>
+                {deletingPostId ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {avatarPreview && (
