@@ -8,6 +8,7 @@ import {
   Camera,
   CheckCircle2,
   ChevronRight,
+  Download,
   FileText,
   Globe2,
   Heart,
@@ -306,6 +307,7 @@ const Settings = () => {
     accountVisibility: user?.accountVisibility || "public",
     allowMessagesFrom: user?.allowMessagesFrom || "everyone",
     allowProfileDiscovery: user?.allowProfileDiscovery !== false,
+    allowVideoDownloads: user?.allowVideoDownloads !== false,
   });
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -340,6 +342,7 @@ const Settings = () => {
       accountVisibility: user?.accountVisibility || "public",
       allowMessagesFrom: user?.allowMessagesFrom || "everyone",
       allowProfileDiscovery: user?.allowProfileDiscovery !== false,
+      allowVideoDownloads: user?.allowVideoDownloads !== false,
     });
     setUsernameFlow({ ...emptyUsernameFlow, value: cleanUsername(user?.username || "") });
   }, [user]);
@@ -981,6 +984,17 @@ const Settings = () => {
               saveSettings(next, "Discovery updated.");
             }}
           />
+          <SettingRow
+            icon={Download}
+            label="Allow people to download my videos"
+            detail="Show a download button on your videos"
+            checked={privacy.allowVideoDownloads}
+            onToggle={(checked) => {
+              const next = { ...privacy, allowVideoDownloads: checked };
+              setPrivacy(next);
+              saveSettings(next, "Download privacy updated.");
+            }}
+          />
         </SettingsSection>
 
         <SettingsSection title="Notifications" icon={Bell}>
@@ -1295,6 +1309,21 @@ const Settings = () => {
                     const next = { ...privacy, allowProfileDiscovery: event.target.checked };
                     setPrivacy(next);
                     saveSettings(next, "Discovery updated.");
+                  }}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-4 rounded-lg bg-surface p-4 text-sm font-bold text-slate-700">
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <Download className="h-4 w-4 text-slate-500" />
+                  <span className="truncate">Allow people to download my videos</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={privacy.allowVideoDownloads}
+                  onChange={(event) => {
+                    const next = { ...privacy, allowVideoDownloads: event.target.checked };
+                    setPrivacy(next);
+                    saveSettings(next, "Download privacy updated.");
                   }}
                 />
               </label>

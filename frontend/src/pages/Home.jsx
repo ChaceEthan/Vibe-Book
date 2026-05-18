@@ -81,15 +81,6 @@ const safeDownloadFilename = (item = {}) => {
   return `VibeBook-${creator}-${id}.${extension}`;
 };
 
-const getDownloadAuthHeaders = () => {
-  try {
-    const token = localStorage.getItem("token") || localStorage.getItem("vibebook_token");
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  } catch {
-    return {};
-  }
-};
-
 const initialsFor = (value = "VibeBook") =>
   String(value)
     .trim()
@@ -121,7 +112,7 @@ const ActionButton = memo(({ active = false, count, label, onClick, children }) 
   <div className="flex min-w-0 flex-col items-center gap-1">
     <button
       type="button"
-      className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-lg backdrop-blur transition duration-150 active:scale-90 sm:h-12 sm:w-12 ${
+      className={`flex h-10 w-10 items-center justify-center rounded-full text-white shadow-lg backdrop-blur transition duration-150 active:scale-90 sm:h-10 sm:w-10 lg:h-11 lg:w-11 ${
         active ? "scale-105 bg-white text-navy" : "bg-slate-950/28 hover:bg-slate-950/45"
       }`}
       onClick={onClick}
@@ -129,14 +120,19 @@ const ActionButton = memo(({ active = false, count, label, onClick, children }) 
     >
       {children}
     </button>
-    <span className="max-w-14 truncate text-[10px] font-black leading-none text-white drop-shadow sm:text-[11px]">{count}</span>
+    <span className="max-w-12 truncate text-[10px] font-black leading-none text-white drop-shadow">{count}</span>
   </div>
 ));
 
-const DownloadButton = memo(({ item }) => {
+const filenameFromDisposition = (value = "") => {
+  const match = String(value).match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i);
+  return match ? decodeURIComponent(match[1]) : "";
+};
+
+const DownloadButton = memo(({ disabled = false, item }) => {
   const [status, setStatus] = useState("idle");
   const resetTimerRef = useRef(null);
-  const statusText = status === "loading" ? "Saving" : status === "success" ? "Saved" : status === "error" ? "Retry" : "Download";
+  const statusText = disabled ? "Off" : status === "loading" ? "Saving" : status === "success" ? "Saved" : status === "error" ? "Retry" : "Save";
   const Icon = status === "loading" ? Loader2 : status === "success" ? Check : Download;
 
   useEffect(() => {
@@ -162,14 +158,11 @@ const DownloadButton = memo(({ item }) => {
     event.preventDefault();
     event.stopPropagation();
 
-    if (status === "loading") {
+    if (disabled || status === "loading") {
       return;
     }
 
-    const source = item?.downloadUrl || item?.downloadableUrl || item?.url || item?.mediaUrl;
-    const href = source ? mediaUrl(source) : "";
-
-    if (!href) {
+    if (!item?._id) {
       setStatus("error");
       scheduleReset(2200);
       return;
@@ -178,16 +171,8 @@ const DownloadButton = memo(({ item }) => {
     setStatus("loading");
 
     try {
-      const response = await fetch(href, {
-        credentials: "include",
-        headers: getDownloadAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error("Video download failed.");
-      }
-
-      const blob = await response.blob();
+      const response = await feedApi.downloadVideo(item._id);
+      const blob = response.data;
 
       if (!blob.size) {
         throw new Error("Video download was empty.");
@@ -196,7 +181,7 @@ const DownloadButton = memo(({ item }) => {
       const blobUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = blobUrl;
-      anchor.download = safeDownloadFilename(item);
+      anchor.download = filenameFromDisposition(response.headers?.["content-disposition"]) || safeDownloadFilename(item);
       anchor.rel = "noopener";
       document.body.appendChild(anchor);
       anchor.click();
@@ -205,21 +190,8 @@ const DownloadButton = memo(({ item }) => {
       setStatus("success");
       scheduleReset();
     } catch {
-      try {
-        const anchor = document.createElement("a");
-        anchor.href = href;
-        anchor.download = safeDownloadFilename(item);
-        anchor.rel = "noopener";
-        anchor.target = "_blank";
-        document.body.appendChild(anchor);
-        anchor.click();
-        anchor.remove();
-        setStatus("success");
-        scheduleReset(2200);
-      } catch {
-        setStatus("error");
-        scheduleReset(2600);
-      }
+      setStatus("error");
+      scheduleReset(2600);
     }
   };
 
@@ -227,20 +199,23 @@ const DownloadButton = memo(({ item }) => {
     <div className="flex min-w-0 flex-col items-center gap-1">
       <button
         type="button"
-        className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/15 text-white shadow-lg backdrop-blur transition duration-150 hover:-translate-y-0.5 active:scale-90 sm:h-11 sm:w-11 ${
-          status === "success"
+        title={disabled ? "Downloads disabled by creator" : "Download video"}
+        className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/15 text-white shadow-lg backdrop-blur transition duration-150 hover:-translate-y-0.5 active:scale-90 sm:h-10 sm:w-10 lg:h-11 lg:w-11 ${
+          disabled
+            ? "bg-slate-950/18 text-white/45"
+            : status === "success"
             ? "bg-emerald-400 text-slate-950"
             : status === "error"
               ? "bg-red-500/88"
               : "bg-slate-950/34 hover:bg-slate-950/52"
         }`}
         onClick={handleDownload}
-        disabled={status === "loading"}
-        aria-label={status === "loading" ? "Downloading video" : "Download video"}
+        disabled={disabled || status === "loading"}
+        aria-label={disabled ? "Downloads disabled by creator" : status === "loading" ? "Downloading video" : "Download video"}
       >
         <Icon className={`h-5 w-5 ${status === "loading" ? "animate-spin" : ""}`} />
       </button>
-      <span className="max-w-14 truncate text-[10px] font-black leading-none text-white drop-shadow sm:text-[11px]">{statusText}</span>
+      <span className="max-w-12 truncate text-[10px] font-black leading-none text-white drop-shadow">{statusText}</span>
     </div>
   );
 });
@@ -280,6 +255,7 @@ const FeedItem = memo(
     const hasLongCaption = caption.length > 120;
     const currentUserImage = currentUser?.profilePicture || currentUser?.profileImage || currentUser?.images?.[0] || "";
     const showVideoBranding = isVideoFeedItem(item);
+    const downloadsAllowed = isOwnProfile || profile.allowVideoDownloads !== false;
 
     const addActivityBurst = (kind) => {
       const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -351,13 +327,14 @@ const FeedItem = memo(
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[34%] bg-gradient-to-t from-slate-950/70 via-slate-950/18 to-transparent" />
 
         {showVideoBranding && (
-          <div className="pointer-events-none absolute bottom-[calc(14.5rem+env(safe-area-inset-bottom))] left-3 z-20 max-w-[calc(100%-6.75rem)] sm:bottom-[calc(15.5rem+env(safe-area-inset-bottom))] sm:left-5 sm:max-w-sm">
-            <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-white/14 bg-slate-950/24 px-2.5 py-1.5 text-white shadow-[0_10px_30px_rgba(2,6,23,0.28)] backdrop-blur-md">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/90 text-[10px] font-black text-navy shadow-sm">VB</span>
-              <span className="min-w-0 truncate text-[11px] font-black leading-none drop-shadow sm:text-xs">
-                VibeBook{profile.username ? ` @${profile.username}` : ""}
-              </span>
-            </div>
+          <div className="pointer-events-none absolute bottom-[calc(13.8rem+env(safe-area-inset-bottom))] left-3 z-20 sm:bottom-[calc(14.8rem+env(safe-area-inset-bottom))] sm:left-5">
+            <img
+              src="/logo.png"
+              alt=""
+              aria-hidden="true"
+              className="h-8 w-8 rounded-full border border-white/20 bg-white/18 object-cover opacity-55 shadow-[0_4px_18px_rgba(2,6,23,0.35)] backdrop-blur-sm sm:h-9 sm:w-9"
+              draggable={false}
+            />
           </div>
         )}
 
@@ -431,7 +408,7 @@ const FeedItem = memo(
           ))}
         </div>
 
-        <div className="home-feed-actions absolute bottom-[calc(4.9rem+env(safe-area-inset-bottom))] right-3 z-20 flex flex-col items-center gap-2.5 sm:bottom-[calc(5.3rem+env(safe-area-inset-bottom))] sm:right-5">
+        <div className="home-feed-actions absolute bottom-[calc(4.65rem+env(safe-area-inset-bottom))] right-2 z-20 flex max-h-[calc(100%-7.5rem)] w-12 flex-col items-center justify-end gap-2 overflow-visible sm:bottom-[calc(5rem+env(safe-area-inset-bottom))] sm:right-4 lg:right-6 lg:w-14">
           <ActionButton active={item.likedByViewer} count={formatCount(item.likes || item.likeCount)} label="Like media" onClick={handleLikePress}>
             <Heart className={`h-6 w-6 ${item.likedByViewer ? "fill-red-500 text-red-500" : ""}`} />
           </ActionButton>
@@ -444,7 +421,7 @@ const FeedItem = memo(
             <Share2 className="h-6 w-6" />
           </ActionButton>
 
-          {showVideoBranding && <DownloadButton item={item} />}
+          {showVideoBranding && <DownloadButton disabled={!downloadsAllowed} item={item} />}
 
           <ActionButton active={item.savedByViewer} count={formatCount(saveCount)} label="Save post" onClick={() => onSave(item)}>
             <Bookmark className={`h-6 w-6 ${item.savedByViewer ? "fill-brand text-brand" : ""}`} />

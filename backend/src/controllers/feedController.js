@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { Readable } = require("stream");
 
 const Feed = require("../models/Feed");
 const User = require("../models/User");
@@ -25,7 +26,7 @@ const {
   uniqueTopics,
 } = require("../utils/feedRanking");
 
-const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified province district createdAt updatedAt profileTheme creatorBadges marketplace creatorLevel creatorTier";
+const userSelect = "name username role category skills price location profileImage profilePicture images gallery imageDescriptions videos videoUrls videoDescriptions averageRating rating likes likedBy followers following viewsCount totalWatchTime interests likedTopics favoriteCreators earnings isPremium premiumBadge isVerified allowVideoDownloads province district createdAt updatedAt profileTheme creatorBadges marketplace creatorLevel creatorTier";
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 30;
 
@@ -53,6 +54,25 @@ const cloudinaryPublicIdFromUrl = (url = "") => {
   const value = String(url || "");
   const match = value.match(/\/(?:image|video)\/upload\/(?:v\d+\/)?(.+?)(?:\.[a-z0-9]+)?(?:[?#].*)?$/i);
   return match ? decodeURIComponent(match[1]) : "";
+};
+
+const cloudinaryLogoWatermarkUrl = (url = "") => {
+  const value = String(url || "");
+  const watermark = "l_text:Arial_48_bold:VB,co_white,o_38,g_south_east,x_28,y_28";
+  return value.replace(/\/video\/upload\//i, `/video/upload/${watermark}/`);
+};
+
+const safeVideoFilename = (item = {}) => {
+  const creator = String(item.userId?.username || item.userId?.name || "creator")
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/[^a-z0-9-_]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36) || "creator";
+  const extension = String(item.mediaUrl || "").split(/[?#]/)[0].match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() || "mp4";
+  const id = String(item._id || Date.now()).slice(-8);
+
+  return `VibeBook-${creator}-${id}.${extension}`;
 };
 
 const parsePositiveInt = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
@@ -282,6 +302,7 @@ const buildProfile = (user, viewer = null) => {
     premiumBadge: user?.premiumBadge || user?.isPremium,
     isVerified: user?.isVerified,
     verified: user?.isVerified,
+    allowVideoDownloads: user?.allowVideoDownloads !== false,
     profileTheme: user?.marketplace?.equippedTheme || user?.profileTheme || "classic",
     equippedFrame: user?.marketplace?.equippedFrame || "",
     equippedBadges: Array.isArray(user?.marketplace?.equippedBadges) && user.marketplace.equippedBadges.length ? user.marketplace.equippedBadges : Array.isArray(user?.creatorBadges) ? user.creatorBadges : [],
@@ -989,6 +1010,54 @@ const editPost = async (req, res, next) => {
   }
 };
 
+const downloadPostVideo = async (req, res, next) => {
+  try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "Valid post id is required" });
+    }
+
+    const item = await Feed.findById(req.params.id).populate("userId", userSelect);
+
+    if (!item || item.type !== "video" || !hasMediaUrl(item.mediaUrl)) {
+      return res.status(404).json({ message: "Video not found" });
+    }
+
+    const ownerId = idOf(item.userId?._id || item.userId);
+    const viewerId = idOf(req.user?._id);
+    const isOwner = Boolean(viewerId && ownerId && viewerId === ownerId);
+    const isAdmin = req.user?.role === "admin";
+
+    if (!isOwner && !isAdmin && item.userId?.allowVideoDownloads === false) {
+      return res.status(403).json({ message: "Downloads disabled by creator" });
+    }
+
+    const sourceUrl = cloudinaryLogoWatermarkUrl(normalizeStoredUploadPath(item.mediaUrl));
+    const upstream = await fetch(sourceUrl, {
+      headers: {
+        Accept: "video/*,application/octet-stream;q=0.9,*/*;q=0.8",
+      },
+    });
+
+    if (!upstream.ok || !upstream.body) {
+      return res.status(502).json({ message: "Unable to prepare video download" });
+    }
+
+    res.setHeader("Content-Type", upstream.headers.get("content-type") || "video/mp4");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeVideoFilename(item)}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+
+    const length = upstream.headers.get("content-length");
+    if (length) {
+      res.setHeader("Content-Length", length);
+    }
+
+    return Readable.fromWeb(upstream.body).pipe(res);
+  } catch (error) {
+    console.error(`[post:download] ${error.message}`);
+    return next(error);
+  }
+};
+
 const deletePost = async (req, res, next) => {
   try {
     if (!isValidObjectId(req.params.id)) {
@@ -1040,6 +1109,7 @@ const deletePost = async (req, res, next) => {
 module.exports = {
   addFeedComment,
   deletePost,
+  downloadPostVideo,
   editPost,
   getFeed,
   getRecommendations,

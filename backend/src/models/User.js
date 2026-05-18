@@ -604,6 +604,10 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true,
   },
+  allowVideoDownloads: {
+    type: Boolean,
+    default: true,
+  },
   allowMessagesFrom: {
     type: String,
     enum: ["everyone", "followers", "none"],

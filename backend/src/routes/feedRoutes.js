@@ -3,6 +3,7 @@ const express = require("express");
 const {
   addFeedComment,
   deletePost,
+  downloadPostVideo,
   editPost,
   getFeed,
   incrementPostView,
@@ -17,6 +18,7 @@ const optionalAuthMiddleware = require("../middleware/optionalAuthMiddleware");
 const router = express.Router();
 
 router.get("/", optionalAuthMiddleware, getFeed);
+router.get("/:id/download", optionalAuthMiddleware, downloadPostVideo);
 router.post("/:id/view", optionalAuthMiddleware, incrementPostView);
 router.patch("/:id/edit", authMiddleware, editPost);
 router.delete("/:id", authMiddleware, deletePost);

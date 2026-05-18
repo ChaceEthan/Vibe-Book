@@ -487,6 +487,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     notificationEnabled: options.includePrivate ? user.notificationEnabled !== false : undefined,
     accountVisibility: options.includePrivate ? user.accountVisibility || "public" : undefined,
     allowProfileDiscovery: options.includePrivate ? user.allowProfileDiscovery !== false : undefined,
+    allowVideoDownloads: user.allowVideoDownloads !== false,
     allowMessagesFrom: options.includePrivate ? user.allowMessagesFrom || "everyone" : undefined,
     blockedUsers: options.includePrivate ? user.blockedUsers || [] : undefined,
     usernameHistory: options.includePrivate ? user.usernameHistory || [] : undefined,

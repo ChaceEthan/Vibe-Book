@@ -298,6 +298,7 @@ const userResponse = (user) => {
     notificationEnabled: user.notificationEnabled !== false,
     accountVisibility: user.accountVisibility || "public",
     allowProfileDiscovery: user.allowProfileDiscovery !== false,
+    allowVideoDownloads: user.allowVideoDownloads !== false,
     allowMessagesFrom: user.allowMessagesFrom || "everyone",
     blockedUsers: user.blockedUsers || [],
     referralCode: user.referralCode,

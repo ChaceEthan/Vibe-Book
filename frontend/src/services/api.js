@@ -202,6 +202,7 @@ export const userApi = {
 
 export const feedApi = {
   get: (params = {}) => API.get("/posts", { params }),
+  downloadVideo: (id) => API.get(`/posts/${id}/download`, { responseType: "blob", timeout: UPLOAD_TIMEOUT_MS }),
   toggleLike: (id, payload = {}) => API.post(`/posts/${id}/like`, payload),
   addComment: (id, payload) => API.post(`/posts/${id}/comments`, payload),
   recordView: (id, payload = {}) => API.post(`/posts/${id}/view`, payload),

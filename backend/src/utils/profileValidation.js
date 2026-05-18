@@ -363,6 +363,10 @@ const normalizeProfileFields = (body, options = {}) => {
     data.allowProfileDiscovery = body.allowProfileDiscovery === true || body.allowProfileDiscovery === "true";
   }
 
+  if (hasOwn(body, "allowVideoDownloads")) {
+    data.allowVideoDownloads = body.allowVideoDownloads === true || body.allowVideoDownloads === "true";
+  }
+
   if (data.role && !data.category) {
     data.category = defaultCategoryByRole[data.role];
   }
