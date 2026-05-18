@@ -2,7 +2,10 @@
 import {
   BadgeCheck,
   Bookmark,
+  Check,
+  Download,
   Heart,
+  Loader2,
   MessageCircle,
   RefreshCw,
   Search,
@@ -57,6 +60,36 @@ const numericCount = (value) => {
   return Number.isFinite(count) ? count : 0;
 };
 
+const isVideoFeedItem = (item = {}) => {
+  const value = String(item.url || item.mediaUrl || "");
+  return item.type === "video" || /\.(mp4|mov|m4v|webm|avi|3gp|3g2|mpeg|mpg)(?:$|[?#])/i.test(value) || value.includes("/video/upload/");
+};
+
+const safeDownloadFilename = (item = {}) => {
+  const profile = item.userId || {};
+  const source = String(item.url || item.mediaUrl || "");
+  const extensionMatch = source.split(/[?#]/)[0].match(/\.([a-z0-9]{2,5})$/i);
+  const extension = extensionMatch?.[1]?.toLowerCase() || "mp4";
+  const creator = String(profile.username || profile.name || "creator")
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/[^a-z0-9-_]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36) || "creator";
+  const id = String(item._id || Date.now()).slice(-8);
+
+  return `VibeBook-${creator}-${id}.${extension}`;
+};
+
+const getDownloadAuthHeaders = () => {
+  try {
+    const token = localStorage.getItem("token") || localStorage.getItem("vibebook_token");
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+};
+
 const initialsFor = (value = "VibeBook") =>
   String(value)
     .trim()
@@ -100,6 +133,118 @@ const ActionButton = memo(({ active = false, count, label, onClick, children }) 
   </div>
 ));
 
+const DownloadButton = memo(({ item }) => {
+  const [status, setStatus] = useState("idle");
+  const resetTimerRef = useRef(null);
+  const statusText = status === "loading" ? "Saving" : status === "success" ? "Saved" : status === "error" ? "Retry" : "Download";
+  const Icon = status === "loading" ? Loader2 : status === "success" ? Check : Download;
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        window.clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const scheduleReset = (delay = 1800) => {
+    if (resetTimerRef.current) {
+      window.clearTimeout(resetTimerRef.current);
+    }
+
+    resetTimerRef.current = window.setTimeout(() => {
+      setStatus("idle");
+      resetTimerRef.current = null;
+    }, delay);
+  };
+
+  const handleDownload = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (status === "loading") {
+      return;
+    }
+
+    const source = item?.downloadUrl || item?.downloadableUrl || item?.url || item?.mediaUrl;
+    const href = source ? mediaUrl(source) : "";
+
+    if (!href) {
+      setStatus("error");
+      scheduleReset(2200);
+      return;
+    }
+
+    setStatus("loading");
+
+    try {
+      const response = await fetch(href, {
+        credentials: "include",
+        headers: getDownloadAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error("Video download failed.");
+      }
+
+      const blob = await response.blob();
+
+      if (!blob.size) {
+        throw new Error("Video download was empty.");
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = blobUrl;
+      anchor.download = safeDownloadFilename(item);
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1200);
+      setStatus("success");
+      scheduleReset();
+    } catch {
+      try {
+        const anchor = document.createElement("a");
+        anchor.href = href;
+        anchor.download = safeDownloadFilename(item);
+        anchor.rel = "noopener";
+        anchor.target = "_blank";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setStatus("success");
+        scheduleReset(2200);
+      } catch {
+        setStatus("error");
+        scheduleReset(2600);
+      }
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col items-center gap-1">
+      <button
+        type="button"
+        className={`flex h-10 w-10 items-center justify-center rounded-full border border-white/15 text-white shadow-lg backdrop-blur transition duration-150 hover:-translate-y-0.5 active:scale-90 sm:h-11 sm:w-11 ${
+          status === "success"
+            ? "bg-emerald-400 text-slate-950"
+            : status === "error"
+              ? "bg-red-500/88"
+              : "bg-slate-950/34 hover:bg-slate-950/52"
+        }`}
+        onClick={handleDownload}
+        disabled={status === "loading"}
+        aria-label={status === "loading" ? "Downloading video" : "Download video"}
+      >
+        <Icon className={`h-5 w-5 ${status === "loading" ? "animate-spin" : ""}`} />
+      </button>
+      <span className="max-w-14 truncate text-[10px] font-black leading-none text-white drop-shadow sm:text-[11px]">{statusText}</span>
+    </div>
+  );
+});
+
 const FeedItem = memo(
   ({
     currentUser,
@@ -134,6 +279,7 @@ const FeedItem = memo(
     const caption = String(item.caption || "");
     const hasLongCaption = caption.length > 120;
     const currentUserImage = currentUser?.profilePicture || currentUser?.profileImage || currentUser?.images?.[0] || "";
+    const showVideoBranding = isVideoFeedItem(item);
 
     const addActivityBurst = (kind) => {
       const id = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -203,6 +349,17 @@ const FeedItem = memo(
 
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-slate-950/35 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[34%] bg-gradient-to-t from-slate-950/70 via-slate-950/18 to-transparent" />
+
+        {showVideoBranding && (
+          <div className="pointer-events-none absolute bottom-[calc(14.5rem+env(safe-area-inset-bottom))] left-3 z-20 max-w-[calc(100%-6.75rem)] sm:bottom-[calc(15.5rem+env(safe-area-inset-bottom))] sm:left-5 sm:max-w-sm">
+            <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-white/14 bg-slate-950/24 px-2.5 py-1.5 text-white shadow-[0_10px_30px_rgba(2,6,23,0.28)] backdrop-blur-md">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/90 text-[10px] font-black text-navy shadow-sm">VB</span>
+              <span className="min-w-0 truncate text-[11px] font-black leading-none drop-shadow sm:text-xs">
+                VibeBook{profile.username ? ` @${profile.username}` : ""}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="home-feed-caption absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-center gap-3">
@@ -286,6 +443,8 @@ const FeedItem = memo(
           <ActionButton count={formatCount(item.shareCount)} label="Share post" onClick={() => onShare(item)}>
             <Share2 className="h-6 w-6" />
           </ActionButton>
+
+          {showVideoBranding && <DownloadButton item={item} />}
 
           <ActionButton active={item.savedByViewer} count={formatCount(saveCount)} label="Save post" onClick={() => onSave(item)}>
             <Bookmark className={`h-6 w-6 ${item.savedByViewer ? "fill-brand text-brand" : ""}`} />
