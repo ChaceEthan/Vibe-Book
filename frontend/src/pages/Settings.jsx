@@ -40,8 +40,8 @@ import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
-import { authApi, mediaUrl, userApi } from "../services/api";
-import { handleAvatarError } from "../utils/profileImage";
+import { authApi, userApi } from "../services/api";
+import { getSafeProfileImage, handleAvatarError } from "../utils/profileImage";
 
 const PHONE_COUNTRIES = [
   { country: "Rwanda", code: "+250", label: "RW" },
@@ -324,7 +324,7 @@ const Settings = () => {
   const [avatarSaving, setAvatarSaving] = useState(false);
   const avatarInputRef = useRef(null);
 
-  const profileImage = mediaUrl(user?.profilePicture || user?.profileImage || "");
+  const profileImage = getSafeProfileImage(user);
   const activeCountry = useMemo(
     () => PHONE_COUNTRIES.find((item) => item.country === phoneForm.country) || PHONE_COUNTRIES[0],
     [phoneForm.country]

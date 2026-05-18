@@ -15,12 +15,17 @@ const {
 const { removeFiles } = require("../utils/fileCleanup");
 const { analyzePostMetadata } = require("../utils/aiTagging");
 const { rankingFieldsForPost, uniqueTopics } = require("../utils/feedRanking");
+const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { getUploadedVideoDurationSeconds } = require("../utils/videoDuration");
 
 const router = express.Router();
 const MAX_VIDEO_SECONDS = 120;
 
 const cleanDescription = (value) => (typeof value === "string" ? value.trim().slice(0, 500) : "");
+const hasCustomProfileImage = (user = {}) => {
+  const image = String(user.profilePicture || user.profileImage || "").trim();
+  return Boolean(image && image !== DEFAULT_PROFILE_IMAGE_PATH);
+};
 const normalizeOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
 const parseDuration = (value) => {
   const duration = Number(value || 0);
@@ -146,7 +151,7 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
       };
     }
 
-    if (type === "image" && !req.user.profilePicture && !req.user.profileImage) {
+    if (type === "image" && !hasCustomProfileImage(req.user)) {
       update.$set = {
         profilePicture: url,
         profileImage: url,

@@ -2,8 +2,9 @@
 import { ShieldCheck, Star, Trash2, UserX } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { adminApi, mediaUrl } from "../services/api";
+import { adminApi } from "../services/api";
 
 const Admin = () => {
   const { user } = useAuth();
@@ -88,11 +89,7 @@ const Admin = () => {
             {users.map((item) => (
               <article key={item._id} className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-3">
-                  <img
-                    src={mediaUrl(item.profilePicture || item.profileImage || item.images?.[0])}
-                    alt=""
-                    className="h-12 w-12 shrink-0 rounded-lg object-cover"
-                  />
+                  <SafeAvatar user={item} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
                   <div className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
                       <h3 className="truncate font-black text-navy">{item.name}</h3>

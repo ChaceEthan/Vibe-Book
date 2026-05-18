@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useEffect, useMemo, useState } from "react";
 
-import { getSafeProfileImage, handleAvatarError } from "../utils/profileImage";
+import { getDefaultAvatar, getSafeProfileImage, handleAvatarError, resolveProfileImage } from "../utils/profileImage";
 
 const SafeAvatar = ({
   user,
@@ -12,7 +12,8 @@ const SafeAvatar = ({
   fallbackClassName = "",
   ...props
 }) => {
-  const nextSrc = useMemo(() => src || getSafeProfileImage(user), [src, user]);
+  const fallbackSrc = useMemo(() => getDefaultAvatar(), []);
+  const nextSrc = useMemo(() => (src ? resolveProfileImage(src) : getSafeProfileImage(user)), [src, user]);
   const [displaySrc, setDisplaySrc] = useState(nextSrc);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ const SafeAvatar = ({
     };
     image.onerror = () => {
       if (!canceled) {
-        setDisplaySrc(getSafeProfileImage({}));
+        setDisplaySrc(fallbackSrc);
       }
     };
     image.src = nextSrc;
@@ -38,7 +39,7 @@ const SafeAvatar = ({
     return () => {
       canceled = true;
     };
-  }, [displaySrc, nextSrc]);
+  }, [displaySrc, fallbackSrc, nextSrc]);
 
   return (
     <img
@@ -49,7 +50,7 @@ const SafeAvatar = ({
       decoding="async"
       onError={(event) => {
         handleAvatarError(event);
-        setDisplaySrc(getSafeProfileImage({}));
+        setDisplaySrc(fallbackSrc);
       }}
       {...props}
     />

@@ -1,5 +1,6 @@
 // @ts-nocheck
 const mongoose = require("mongoose");
+const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 
 const allowedRoles = ["dancer", "dj", "mc", "artist", "crew", "admin"];
 const allowedTypes = ["single", "crew"];
@@ -226,12 +227,12 @@ const userSchema = new mongoose.Schema({
   profileImage: {
     type: String,
     trim: true,
-    default: "",
+    default: DEFAULT_PROFILE_IMAGE_PATH,
   },
   profilePicture: {
     type: String,
     trim: true,
-    default: "",
+    default: DEFAULT_PROFILE_IMAGE_PATH,
   },
   images: {
     type: [String],

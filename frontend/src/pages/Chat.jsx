@@ -106,7 +106,7 @@ const avatarImageFor = (profile = {}) =>
 
 const Avatar = memo(({ profile, size = "h-9 w-9", className = "" }) => {
   const image = avatarImageFor(profile || {});
-  return <SafeAvatar user={profile} src={image ? mediaUrl(image) : ""} className={`${size} shrink-0 rounded-full object-cover ${className}`} />;
+  return <SafeAvatar user={profile} src={image} className={`${size} shrink-0 rounded-full object-cover ${className}`} />;
 });
 
 Avatar.displayName = "Avatar";

@@ -19,7 +19,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import PostMedia from "../components/PostMedia.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { feedApi, mediaUrl, userApi } from "../services/api";
+import { feedApi, userApi } from "../services/api";
 
 const RECENT_KEY = "vibebook:recent-searches";
 const tabs = ["Top", "Users", "Videos", "Hashtags", "Sounds"];
@@ -131,7 +131,7 @@ const UserResultCard = ({ currentUser, onFollow, user }) => {
   return (
     <article className="flex min-w-0 gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg">
       <Link to={`/profile/${user._id}`} className="shrink-0">
-        <SafeAvatar user={user} src={image ? mediaUrl(image) : ""} className="h-16 w-16 rounded-full object-cover ring-2 ring-white" />
+        <SafeAvatar user={user} src={image} className="h-16 w-16 rounded-full object-cover ring-2 ring-white" />
       </Link>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -185,7 +185,7 @@ const VideoCard = ({ post }) => {
         <div className="absolute inset-x-0 bottom-0 p-3 text-white">
           <p className="line-clamp-2 text-xs font-bold leading-4">{post.caption || "VibeBook video"}</p>
           <div className="mt-2 flex min-w-0 items-center gap-2">
-            <SafeAvatar user={creator} src={profileImage ? mediaUrl(profileImage) : ""} className="h-7 w-7 rounded-full object-cover ring-1 ring-white/70" />
+            <SafeAvatar user={creator} src={profileImage} className="h-7 w-7 rounded-full object-cover ring-1 ring-white/70" />
             <span className="min-w-0 truncate text-xs font-black">@{creator.username || creator.name || "creator"}</span>
           </div>
         </div>

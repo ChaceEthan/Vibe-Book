@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { getSafeProfileImage } from "./profileImage";
+
 export const NOTIFICATION_SYNC_EVENT = "vibebook:notifications-unread";
 
 export const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -9,7 +11,7 @@ export const notificationDataFor = (notification = {}) => (notification.data && 
 
 export const avatarFor = (notification = {}) => {
   const actor = actorFor(notification);
-  return actor?.profilePicture || actor?.profileImage || actor?.images?.[0] || "";
+  return actor ? getSafeProfileImage(actor) : "";
 };
 
 export const actorVerified = (actor = {}) => Boolean(actor?.isVerified || actor?.verified || actor?.premiumBadge);
