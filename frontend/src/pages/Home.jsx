@@ -18,6 +18,8 @@ import { Link, useNavigate } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
+import LiveDiscoveryRow from "../components/LiveDiscoveryRow.jsx";
+import LiveStreamViewer from "../components/LiveStreamViewer.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, getApiErrorMessage, isRetryableApiError, mediaUrl, userApi } from "../services/api";
 import { isValidPost, usePostStore } from "../store/postStore";
@@ -609,6 +611,7 @@ const Home = () => {
   const [activePostId, setActivePostId] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(readFeedAudioPreference);
   const [audioUnlockToken, setAudioUnlockToken] = useState(0);
+  const [selectedLiveStream, setSelectedLiveStream] = useState(null);
   const scrollerRef = useRef(null);
   const loadMoreRef = useRef(null);
   const feedRequestRef = useRef("");
@@ -622,6 +625,18 @@ const Home = () => {
   const pullDistanceRef = useRef(0);
   const isPullingRef = useRef(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const handleLiveStarted = (event) => {
+      const stream = event.detail?.stream;
+      if (stream?.id) {
+        setSelectedLiveStream(stream);
+      }
+    };
+
+    window.addEventListener("vibebook:live-started", handleLiveStarted);
+    return () => window.removeEventListener("vibebook:live-started", handleLiveStarted);
+  }, []);
 
   const replaceFeedItem = useCallback((nextItem, options = {}) => {
     replacePost(nextItem, options);
@@ -1343,6 +1358,9 @@ const Home = () => {
       >
         {visibleFeed.length ? (
           <>
+            <div className="sticky top-0 z-10 bg-slate-950 border-b border-white/10">
+              <LiveDiscoveryRow onStreamClick={(stream) => setSelectedLiveStream(stream)} />
+            </div>
             {visibleFeed.map((item, index) => (
               <FeedItem
                 key={item._id || `${item.url}-${index}`}
@@ -1410,6 +1428,13 @@ const Home = () => {
         onToggleCommentLike={toggleCommentLike}
         post={activeCommentPost}
       />
+
+      {selectedLiveStream && (
+        <LiveStreamViewer
+          streamId={selectedLiveStream.id}
+          onClose={() => setSelectedLiveStream(null)}
+        />
+      )}
     </section>
   );
 };

@@ -34,7 +34,7 @@ const DEFAULT_FRONTEND_URL = "https://vibe-book-kappa.vercel.app";
 export const FRONTEND_BASE_URL = DEFAULT_FRONTEND_URL;
 export const referralUrlFor = (referralCode = "") => `${FRONTEND_BASE_URL}/register?ref=${encodeURIComponent(String(referralCode || "").trim())}`;
 
-const API = axios.create({
+export const API = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
   timeout: 25000,

@@ -38,6 +38,7 @@ const TRANSACTION_SOURCES = {
   FIRST_TIME_BONUS: "first_time_bonus",
   REDEEM: "redeem",
   QR_TRANSFER: "qr_transfer",
+  TRANSFER: "transfer",
   POST_VIEW: "post_view",
   LIKE_REWARD: "like_reward",
   COMMENT_REWARD: "comment_reward",

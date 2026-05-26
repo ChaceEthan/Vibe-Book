@@ -1,0 +1,224 @@
+// @ts-nocheck
+/**
+ * LiveStream Model
+ * Stores active and completed livestreams
+ */
+
+const mongoose = require("mongoose");
+
+const liveStreamSchema = new mongoose.Schema(
+  {
+    creatorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      index: true,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 120,
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: "",
+    },
+    category: {
+      type: String,
+      enum: ["gaming", "music", "art", "talk", "performance", "education", "lifestyle", "other"],
+      default: "other",
+      index: true,
+    },
+    tags: {
+      type: [String],
+      default: [],
+      maxlength: 5,
+    },
+    status: {
+      type: String,
+      enum: ["scheduled", "live", "ended", "archived"],
+      default: "live",
+      index: true,
+    },
+    privacyLevel: {
+      type: String,
+      enum: ["public", "friends", "private"],
+      default: "public",
+    },
+    thumbnail: {
+      type: String,
+      default: null,
+    },
+    coverImage: {
+      type: String,
+      default: null,
+    },
+    streamUrl: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    streamKey: {
+      type: String,
+      trim: true,
+      select: false,
+      default: null,
+    },
+    viewerCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    maxViewers: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    duration: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    settings: {
+      commentsEnabled: {
+        type: Boolean,
+        default: true,
+      },
+      giftsEnabled: {
+        type: Boolean,
+        default: true,
+      },
+      allowReactions: {
+        type: Boolean,
+        default: true,
+      },
+      moderatorIds: {
+        type: [mongoose.Schema.Types.ObjectId],
+        ref: "User",
+        default: [],
+      },
+      qualityOptions: {
+        type: [String],
+        enum: ["360p", "480p", "720p", "1080p"],
+        default: ["720p"],
+      },
+      selectedQuality: {
+        type: String,
+        enum: ["360p", "480p", "720p", "1080p"],
+        default: "720p",
+      },
+      followerOnlyChat: {
+        type: Boolean,
+        default: false,
+      },
+      moderationEnabled: {
+        type: Boolean,
+        default: true,
+      },
+      liveNotifications: {
+        type: Boolean,
+        default: true,
+      },
+      beautyFilter: {
+        type: String,
+        trim: true,
+        default: "natural",
+        maxlength: 40,
+      },
+      backgroundTheme: {
+        type: String,
+        trim: true,
+        default: "classic",
+        maxlength: 40,
+      },
+      effectsPreset: {
+        type: String,
+        trim: true,
+        default: "none",
+        maxlength: 40,
+      },
+      pkBattleReady: {
+        type: Boolean,
+        default: false,
+      },
+    },
+    stats: {
+      totalViews: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      totalEngagement: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      giftsReceived: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      giftValue: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      avgViewDuration: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+    },
+    scheduledStartTime: {
+      type: Date,
+      default: null,
+    },
+    startedAt: {
+      type: Date,
+      default: null,
+    },
+    endedAt: {
+      type: Date,
+      default: null,
+    },
+    replayUrl: {
+      type: String,
+      default: null,
+    },
+    replayExpireAt: {
+      type: Date,
+      default: null,
+    },
+    isLive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Indexes for common queries
+liveStreamSchema.index({ creatorId: 1, status: 1 });
+liveStreamSchema.index({ isLive: 1, status: 1 });
+liveStreamSchema.index({ category: 1, isLive: 1 });
+liveStreamSchema.index({ startedAt: -1 });
+liveStreamSchema.index({ viewerCount: -1 });
+
+// Calculate duration for ended streams
+liveStreamSchema.pre("save", function () {
+  if (this.status === "ended" && this.startedAt && this.endedAt) {
+    this.duration = Math.floor((this.endedAt - this.startedAt) / 1000);
+  }
+});
+
+module.exports = mongoose.model("LiveStream", liveStreamSchema);

@@ -13,6 +13,7 @@ import {
   Lock,
   Pause,
   Play,
+  Radio,
   RotateCw,
   Scissors,
   SlidersHorizontal,
@@ -35,6 +36,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import { feedApi, mediaUrl } from "../services/api";
 import { isRenderableMediaUrl, isValidPost, normalizePost, stablePostUrl, usePostStore } from "../store/postStore";
+import LiveStreamSetup from "./LiveStreamSetup.jsx";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_VIDEO_SIZE = 50 * 1024 * 1024;
@@ -323,6 +325,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
   const [previewError, setPreviewError] = useState("");
   const [previewMuted, setPreviewMuted] = useState(true);
   const [mobileRecorderAvailable, setMobileRecorderAvailable] = useState(false);
+  const [liveSetupOpen, setLiveSetupOpen] = useState(false);
 
   const isProfile = false;
   const isImage = type === "image";
@@ -467,6 +470,7 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setEditor(defaultEditor);
     setActiveEditorPanel("filters");
     setCaptureMode("gallery");
+    setLiveSetupOpen(false);
     setPreview((current) => {
       if (current) URL.revokeObjectURL(current);
       return "";
@@ -1013,7 +1017,21 @@ const Upload = ({ open, initialType = "image", onClose }) => {
       cancelUpload();
     }
 
+    setLiveSetupOpen(false);
     stopCamera();
+    onClose?.();
+  };
+
+  const openLiveSetup = () => {
+    setError("");
+    stopCamera();
+    setLiveSetupOpen(true);
+  };
+
+  const handleLiveStarted = (stream) => {
+    setLiveSetupOpen(false);
+    addToast("Livestream started", "success");
+    window.dispatchEvent(new CustomEvent("vibebook:live-started", { detail: { stream } }));
     onClose?.();
   };
 
@@ -1047,6 +1065,12 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:p-3">
+      {liveSetupOpen && (
+        <LiveStreamSetup
+          onStart={handleLiveStarted}
+          onClose={() => setLiveSetupOpen(false)}
+        />
+      )}
       <div className="flex min-h-[100dvh] w-full min-w-0 flex-col rounded-none bg-white shadow-2xl sm:my-0 sm:min-h-0 sm:max-w-5xl sm:rounded-2xl xl:max-w-6xl">
         {/* Header with step progress */}
         <div className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 sm:py-3">
@@ -1145,7 +1169,22 @@ const Upload = ({ open, initialType = "image", onClose }) => {
               })}
             </div>
 
-            <div className={`mt-2.5 grid gap-2 ${mobileRecorderAvailable ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+            <div className="mt-2.5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <button
+                type="button"
+                className="group relative flex min-h-[3.75rem] items-center gap-2 overflow-hidden rounded-lg border border-red-200 bg-white p-2.5 text-left transition-all duration-200 hover:border-red-400 hover:shadow-md disabled:opacity-50"
+                onClick={openLiveSetup}
+                disabled={uploading || recording || cameraPreparing}
+              >
+                <span className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600 transition group-hover:bg-red-100">
+                  <Radio className="h-4 w-4" />
+                </span>
+                <div className="relative z-10 min-w-0 flex-1">
+                  <span className="block text-[0.82rem] font-bold text-slate-900">Go Live</span>
+                  <span className="mt-0.5 block text-xs font-semibold text-slate-500">Camera preview.</span>
+                </div>
+              </button>
+
               {mobileRecorderAvailable && (
                 <button
                   type="button"

@@ -12,6 +12,7 @@ const VisitorStat = require("./models/VisitorStat");
 const { validateChatMessage } = require("./utils/chatModeration");
 const { createNotification } = require("./utils/notifications");
 const { initializeWalletSockets } = require("./modules/wallet/walletSocket");
+const { setupLiveStreamSockets } = require("./modules/livestream/livestreamSocket");
 const purchaseService = require("./modules/marketplace/purchaseService");
 
 let ioInstance = null;
@@ -865,6 +866,14 @@ const initSocket = (server, corsOptions = {}) => {
     console.log("[socket] wallet sockets initialized");
   } catch (error) {
     console.error("[socket] failed to initialize wallet sockets:", error.message);
+  }
+
+  // Initialize livestream socket events
+  try {
+    setupLiveStreamSockets(ioInstance);
+    console.log("[socket] livestream sockets initialized");
+  } catch (error) {
+    console.error("[socket] failed to initialize livestream sockets:", error.message);
   }
 
   return ioInstance;

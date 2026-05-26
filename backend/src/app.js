@@ -24,6 +24,7 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 const videoRoutes = require("./routes/videoRoutes");
 const walletRoutes = require("./routes/walletRoutes");
+const livestreamRoutes = require("./modules/livestream/livestreamRoutes");
 const marketplaceRoutes = require("./modules/marketplace/marketplaceRoutes");
 const { createBooking } = require("./controllers/bookingController");
 const { followBackProfile, followProfile, getProfile, searchUsers, unfollowProfile, updateProfile } = require("./controllers/userController");
@@ -102,7 +103,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/groups", "/api/creator", "/api/admin", "/api/bookings", "/api/payments", "/api/marketplace", "/api/wallet", "/api/media", "/api/upload"];
+  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/groups", "/api/creator", "/api/admin", "/api/bookings", "/api/payments", "/api/marketplace", "/api/wallet", "/api/livestream", "/api/media", "/api/upload"];
   if (privatePrefixes.some((prefix) => req.path.startsWith(prefix))) {
     res.set("Cache-Control", "no-store");
   } else {
@@ -141,6 +142,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);
 app.use("/api/payments", bookingLimiter, paymentRoutes);
 app.use("/api/wallet", walletRoutes);
+app.use("/api/livestream", livestreamRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/rules", ruleRoutes);
