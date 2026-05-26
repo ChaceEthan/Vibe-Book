@@ -40,6 +40,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import PostMedia from "../components/PostMedia.jsx";
 import EditVideoModal from "../components/EditVideoModal.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
+import LiveAvatar from "../components/LiveAvatar.jsx";
 import SafeCoverImage from "../components/SafeCoverImage.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
@@ -1874,7 +1875,7 @@ const Profile = () => {
         <div className="px-4 pb-6 text-center sm:px-6">
           <div className={`relative mx-auto -mt-16 h-32 w-32 rounded-full ${frameGradient ? `bg-gradient-to-br ${frameGradient} p-1 shadow-[0_0_32px_rgba(34,197,94,0.45)]` : "border-4 border-white bg-slate-100 shadow-xl"}`}>
             {frameGradient && <motion.span className="absolute inset-[-7px] rounded-full bg-inherit opacity-40 blur-md" animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} />}
-            <SafeAvatar user={{ ...user, profilePicture: profilePicture || activeImageUrl }} alt={user.name} className="relative h-full w-full rounded-full border-4 border-white object-cover" loading="eager" />
+            <LiveAvatar user={{ ...user, profilePicture: profilePicture || activeImageUrl }} alt={user.name} wrapperClassName="h-full w-full" className="relative h-full w-full rounded-full border-4 border-white object-cover" loading="eager" />
             {isOwnProfile && (
               <>
                 <input ref={avatarInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={handleAvatarSelect} />

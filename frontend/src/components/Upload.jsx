@@ -1032,8 +1032,21 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setLiveSetupOpen(false);
     addToast("Livestream started", "success");
     window.dispatchEvent(new CustomEvent("vibebook:live-started", { detail: { stream } }));
+    navigate("/", { replace: false });
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("vibebook:live-started", { detail: { stream } }));
+    }, 80);
     onClose?.();
   };
+
+  if (liveSetupOpen) {
+    return (
+      <LiveStreamSetup
+        onStart={handleLiveStarted}
+        onClose={() => setLiveSetupOpen(false)}
+      />
+    );
+  }
 
   const scrollToUploadDetails = () => {
     document.getElementById("upload-post-details")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1065,12 +1078,6 @@ const Upload = ({ open, initialType = "image", onClose }) => {
 
   return (
     <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto overflow-x-hidden bg-slate-950/80 p-0 backdrop-blur-md sm:p-3">
-      {liveSetupOpen && (
-        <LiveStreamSetup
-          onStart={handleLiveStarted}
-          onClose={() => setLiveSetupOpen(false)}
-        />
-      )}
       <div className="flex min-h-[100dvh] w-full min-w-0 flex-col rounded-none bg-white shadow-2xl sm:my-0 sm:min-h-0 sm:max-w-5xl sm:rounded-2xl xl:max-w-6xl">
         {/* Header with step progress */}
         <div className="sticky top-0 z-40 shrink-0 border-b border-slate-200 bg-white px-3 py-2.5 sm:px-4 sm:py-3">

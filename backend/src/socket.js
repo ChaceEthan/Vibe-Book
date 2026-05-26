@@ -341,6 +341,7 @@ const initSocket = (server, corsOptions = {}) => {
 
   ioInstance = new Server(server, {
     cors: socketCorsConfig,
+    path: process.env.SOCKET_PATH || "/socket.io",
     connectionStateRecovery: {
       maxDisconnectionDuration: 2 * 60 * 1000,
       skipMiddlewares: false,
@@ -386,7 +387,9 @@ const initSocket = (server, corsOptions = {}) => {
       await joinUserGroupRooms(socket, userId);
       await markPendingMessagesDelivered(userId);
       socket.data.activeGroupRoom = "";
-      console.log(`Socket connected: ${userId}${socket.recovered ? " (recovered)" : ""}`);
+      if (!isProduction) {
+        console.log(`Socket connected: ${userId}${socket.recovered ? " (recovered)" : ""}`);
+      }
       await emitStats();
     } catch (error) {
       removeOnlineUser(userId, socket.id);
@@ -627,7 +630,6 @@ const initSocket = (server, corsOptions = {}) => {
 
         socket.join(room);
         socket.data.activeGroupRoom = room;
-        console.log(`[socket] ${userId} joined group ${group._id}`);
         callback?.({ success: true, groupId: group._id.toString() });
       } catch (error) {
         callback?.({ success: false, message: "Unable to join group room" });
@@ -650,7 +652,6 @@ const initSocket = (server, corsOptions = {}) => {
           socket.data.activeGroupRoom = "";
         }
 
-        console.log(`[socket] ${userId} left group ${groupId}`);
         callback?.({ success: true, groupId });
       } catch (error) {
         logSocketError("socket:leave_group", error);
@@ -855,7 +856,9 @@ const initSocket = (server, corsOptions = {}) => {
 
     socket.on("disconnect", async (reason) => {
       removeOnlineUser(userId, socket.id);
-      console.log(`Socket disconnected: ${userId} (${reason})`);
+      if (!isProduction) {
+        console.log(`Socket disconnected: ${userId} (${reason})`);
+      }
       await emitStats();
     });
   });
@@ -863,7 +866,9 @@ const initSocket = (server, corsOptions = {}) => {
   // Initialize wallet socket events
   try {
     initializeWalletSockets(ioInstance, onlineUsers);
-    console.log("[socket] wallet sockets initialized");
+    if (!isProduction) {
+      console.log("[socket] wallet sockets initialized");
+    }
   } catch (error) {
     console.error("[socket] failed to initialize wallet sockets:", error.message);
   }
@@ -871,7 +876,9 @@ const initSocket = (server, corsOptions = {}) => {
   // Initialize livestream socket events
   try {
     setupLiveStreamSockets(ioInstance);
-    console.log("[socket] livestream sockets initialized");
+    if (!isProduction) {
+      console.log("[socket] livestream sockets initialized");
+    }
   } catch (error) {
     console.error("[socket] failed to initialize livestream sockets:", error.message);
   }

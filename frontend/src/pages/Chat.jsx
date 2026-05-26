@@ -3,7 +3,7 @@ import { AlertCircle, Check, CheckCheck, Clock3, Copy, FileText, MoreVertical, P
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import SafeAvatar from "../components/SafeAvatar.jsx";
+import LiveAvatar from "../components/LiveAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { groupChatApi, mediaUrl, messageApi, userApi } from "../services/api";
 import { connectSocket, getChatId } from "../services/socket";
@@ -106,7 +106,7 @@ const avatarImageFor = (profile = {}) =>
 
 const Avatar = memo(({ profile, size = "h-9 w-9", className = "" }) => {
   const image = avatarImageFor(profile || {});
-  return <SafeAvatar user={profile} src={image} className={`${size} shrink-0 rounded-full object-cover ${className}`} />;
+  return <LiveAvatar user={profile} src={image} className={`${size} shrink-0 rounded-full object-cover ${className}`} />;
 });
 
 Avatar.displayName = "Avatar";

@@ -44,6 +44,17 @@ const normalizeStream = (stream = {}) => ({
 
 const normalizeStreams = (streams = []) => streams.map(normalizeStream).filter((stream) => stream.id && stream.isLive !== false && stream.status !== "ended");
 
+const creatorIdForStream = (stream = {}) => String(stream.creatorId || stream.creator?.id || stream.creator?._id || "");
+
+const liveCreatorMapFor = (streams = []) =>
+  streams.reduce((map, stream) => {
+    const creatorId = creatorIdForStream(stream);
+    if (creatorId && stream.id && stream.isLive !== false && stream.status !== "ended") {
+      map[creatorId] = stream.id;
+    }
+    return map;
+  }, {});
+
 export const useLiveStreamStore = create((set, get) => ({
   activeLiveStreams: [],
   currentStream: null,
@@ -51,6 +62,8 @@ export const useLiveStreamStore = create((set, get) => ({
   liveStreamsByCategory: {},
   creatorLiveStreams: {},
   pagination: DEFAULT_PAGINATION,
+  liveCreatorIds: {},
+  lastPresenceFetchAt: 0,
   loading: false,
   error: "",
   requestLocks: {},
@@ -71,6 +84,10 @@ export const useLiveStreamStore = create((set, get) => ({
         activeLiveStreams: stream.id
           ? [stream, ...state.activeLiveStreams.filter((item) => item.id !== stream.id)]
           : state.activeLiveStreams,
+        liveCreatorIds: {
+          ...state.liveCreatorIds,
+          ...(creatorIdForStream(stream) ? { [creatorIdForStream(stream)]: stream.id } : {}),
+        },
         loading: false,
       }));
       return { ok: true, stream };
@@ -97,6 +114,7 @@ export const useLiveStreamStore = create((set, get) => ({
       set((state) => ({
         currentStream: stream,
         activeLiveStreams: state.activeLiveStreams.filter((item) => item.id !== stream.id),
+        liveCreatorIds: liveCreatorMapFor(state.activeLiveStreams.filter((item) => item.id !== stream.id)),
         loading: false,
       }));
       return { ok: true, stream };
@@ -156,7 +174,7 @@ export const useLiveStreamStore = create((set, get) => ({
       const streams = normalizeStreams(response?.data?.streams || response?.streams || []);
       const pagination = response?.data?.pagination || response?.pagination || DEFAULT_PAGINATION;
 
-      set({ activeLiveStreams: streams, pagination, loading: false });
+      set({ activeLiveStreams: streams, pagination, liveCreatorIds: liveCreatorMapFor(streams), lastPresenceFetchAt: Date.now(), loading: false });
       return { ok: true, streams, pagination };
     } catch (error) {
       const message = getApiErrorMessage(error, "Failed to load livestreams");
@@ -279,6 +297,11 @@ export const useLiveStreamStore = create((set, get) => ({
       activeLiveStreams: nextStream.isLive && nextStream.status !== "ended"
         ? [nextStream, ...state.activeLiveStreams.filter((item) => item.id !== nextStream.id)]
         : state.activeLiveStreams.filter((item) => item.id !== nextStream.id),
+      liveCreatorIds: liveCreatorMapFor(
+        nextStream.isLive && nextStream.status !== "ended"
+          ? [nextStream, ...state.activeLiveStreams.filter((item) => item.id !== nextStream.id)]
+          : state.activeLiveStreams.filter((item) => item.id !== nextStream.id)
+      ),
       currentStream: state.currentStream?.id === nextStream.id ? nextStream : state.currentStream,
     }));
   },
@@ -289,8 +312,21 @@ export const useLiveStreamStore = create((set, get) => ({
 
     set((state) => ({
       activeLiveStreams: state.activeLiveStreams.filter((stream) => stream.id !== id),
+      liveCreatorIds: liveCreatorMapFor(state.activeLiveStreams.filter((stream) => stream.id !== id)),
       currentStream: state.currentStream?.id === id ? { ...state.currentStream, isLive: false, status: "ended" } : state.currentStream,
     }));
+  },
+
+  isUserLive: (userId) => Boolean(get().liveCreatorIds[String(userId || "")]),
+
+  ensureLivePresence: async () => {
+    const { lastPresenceFetchAt } = get();
+    if (Date.now() - Number(lastPresenceFetchAt || 0) < 45000) {
+      return { ok: true };
+    }
+
+    set({ lastPresenceFetchAt: Date.now() });
+    return get().getActiveLiveStreams(50, 0, { silent: true });
   },
 
   // Clear current stream

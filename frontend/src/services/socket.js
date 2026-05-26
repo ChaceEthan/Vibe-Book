@@ -1,35 +1,24 @@
 import { io } from "socket.io-client";
 
-const DEFAULT_API_ROOT = "https://vibe-book-fri1.onrender.com";
-
-const normalizeApiRoot = (value) => {
-  let next = String(value || DEFAULT_API_ROOT).trim().replace(/\s+/g, "");
-
-  if (!next) {
-    next = DEFAULT_API_ROOT;
-  }
-
-  next = next.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
-
-  if (next.startsWith("/") && typeof window !== "undefined") {
-    next = `${window.location.origin}${next}`;
-  }
-
-  if (!/^https?:\/\//i.test(next)) {
-    next = `https://${next.replace(/^\/+/, "")}`;
-  }
-
-  return next.replace(/\/+$/, "");
-};
-
-const API_ROOT = normalizeApiRoot(import.meta.env.VITE_API_URL || DEFAULT_API_ROOT);
-const API_BASE_URL = `${API_ROOT.replace(/(?:\/api)+\/?$/i, "")}/api`;
-const SOCKET_URL = API_BASE_URL.replace(/\/api\/?$/, "");
+import { SOCKET_PATH, SOCKET_URL } from "../config/network";
 
 let socket = null;
 let connectRequested = false;
 let disconnectTimer = null;
 let socketAuth = {};
+let lastSocketWarningAt = 0;
+
+const warnSocketIssue = (message, payload = {}) => {
+  if (typeof console === "undefined") return;
+
+  const now = Date.now();
+  if (now - lastSocketWarningAt < 60000) {
+    return;
+  }
+
+  lastSocketWarningAt = now;
+  console.warn(message, payload);
+};
 
 const clearDisconnectTimer = () => {
   if (disconnectTimer) {
@@ -77,11 +66,13 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     autoConnect: false,
     withCredentials: true,
     reconnection: true,
-    reconnectionAttempts: 12,
+    reconnectionAttempts: 8,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 8000,
-    timeout: 12000,
-    transports: ["polling", "websocket"],
+    reconnectionDelayMax: 12000,
+    randomizationFactor: 0.6,
+    timeout: 15000,
+    path: SOCKET_PATH,
+    transports: ["websocket", "polling"],
   });
 
   socket.on("connect", () => {
@@ -93,7 +84,11 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     if (/unauthorized|jwt|token/i.test(error?.message || "") && !getStoredToken()) {
       disconnectSocket({ immediate: true });
     }
-    console.warn("Socket connection failed:", error.message);
+    warnSocketIssue("[socket] connection failed", {
+      message: error?.message || "Socket connection failed",
+      url: SOCKET_URL,
+      path: SOCKET_PATH,
+    });
   });
 
   socket.on("disconnect", () => {
@@ -112,6 +107,11 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 };
 
 export const connectSocket = (token = getStoredToken(), extraAuth = {}) => {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    warnSocketIssue("[socket] offline; connection deferred");
+    return socket;
+  }
+
   const activeSocket = getSocket(token, extraAuth);
 
   clearDisconnectTimer();

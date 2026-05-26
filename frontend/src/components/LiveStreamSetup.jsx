@@ -55,6 +55,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const startingRef = useRef(false);
   const micMutedRef = useRef(false);
   const mountedRef = useRef(true);
+  const pendingStreamRef = useRef(null);
 
   const [form, setForm] = useState({
     title: "",
@@ -90,7 +91,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const [countdown, setCountdown] = useState(null);
   const [starting, setStarting] = useState(false);
 
-  const { startLiveStream, loading } = useLiveStreamStore();
+  const { endLiveStream, startLiveStream, loading } = useLiveStreamStore();
   const isBusy = starting || loading;
 
   const tags = useMemo(() => normalizeTags(tagText), [tagText]);
@@ -261,6 +262,11 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
 
   const handleClose = () => {
     cancelCountdown();
+    const pendingStream = pendingStreamRef.current;
+    if (pendingStream?.id) {
+      endLiveStream(pendingStream.id).catch(() => null);
+      pendingStreamRef.current = null;
+    }
     startingRef.current = false;
     stopCamera();
     onClose?.();
@@ -283,15 +289,6 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
     setStarting(true);
     setError("");
 
-    const countdownResult = await runCountdown();
-    if (!mountedRef.current) return;
-
-    if (countdownResult?.canceled) {
-      setStarting(false);
-      startingRef.current = false;
-      return;
-    }
-
     const result = await startLiveStream({
       ...form,
       title: form.title.trim(),
@@ -307,16 +304,32 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
     });
     if (!mountedRef.current) return;
 
-    setStarting(false);
-    startingRef.current = false;
-
-    if (result.ok) {
-      stopCamera();
-      onStart?.(result.stream);
+    if (!result.ok) {
+      setStarting(false);
+      startingRef.current = false;
+      setError(result.error || "Failed to start livestream.");
       return;
     }
 
-    setError(result.error || "Failed to start livestream.");
+    pendingStreamRef.current = result.stream;
+    const countdownResult = await runCountdown();
+    if (!mountedRef.current) return;
+
+    if (countdownResult?.canceled) {
+      if (result.stream?.id) {
+        endLiveStream(result.stream.id).catch(() => null);
+      }
+      pendingStreamRef.current = null;
+      setStarting(false);
+      startingRef.current = false;
+      return;
+    }
+
+    setStarting(false);
+    startingRef.current = false;
+    pendingStreamRef.current = null;
+    stopCamera();
+    onStart?.(result.stream);
   };
 
   return (
@@ -352,8 +365,8 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
           </button>
         </header>
 
-        <main className="relative z-10 grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-0 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-1">
-          <section className="relative min-h-[46dvh] overflow-hidden bg-slate-950 lg:min-h-0">
+        <main className="relative z-10 grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(18rem,42dvh)] gap-0 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-1">
+          <section className="relative min-h-0 overflow-hidden bg-slate-950">
             <video
               ref={videoRef}
               autoPlay
@@ -425,7 +438,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
             </div>
           </section>
 
-          <aside className="relative flex max-h-[54dvh] min-h-0 flex-col overflow-hidden border-t border-white/10 bg-slate-950/95 backdrop-blur-xl lg:max-h-none lg:border-l lg:border-t-0">
+          <aside className="relative flex min-h-0 flex-col overflow-hidden border-t border-white/10 bg-slate-950/95 backdrop-blur-xl lg:border-l lg:border-t-0">
             <div className="flex-1 overflow-y-auto p-4 sm:p-5">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <button

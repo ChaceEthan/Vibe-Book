@@ -19,6 +19,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { messageApi } from "../services/api";
 import { connectSocket } from "../services/socket";
+import { useLiveStreamStore } from "../store/livestreamStore";
 
 const navClass = ({ isActive }) =>
   `flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-bold transition ${
@@ -41,6 +42,10 @@ const Navbar = () => {
   const location = useLocation();
   const notificationCacheRef = useRef(new Map());
   const audioContextRef = useRef(null);
+  const upsertLiveStream = useLiveStreamStore((state) => state.upsertLiveStream);
+  const removeLiveStream = useLiveStreamStore((state) => state.removeLiveStream);
+  const applyViewerCount = useLiveStreamStore((state) => state.applyViewerCount);
+  const ensureLivePresence = useLiveStreamStore((state) => state.ensureLivePresence);
 
   const bottomNavItems = useMemo(
     () => [
@@ -168,16 +173,40 @@ const Navbar = () => {
       setUnreadCount(Number(payload.unreadCount || 0));
     };
 
+    const handleLiveStarted = (payload = {}) => {
+      if (payload.stream) {
+        upsertLiveStream(payload.stream);
+      } else {
+        ensureLivePresence();
+      }
+    };
+
+    const handleLiveEnded = (payload = {}) => {
+      removeLiveStream(payload.streamId || payload.stream?.id);
+    };
+
+    const handleLiveViewerUpdate = (payload = {}) => {
+      if (payload.streamId) {
+        applyViewerCount(payload.streamId, Number(payload.viewerCount || 0), payload.maxViewers ?? null);
+      }
+    };
+
     socket.on("receive_message", handleDirectMessage);
     socket.on("receive_group_message", handleGroupMessage);
     socket.on("unread:update", handleUnreadUpdate);
+    socket.on("livestream:started", handleLiveStarted);
+    socket.on("livestream:ended_global", handleLiveEnded);
+    socket.on("livestream:viewers_updated_global", handleLiveViewerUpdate);
 
     return () => {
       socket.off("receive_message", handleDirectMessage);
       socket.off("receive_group_message", handleGroupMessage);
       socket.off("unread:update", handleUnreadUpdate);
+      socket.off("livestream:started", handleLiveStarted);
+      socket.off("livestream:ended_global", handleLiveEnded);
+      socket.off("livestream:viewers_updated_global", handleLiveViewerUpdate);
     };
-  }, [isAuthenticated, token, user?._id, user?.name]);
+  }, [applyViewerCount, ensureLivePresence, isAuthenticated, removeLiveStream, token, upsertLiveStream, user?._id, user?.name]);
 
   useEffect(() => {
     const openFromEvent = (event) => {

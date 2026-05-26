@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
-import SafeAvatar from "./SafeAvatar.jsx";
+import LiveAvatar from "./LiveAvatar.jsx";
 
 const LiveDiscoveryRow = ({ onStreamClick }) => {
   const { token } = useAuth();
@@ -162,10 +162,11 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
             >
               <div className="relative mx-auto h-[4.25rem] w-[4.25rem] rounded-full bg-gradient-to-tr from-red-500 via-blue-500 to-emerald-400 p-[3px] shadow-[0_0_28px_rgba(59,130,246,0.25)]">
                 <div className="h-full w-full rounded-full bg-slate-950 p-[2px]">
-                  <SafeAvatar
+                  <LiveAvatar
                     user={stream.creator}
                     src={stream.creator?.avatar}
                     className="h-full w-full rounded-full object-cover"
+                    forceLive
                   />
                 </div>
                 <span className="absolute -right-1 -top-1 inline-flex items-center gap-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[0.58rem] font-black text-white shadow-lg">

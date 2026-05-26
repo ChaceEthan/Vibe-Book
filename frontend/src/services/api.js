@@ -2,36 +2,9 @@
 import axios from "axios";
 
 import { APP_ROOT_URL } from "../config/env";
+import { API_BASE_URL, API_ROOT, FRONTEND_BASE_URL } from "../config/network";
 
-const DEFAULT_API_ROOT = "https://vibe-book-fri1.onrender.com";
-const rawApiRoot = import.meta.env.VITE_API_URL || DEFAULT_API_ROOT;
-
-const normalizeApiRoot = (value) => {
-  let next = String(value || DEFAULT_API_ROOT).trim().replace(/\s+/g, "");
-
-  if (!next) {
-    next = DEFAULT_API_ROOT;
-  }
-
-  next = next.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
-
-  if (next.startsWith("/") && typeof window !== "undefined") {
-    next = `${window.location.origin}${next}`;
-  }
-
-  if (!/^https?:\/\//i.test(next)) {
-    next = `https://${next.replace(/^\/+/, "")}`;
-  }
-
-  return next.replace(/\/+$/, "");
-};
-
-const API_ROOT = normalizeApiRoot(rawApiRoot);
-const API_BASE_URL = `${API_ROOT.replace(/(?:\/api)+\/?$/i, "")}/api`;
-const API_ROOT_URL = API_BASE_URL.replace(/\/api\/?$/, "");
-const DEFAULT_FRONTEND_URL = "https://vibe-book-kappa.vercel.app";
-
-export const FRONTEND_BASE_URL = DEFAULT_FRONTEND_URL;
+export { FRONTEND_BASE_URL };
 export const referralUrlFor = (referralCode = "") => `${FRONTEND_BASE_URL}/register?ref=${encodeURIComponent(String(referralCode || "").trim())}`;
 
 export const API = axios.create({
@@ -43,6 +16,21 @@ const UPLOAD_TIMEOUT_MS = 180000;
 const WALLET_REQUEST_TIMEOUT_MS = 15000;
 const MARKETPLACE_REQUEST_TIMEOUT_MS = 20000;
 const OTP_REQUEST_TIMEOUT_MS = 45000;
+const networkWarningCache = new Map();
+
+const warnOncePerWindow = (key, payload, windowMs = 60000) => {
+  if (typeof console === "undefined") return;
+
+  const now = Date.now();
+  const last = networkWarningCache.get(key) || 0;
+
+  if (now - last < windowMs) {
+    return;
+  }
+
+  networkWarningCache.set(key, now);
+  console.warn(key, payload);
+};
 
 export const getApiErrorMessage = (error, fallback = "Request failed. Please try again.") => {
   const data = error?.response?.data;
@@ -130,13 +118,13 @@ API.interceptors.response.use(
     const authCode = error.response?.data?.code || "";
 
     if (!error.response) {
-      console.warn("[api] network request failed", {
+      warnOncePerWindow("[api] network request failed", {
         baseURL: API_BASE_URL,
         code: error.code || "NETWORK_ERROR",
         message: error.message,
       });
     } else if (error.response.status >= 500) {
-      console.warn("[api] server request failed", {
+      warnOncePerWindow(`[api] server request failed:${error.response.status}:${error.config?.url || ""}`, {
         status: error.response.status,
         url: error.config?.url,
       });
@@ -383,18 +371,17 @@ export const mediaUrl = (path) => {
   }
 
   if (value.startsWith("/uploads")) {
-    return `${API_ROOT_URL}${value}`;
+    return `${API_ROOT}${value}`;
   }
 
   if (value.startsWith("uploads/")) {
-    return `${API_ROOT_URL}/${value}`;
+    return `${API_ROOT}/${value}`;
   }
 
   if (value.startsWith("/")) {
     return `${APP_ROOT_URL}${value}`;
   }
 
-  console.error("Media path is not an absolute URL:", value);
   return `${APP_ROOT_URL}/logo.png`;
 };
 

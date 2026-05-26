@@ -18,6 +18,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
+import LiveAvatar from "../components/LiveAvatar.jsx";
 import LiveDiscoveryRow from "../components/LiveDiscoveryRow.jsx";
 import LiveStreamViewer from "../components/LiveStreamViewer.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -116,13 +117,13 @@ const FramedSafeAvatar = ({ user, src = "", alt = "", className = "" }) => {
   const gradient = frameGradientFor(frame);
 
   if (!gradient) {
-    return <SafeAvatar user={user} src={src} alt={alt} className={className} />;
+    return <LiveAvatar user={user} src={src} alt={alt} className={className} />;
   }
 
   return (
     <span className={`relative inline-flex shrink-0 rounded-full bg-gradient-to-br ${gradient} p-[2px] shadow-xl`}>
       <span className="absolute inset-[-3px] rounded-full bg-inherit opacity-45 blur-sm" />
-      <SafeAvatar user={user} src={src} alt={alt} className={`${className} relative ring-2 ring-white/75`} />
+      <LiveAvatar user={user} src={src} alt={alt} className={`${className} relative ring-2 ring-white/75`} />
     </span>
   );
 };

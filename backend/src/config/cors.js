@@ -5,7 +5,7 @@ const rejectedOriginsLogged = new Set();
 
 const allowedOrigins = new Set([
   "https://vibe-book-kappa.vercel.app",
-  "https://vibe-book-fri1.onrender.com",
+  "https://vibe-book-api.onrender.com",
   ...LOCAL_DEV_PORTS.map((port) => `http://localhost:${port}`),
   ...LOCAL_DEV_PORTS.map((port) => `http://127.0.0.1:${port}`),
 ]);
