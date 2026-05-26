@@ -6,7 +6,7 @@ const User = require("../models/User");
 const { buildAccessState, syncTrialState } = require("../utils/accessControl");
 const { applyAdminIsolation, isConfiguredAdminEmail } = require("../utils/adminIsolation");
 const generateToken = require("../utils/generateToken");
-const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
+const { DEFAULT_COVER_IMAGE_PATH, DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const { sendVerificationEmail } = require("../utils/emailService");
 const { sendPhoneVerificationSms } = require("../utils/smsService");
 const { createNotification } = require("../utils/notifications");
@@ -215,6 +215,7 @@ const userResponse = (user) => {
   const images = normalizeStoredUploadPaths(gallery);
   const videos = normalizeStoredUploadPaths(Array.isArray(user.videos) && user.videos.length ? user.videos : user.videoUrls || []);
   const profileImage = normalizeStoredUploadPath(user.profilePicture || user.profileImage) || images[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const coverImage = normalizeStoredUploadPath(user.coverImage) || DEFAULT_COVER_IMAGE_PATH;
   const imageDescriptions = (Array.isArray(user.imageDescriptions) ? user.imageDescriptions : [])
     .map((item) => ({
       url: normalizeStoredUploadPath(item?.url),
@@ -258,7 +259,7 @@ const userResponse = (user) => {
     district: user.district,
     profileImage,
     profilePicture: profileImage,
-    coverImage: user.coverImage || "",
+    coverImage,
     images,
     gallery: images,
     imageDescriptions,
@@ -544,6 +545,9 @@ const register = async (req, res, next) => {
     userData.accountStatus = "active";
     userData.name = displayName;
     userData.referralCode = createReferralCode(displayName);
+    userData.profileImage = normalizeStoredUploadPath(userData.profileImage || userData.profilePicture) || DEFAULT_PROFILE_IMAGE_PATH;
+    userData.profilePicture = userData.profileImage;
+    userData.coverImage = normalizeStoredUploadPath(userData.coverImage) || DEFAULT_COVER_IMAGE_PATH;
 
     if (req.body.birthday) {
       const birthday = new Date(req.body.birthday);

@@ -298,8 +298,13 @@ const emitStats = async () => {
   }
 };
 
+const normalizeSocketToken = (value = "") => {
+  const token = String(value || "").replace(/^bearer\s+/i, "").trim();
+  return /^(undefined|null|false|nan)$/i.test(token) ? "" : token;
+};
+
 const getUserFromSocket = async (socket) => {
-  const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace("Bearer ", "");
+  const token = normalizeSocketToken(socket.handshake.auth?.token || socket.handshake.headers?.authorization);
 
   if (!token) {
     return null;

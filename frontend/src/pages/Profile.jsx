@@ -40,12 +40,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import PostMedia from "../components/PostMedia.jsx";
 import EditVideoModal from "../components/EditVideoModal.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
+import SafeCoverImage from "../components/SafeCoverImage.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import { bookingApi, feedApi, mediaUrl, paymentApi, userApi } from "../services/api";
 import { usePostStore } from "../store/postStore";
 import { useWalletStore } from "../store/walletStore";
-import { getSafeProfileImage, handleAvatarError } from "../utils/profileImage";
+import { getSafeProfileImage, handleAvatarError, handleCoverError } from "../utils/profileImage";
 
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
 
@@ -610,7 +611,7 @@ const ProfileMediaViewer = ({
 
 const Profile = () => {
   const { id } = useParams();
-  const { logout, refreshProfile, uploadProfilePicture, user: currentUser } = useAuth();
+  const { logout, refreshProfile, updateProfile, uploadProfileCover, uploadProfilePicture, user: currentUser } = useAuth();
   const { addToast } = useToast();
   const { wallet: profileWallet, loadWallet: loadProfileWallet } = useWalletStore();
   const storePosts = usePostStore((state) => state.posts);
@@ -658,7 +659,11 @@ const Profile = () => {
   const [avatarFile, setAvatarFile] = useState(null);
   const [avatarPreview, setAvatarPreview] = useState("");
   const [avatarSaving, setAvatarSaving] = useState(false);
+  const [coverFile, setCoverFile] = useState(null);
+  const [coverPreview, setCoverPreview] = useState("");
+  const [coverSaving, setCoverSaving] = useState(false);
   const avatarInputRef = useRef(null);
+  const coverInputRef = useRef(null);
   const profileActionsRef = useRef(null);
   const likeRequestsRef = useRef(new Map());
   const navigate = useNavigate();
@@ -692,8 +697,11 @@ const Profile = () => {
       if (avatarPreview) {
         URL.revokeObjectURL(avatarPreview);
       }
+      if (coverPreview) {
+        URL.revokeObjectURL(coverPreview);
+      }
     };
-  }, [avatarPreview]);
+  }, [avatarPreview, coverPreview]);
 
   useEffect(() => {
     setActiveImage(0);
@@ -839,7 +847,7 @@ const Profile = () => {
     const userPosts = Array.isArray(user?.posts) ? user.posts : [];
     const syncedPosts = storePosts.filter((post) => (post.userId?._id || post.userId) === userId);
 
-    [...userPosts, ...syncedPosts].forEach((post) => {
+    [...syncedPosts, ...userPosts].forEach((post) => {
       if (post?._id) {
         byId.set(post._id, { ...(byId.get(post._id) || {}), ...post });
       }
@@ -852,7 +860,10 @@ const Profile = () => {
   const followButtonLabel = isMutualFollow ? "Following each other" : isFollowing ? "Following" : followsViewer ? "Follow Back" : "Follow";
   const FollowButtonIcon = isMutualFollow ? BadgeCheck : isFollowing ? UserMinus : UserPlus;
   const followButtonClass = isFollowing ? "btn-secondary" : "btn-primary";
-  const coverImage = user?.coverImage || user?.coverPicture || user?.bannerImage || user?.coverPhoto || images.find((image) => image && image !== profilePicture) || profilePicture || getSafeProfileImage(user);
+  const coverImage = user?.coverImage || user?.coverPicture || user?.bannerImage || user?.coverPhoto || "";
+  const hasCustomCoverImage = Boolean(coverImage && !String(coverImage).includes("/default-cover"));
+  const hasCustomProfilePicture = Boolean(profilePicture && !String(profilePicture).includes("/logo"));
+  const verifiedBadgePosition = isOwnProfile && hasCustomProfilePicture ? "left-1 top-1" : isOwnProfile ? "bottom-2 left-1" : "bottom-2 right-1";
   const profileLikes = profilePosts.reduce((total, post) => total + Number(post.likes || post.likeCount || 0), 0);
   const profileViews = profilePosts.reduce((total, post) => total + Number(post.views || post.viewCount || 0), 0);
   const totalLikes = Number(user?.likes || user?.likeCount || profileLikes || 0);
@@ -1047,7 +1058,7 @@ const Profile = () => {
 
       const merged = { ...item, ...nextPost };
 
-      if (options.preserveLikeState && typeof item.likedByViewer === "boolean") {
+      if (options.preserveLikeState && typeof item.likedByViewer === "boolean" && typeof nextPost.likedByViewer !== "boolean") {
         const likes = Math.max(0, safeCount(item.likes ?? item.likeCount));
         merged.likedByViewer = item.likedByViewer;
         merged.likes = likes;
@@ -1572,6 +1583,120 @@ const Profile = () => {
     }
   };
 
+  const resetAvatarToDefault = async () => {
+    if (!isOwnProfile || avatarSaving || !hasCustomProfilePicture) {
+      return;
+    }
+
+    setAvatarSaving(true);
+
+    try {
+      const nextUser = await updateProfile({ profilePicture: "", profileImage: "" });
+      setUser((current) => ({ ...(current || {}), ...nextUser }));
+      addToast("Profile photo reset to VibeBook default.", "success");
+    } catch (requestError) {
+      addToast(requestError.response?.data?.message || "Unable to reset profile photo.", "error");
+    } finally {
+      setAvatarSaving(false);
+    }
+  };
+
+  const openCoverPicker = () => {
+    if (!isOwnProfile || coverSaving) {
+      return;
+    }
+
+    coverInputRef.current?.click();
+  };
+
+  const handleCoverSelect = (event) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!selectedFile) {
+      return;
+    }
+
+    if (!selectedFile.type?.startsWith("image/")) {
+      addToast("Choose an image file for your cover.", "error");
+      return;
+    }
+
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      addToast("Choose a cover image under 5MB.", "error");
+      return;
+    }
+
+    const nextPreview = URL.createObjectURL(selectedFile);
+    setCoverPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return nextPreview;
+    });
+    setCoverFile(selectedFile);
+  };
+
+  const closeCoverPreview = () => {
+    if (coverSaving) {
+      return;
+    }
+
+    setCoverFile(null);
+    setCoverPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return "";
+    });
+  };
+
+  const saveCover = async () => {
+    if (!coverFile || coverSaving) {
+      return;
+    }
+
+    setCoverSaving(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", coverFile, coverFile.name || `vibebook-cover-${Date.now()}.jpg`);
+      const data = await uploadProfileCover(formData);
+      const nextUser = data?.user;
+
+      if (!nextUser?.coverImage) {
+        throw new Error("Cover image update did not return an image URL.");
+      }
+
+      setUser((current) => ({ ...(current || {}), ...nextUser }));
+      await refreshProfile().catch(() => null);
+      setCoverFile(null);
+      setCoverPreview((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
+      addToast("Cover image updated.", "success");
+    } catch (requestError) {
+      addToast(requestError.response?.data?.message || requestError.message || "Unable to update cover image.", "error");
+    } finally {
+      setCoverSaving(false);
+    }
+  };
+
+  const resetCoverToDefault = async () => {
+    if (!isOwnProfile || coverSaving || !hasCustomCoverImage) {
+      return;
+    }
+
+    setCoverSaving(true);
+
+    try {
+      const nextUser = await updateProfile({ coverImage: "" });
+      setUser((current) => ({ ...(current || {}), ...nextUser }));
+      addToast("Cover reset to VibeBook default.", "success");
+    } catch (requestError) {
+      addToast(requestError.response?.data?.message || "Unable to reset cover image.", "error");
+    } finally {
+      setCoverSaving(false);
+    }
+  };
+
   if (loading) {
     return (
       <section className="container-page py-10">
@@ -1618,8 +1743,37 @@ const Profile = () => {
     <section className="container-page pb-28 pt-4 sm:py-8">
       <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
         <div className="relative h-40 overflow-hidden bg-slate-950 sm:h-56">
-          <img src={mediaUrl(coverImage)} alt="" className="h-full w-full object-cover opacity-75" onError={handleAvatarError} />
+          <SafeCoverImage user={user} src={coverImage} alt="" className="h-full w-full object-cover opacity-80 transition duration-500" loading="eager" />
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent" />
+          {isOwnProfile && (
+            <>
+              <input ref={coverInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={handleCoverSelect} />
+              <div className="absolute bottom-3 right-3 z-30 flex items-center gap-2 sm:bottom-4 sm:right-4">
+                {hasCustomCoverImage && (
+                  <button
+                    type="button"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-950/65 text-white shadow-lg backdrop-blur transition hover:bg-red-500 active:scale-95 disabled:opacity-60"
+                    onClick={resetCoverToDefault}
+                    disabled={coverSaving}
+                    aria-label="Reset cover image"
+                    title="Reset cover image"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/95 text-navy shadow-lg backdrop-blur transition hover:bg-brand active:scale-95 disabled:opacity-60"
+                  onClick={openCoverPicker}
+                  disabled={coverSaving}
+                  aria-label="Change cover image"
+                  title="Change cover image"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </div>
+            </>
+          )}
           <div className="absolute left-4 right-40 top-4 flex flex-wrap gap-2 sm:right-48">
             {verified && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sky-500 px-3 py-1 text-xs font-black uppercase text-white shadow">
@@ -1724,9 +1878,21 @@ const Profile = () => {
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
+                {hasCustomProfilePicture && (
+                  <button
+                    type="button"
+                    className="absolute bottom-2 left-1 z-20 flex h-9 w-9 items-center justify-center rounded-full bg-white text-red-600 shadow-lg ring-2 ring-white transition hover:bg-red-50 active:scale-95 disabled:opacity-60"
+                    onClick={resetAvatarToDefault}
+                    disabled={avatarSaving}
+                    aria-label="Reset profile photo"
+                    title="Reset profile photo"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               </>
             )}
-            {verified && <BadgeCheck className={`absolute bottom-2 h-8 w-8 rounded-full fill-sky-500 text-white shadow ${isOwnProfile ? "left-1" : "right-1"}`} aria-label="Verified creator" />}
+            {verified && <BadgeCheck className={`absolute h-8 w-8 rounded-full fill-sky-500 text-white shadow ${verifiedBadgePosition}`} aria-label="Verified creator" />}
           </div>
 
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -2206,6 +2372,34 @@ const Profile = () => {
               <button type="button" className="btn-secondary" onClick={() => setDeletePostTarget(null)} disabled={Boolean(deletingPostId)}>Cancel</button>
               <button type="button" className="btn-primary bg-red-500 text-white hover:bg-red-600" onClick={() => handlePostDelete(deletePostTarget)} disabled={Boolean(deletingPostId)}>
                 {deletingPostId ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {coverPreview && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-950/65 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-brand">Cover image</p>
+                <h2 className="text-lg font-black text-navy">Preview</h2>
+              </div>
+              <button type="button" className="rounded-full p-2 text-slate-500 hover:bg-slate-100" onClick={closeCoverPreview} disabled={coverSaving} aria-label="Close cover image preview">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-4">
+              <img src={coverPreview} alt="" className="h-48 w-full rounded-lg bg-slate-100 object-cover ring-1 ring-slate-200 sm:h-64" onError={handleCoverError} />
+              <p className="mt-3 truncate text-center text-sm font-semibold text-slate-500">{coverFile?.name || "Selected image"}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+              <button type="button" className="btn-secondary" onClick={closeCoverPreview} disabled={coverSaving}>
+                Cancel
+              </button>
+              <button type="button" className="btn-primary" onClick={saveCover} disabled={coverSaving}>
+                {coverSaving ? "Saving..." : "Save cover"}
               </button>
             </div>
           </div>

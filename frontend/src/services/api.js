@@ -96,14 +96,27 @@ export const isRetryableApiError = (error) => {
   return [408, 429, 500, 502, 503, 504].includes(Number(error.response.status));
 };
 
-const getStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
+const normalizeToken = (value = "") => {
+  const token = String(value || "").replace(/^bearer\s+/i, "").trim();
+  return /^(undefined|null|false|nan)$/i.test(token) ? "" : token;
+};
+
+const getStoredToken = () => {
+  if (typeof localStorage === "undefined") {
+    return "";
+  }
+
+  return normalizeToken(localStorage.getItem("token") || localStorage.getItem("vibebook_token"));
+};
 
 API.interceptors.request.use((config) => {
   const token = getStoredToken();
+  config.headers = config.headers || {};
 
   if (token) {
-    config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
+  } else {
+    delete config.headers.Authorization;
   }
 
   return config;
@@ -113,6 +126,8 @@ API.interceptors.response.use(
   (response) => response,
   (error) => {
     error.userMessage = getApiErrorMessage(error);
+    const status = Number(error.response?.status || 0);
+    const authCode = error.response?.data?.code || "";
 
     if (!error.response) {
       console.warn("[api] network request failed", {
@@ -125,6 +140,18 @@ API.interceptors.response.use(
         status: error.response.status,
         url: error.config?.url,
       });
+    }
+
+    if (status === 401 && getStoredToken() && typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("vibebook:auth-invalid", {
+          detail: {
+            code: authCode || "AUTH_INVALID",
+            message: error.userMessage,
+            url: error.config?.url,
+          },
+        })
+      );
     }
 
     return Promise.reject(error);
@@ -169,6 +196,14 @@ export const uploadProfilePicture = (formData, options = {}) => {
   });
 };
 
+export const uploadProfileCover = (formData, options = {}) => {
+  return API.post("/users/profile/cover", formData, {
+    onUploadProgress: options.onUploadProgress,
+    signal: options.signal,
+    timeout: options.timeout || UPLOAD_TIMEOUT_MS,
+  });
+};
+
 export const userApi = {
   search: async (params) => {
     const endpoint = "/search";
@@ -190,6 +225,7 @@ export const userApi = {
   },
   uploadMedia,
   uploadProfilePicture,
+  uploadProfileCover,
   deleteMedia: (path) => API.delete(`/media/${mediaId(path)}`),
   payAccess: (payload = {}) => API.post("/users/pay-access", { amount: 1000, currency: "RWF", ...payload }),
   follow: (id) => API.post(`/follow/${id}`),

@@ -14,6 +14,7 @@ const {
   unlockProfileContact,
   unfollowProfile,
   updateProfile,
+  uploadProfileCover,
   uploadProfileImage,
   uploadProfileImages,
   uploadProfileVideos,
@@ -30,6 +31,7 @@ router.get("/profile", authMiddleware, getProfile);
 router.put("/profile", authMiddleware, updateProfile);
 router.patch("/profile", authMiddleware, updateProfile);
 router.post("/profile/image", authMiddleware, uploadSingleImage, uploadProfileImage);
+router.post("/profile/cover", authMiddleware, uploadSingleImage, uploadProfileCover);
 router.post("/profile/images", authMiddleware, uploadImages, uploadProfileImages);
 router.post("/profile/videos", authMiddleware, uploadVideos, uploadProfileVideos);
 router.put("/update", authMiddleware, updateProfile);

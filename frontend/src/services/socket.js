@@ -38,21 +38,34 @@ const clearDisconnectTimer = () => {
   }
 };
 
-export const getStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
+const normalizeToken = (value = "") => {
+  const token = String(value || "").replace(/^bearer\s+/i, "").trim();
+  return /^(undefined|null|false|nan)$/i.test(token) ? "" : token;
+};
+
+export const getStoredToken = () => {
+  if (typeof localStorage === "undefined") {
+    return "";
+  }
+
+  return normalizeToken(localStorage.getItem("token") || localStorage.getItem("vibebook_token"));
+};
 
 export const getChatId = (left, right) => [left, right].filter(Boolean).map(String).sort().join(":");
 
 const buildAuth = (token, extraAuth = {}) => {
   socketAuth = { ...socketAuth, ...extraAuth };
-  return { ...socketAuth, token };
+  return { ...socketAuth, token: normalizeToken(token) };
 };
 
 export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
-  if (!token) {
+  const cleanToken = normalizeToken(token);
+
+  if (!cleanToken) {
     return null;
   }
 
-  const auth = buildAuth(token, extraAuth);
+  const auth = buildAuth(cleanToken, extraAuth);
 
   if (socket) {
     socket.auth = auth;
@@ -77,6 +90,9 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 
   socket.on("connect_error", (error) => {
     connectRequested = false;
+    if (/unauthorized|jwt|token/i.test(error?.message || "") && !getStoredToken()) {
+      disconnectSocket({ immediate: true });
+    }
     console.warn("Socket connection failed:", error.message);
   });
 

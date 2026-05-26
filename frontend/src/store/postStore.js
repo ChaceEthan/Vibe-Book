@@ -45,7 +45,7 @@ const countFor = (post = {}, fields = []) => {
 const mergePost = (current = {}, incoming = {}, options = {}) => {
   const next = { ...current, ...normalizePost(incoming) };
 
-  if (options.preserveLikeState && typeof current.likedByViewer === "boolean") {
+  if (options.preserveLikeState && typeof current.likedByViewer === "boolean" && typeof incoming.likedByViewer !== "boolean") {
     const likes = countFor(current, ["likes", "likeCount"]);
     next.likedByViewer = current.likedByViewer;
     next.likes = likes;

@@ -14,7 +14,7 @@ const { removeFiles } = require("../utils/fileCleanup");
 const { addMonetizationScore } = require("../utils/monetization");
 const { createNotification } = require("../utils/notifications");
 const { rewardEngagement } = require("../services/rewardEngine");
-const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
+const { DEFAULT_COVER_IMAGE_PATH, DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const {
   isCloudinarySecureUrl,
   normalizeStoredUploadPath,
@@ -364,6 +364,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
   );
   const profileImage =
     normalizeStoredUploadPath(user.profilePicture || user.profileImage) || allImages[0] || DEFAULT_PROFILE_IMAGE_PATH;
+  const coverImage = normalizeStoredUploadPath(user.coverImage) || DEFAULT_COVER_IMAGE_PATH;
   const visibleImages = isUnlocked ? allImages : [profileImage].filter(Boolean);
   const visibleVideos = isUnlocked ? storedVideos : [];
   const imageDescriptions = normalizeDescriptions(user.imageDescriptions, visibleImages);
@@ -409,7 +410,7 @@ const profileResponse = (user, viewer = null, options = {}) => {
     district: user.district,
     profileImage,
     profilePicture: profileImage,
-    coverImage: user.coverImage || "",
+    coverImage,
     images: visibleImages,
     gallery: visibleImages,
     galleryImageCount: storedImages.length,
@@ -901,6 +902,31 @@ const uploadProfileImage = async (req, res, next) => {
   }
 };
 
+const uploadProfileCover = async (req, res, next) => {
+  try {
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: "Cover image file is required" });
+    }
+
+    const imagePath = getCloudinaryUploadUrl(file);
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      {
+        coverImage: imagePath,
+        updatedAt: new Date(),
+      },
+      { returnDocument: "after", runValidators: true }
+    ).select("-password");
+
+    return res.status(201).json({ user: profileResponse(user, user, { includePrivate: true }) });
+  } catch (error) {
+    await removeFiles(req.file ? [req.file] : []);
+    return next(error);
+  }
+};
+
 const uploadProfileVideos = async (req, res, next) => {
   try {
     const files = req.files || [];
@@ -1379,6 +1405,7 @@ module.exports = {
   getUserById,
   searchUsers,
   updateProfile,
+  uploadProfileCover,
   uploadProfileImage,
   uploadProfileImages,
   uploadProfileVideos,

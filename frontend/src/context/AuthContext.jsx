@@ -13,7 +13,12 @@ const readStoredUser = () => {
   }
 };
 
-const readStoredToken = () => localStorage.getItem("token") || localStorage.getItem("vibebook_token");
+const normalizeToken = (value = "") => {
+  const token = String(value || "").replace(/^bearer\s+/i, "").trim();
+  return /^(undefined|null|false|nan)$/i.test(token) ? "" : token;
+};
+
+const readStoredToken = () => normalizeToken(localStorage.getItem("token") || localStorage.getItem("vibebook_token"));
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(readStoredUser);
@@ -28,10 +33,12 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const saveSession = (nextUser, nextToken) => {
+    const cleanToken = normalizeToken(nextToken);
+
     syncUser(nextUser);
-    setToken(nextToken);
-    localStorage.setItem("token", nextToken);
-    localStorage.setItem("vibebook_token", nextToken);
+    setToken(cleanToken);
+    localStorage.setItem("token", cleanToken);
+    localStorage.setItem("vibebook_token", cleanToken);
   };
 
   const clearSession = () => {
@@ -91,6 +98,15 @@ export const AuthProvider = ({ children }) => {
       active = false;
     };
   }, [token, refreshProfile]);
+
+  useEffect(() => {
+    const handleInvalidAuth = () => {
+      clearSession();
+    };
+
+    window.addEventListener("vibebook:auth-invalid", handleInvalidAuth);
+    return () => window.removeEventListener("vibebook:auth-invalid", handleInvalidAuth);
+  }, []);
 
   const login = async (credentials) => {
     const { data } = await authApi.login(credentials);
@@ -161,6 +177,14 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
+  const uploadProfileCover = async (formData, options = {}) => {
+    const { data } = await userApi.uploadProfileCover(formData, options);
+    if (data.user) {
+      syncUser(data.user);
+    }
+    return data;
+  };
+
   const deleteMedia = async (path) => {
     const { data } = await userApi.deleteMedia(path);
     if (data.user) {
@@ -190,6 +214,7 @@ export const AuthProvider = ({ children }) => {
       refreshProfile,
       updateProfile,
       uploadMedia,
+      uploadProfileCover,
       uploadProfilePicture,
       deleteMedia,
       payAccess,

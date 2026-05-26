@@ -600,31 +600,33 @@ const toggleFeedLike = async (req, res, next) => {
     item.likedBy = Array.isArray(item.likedBy) ? item.likedBy : [];
     const wasLiked = item.likedBy.some((id) => idOf(id) === userId);
     const nextLiked = action === "like" ? true : action === "unlike" ? false : !wasLiked;
-
-    let responseItem = item;
+    let likeChanged = false;
 
     if (nextLiked !== wasLiked) {
-      await Feed.updateOne(
-        { _id: item._id },
+      const updateResult = await Feed.updateOne(
+        nextLiked ? { _id: item._id, likedBy: { $ne: req.user._id } } : { _id: item._id, likedBy: req.user._id },
         nextLiked
           ? { $addToSet: { likedBy: req.user._id }, $set: { lastEngagementAt: new Date() } }
           : { $pull: { likedBy: req.user._id }, $set: { lastEngagementAt: new Date() } }
       );
 
-      responseItem = await Feed.findById(item._id);
+      likeChanged = Number(updateResult.modifiedCount || 0) > 0;
+    }
 
-      if (!responseItem) {
-        return res.status(404).json({ message: "Feed item not found" });
-      }
+    const responseItem = await Feed.findById(item._id);
+
+    if (!responseItem) {
+      return res.status(404).json({ message: "Feed item not found" });
     }
 
     responseItem.likedBy = Array.isArray(responseItem.likedBy) ? responseItem.likedBy : [];
     responseItem.likes = responseItem.likedBy.length;
+    const viewerLiked = responseItem.likedBy.some((id) => idOf(id) === userId);
     updateRankingFields(responseItem);
     await responseItem.save();
     await responseItem.populate("userId", userSelect);
 
-    if (nextLiked && !wasLiked && idOf(responseItem.userId) !== userId) {
+    if (viewerLiked && likeChanged && idOf(responseItem.userId) !== userId) {
       await Promise.all([
         addMonetizationScore(responseItem.userId, "like"),
         updateViewerInterests(req.user, responseItem, 8, { addLikedTopics: true }),
@@ -654,8 +656,8 @@ const toggleFeedLike = async (req, res, next) => {
 
     return res.json({
       feedItem: serializeFeedItem(responseItem, req.user, false, { req }),
-      liked: nextLiked,
-      message: nextLiked ? "Liked" : "Like removed",
+      liked: viewerLiked,
+      message: viewerLiked ? "Liked" : "Like removed",
     });
   } catch (error) {
     return next(error);

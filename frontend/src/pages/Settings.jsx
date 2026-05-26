@@ -55,6 +55,7 @@ const PHONE_COUNTRIES = [
 
 const cleanUsername = (value = "") => value.trim().replace(/^@+/, "").replace(/\s+/g, "_").toLowerCase();
 const cleanPhone = (value = "") => value.replace(/[^\d]/g, "");
+const editableCoverImage = (value = "") => (String(value || "").includes("/default-cover") ? "" : value || "");
 const localPhoneFor = (currentUser = {}) => {
   const digits = cleanPhone(currentUser.phoneNumber || currentUser.phone || "");
   const codeDigits = cleanPhone(currentUser.countryCode || "");
@@ -77,7 +78,7 @@ const initialProfileForm = (user = {}) => {
     gender: user.gender || "",
     birthday: user.birthday ? String(user.birthday).slice(0, 10) : "",
     website: user.website || user.socialLinks?.website || "",
-    coverImage: user.coverImage || "",
+    coverImage: editableCoverImage(user.coverImage),
     categories,
     socialLinks: {
       instagram: user.socialLinks?.instagram || "",

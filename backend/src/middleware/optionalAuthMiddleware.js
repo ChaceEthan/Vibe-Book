@@ -5,12 +5,16 @@ const { syncTrialState } = require("../utils/accessControl");
 
 const getBearerToken = (req) => {
   const authHeader = req.headers.authorization || req.headers.Authorization || "";
+  let token = "";
 
   if (typeof authHeader === "string" && authHeader.toLowerCase().startsWith("bearer ")) {
-    return authHeader.slice(7).trim();
+    token = authHeader.slice(7).trim();
+  } else {
+    token = req.headers["x-auth-token"] || "";
   }
 
-  return req.headers["x-auth-token"] || "";
+  const normalized = String(token || "").replace(/^bearer\s+/i, "").trim();
+  return /^(undefined|null|false|nan)$/i.test(normalized) ? "" : normalized;
 };
 
 const optionalAuthMiddleware = async (req, res, next) => {
