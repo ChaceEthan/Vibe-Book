@@ -108,6 +108,30 @@ export const AuthProvider = ({ children }) => {
     return () => window.removeEventListener("vibebook:auth-invalid", handleInvalidAuth);
   }, []);
 
+  useEffect(() => {
+    const handleUserPatch = (event) => {
+      const patch = event.detail?.user;
+      if (!patch || typeof patch !== "object") return;
+      setUser((current) => {
+        if (!current?._id) return current;
+        const nextUser = {
+          ...current,
+          ...patch,
+          marketplace: {
+            ...(current.marketplace || {}),
+            ...(patch.marketplace || {}),
+          },
+        };
+        localStorage.setItem("vibebook_user", JSON.stringify(nextUser));
+        window.dispatchEvent(new CustomEvent("vibebook:user-updated", { detail: { user: nextUser } }));
+        return nextUser;
+      });
+    };
+
+    window.addEventListener("vibebook:user-patch", handleUserPatch);
+    return () => window.removeEventListener("vibebook:user-patch", handleUserPatch);
+  }, []);
+
   const login = async (credentials) => {
     const { data } = await authApi.login(credentials);
     saveSession(data.user, data.token);

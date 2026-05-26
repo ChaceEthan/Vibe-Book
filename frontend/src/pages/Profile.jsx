@@ -142,6 +142,16 @@ const safeCount = (value = 0) => {
 };
 
 const frameClassFor = (frame = "") => ({
+  frame_starter_neon: "from-cyan-300 via-lime-300 to-emerald-500",
+  frame_gold_aura: "from-yellow-200 via-amber-400 to-orange-600",
+  frame_anime_energy: "from-pink-400 via-violet-500 to-sky-400",
+  frame_cyber_matrix: "from-slate-950 via-blue-600 to-teal-300",
+  frame_kigali_night: "from-indigo-950 via-fuchsia-600 to-yellow-300",
+  frame_diamond_elite: "from-cyan-200 via-white to-violet-500",
+  frame_flame_aura: "from-orange-300 via-red-500 to-rose-700",
+  frame_vip_prestige: "from-zinc-950 via-amber-500 to-white",
+  frame_minimal_luxury: "from-slate-100 via-zinc-300 to-slate-800",
+  frame_nex_genesis_founder: "from-black via-lime-300 to-cyan-200",
   frame_neon_glow: "from-emerald-300 via-cyan-300 to-lime-300",
   frame_gold_elite: "from-yellow-200 via-amber-400 to-orange-500",
   frame_fire_aura: "from-orange-400 via-red-500 to-rose-600",

@@ -23,6 +23,7 @@ const { dailyRewardForStreak, nexCoinEstimate } = require("../../utils/pointsCal
 const { ensureWalletIdentity, findUserByWalletIdentifier, serializeWalletIdentity, walletSettingsFor } = require("./walletIdentityService");
 
 const qrCache = new Map();
+const transferLocks = new Map();
 const PRODUCTION_FRONTEND_URL = "https://vibe-book-kappa.vercel.app";
 
 const referralLinkFor = (referralCode = "") => {
@@ -47,6 +48,11 @@ const syncTokenEstimate = async (wallet, session = null) => {
     estimatedCoins: estimate.estimatedCoins,
     exportable: true,
     stage: "points",
+    tokenSymbol: estimate.tokenSymbol,
+    tokenBalance: wallet.tokenMigration?.tokenBalance || 0,
+    lockedTokenBalance: wallet.tokenMigration?.lockedTokenBalance || 0,
+    migrationEnabled: false,
+    lastEstimateAt: new Date(),
   };
 
   return wallet.save({ ...(session ? { session } : {}) });
@@ -59,6 +65,26 @@ const identityMethodFor = (identifier = "") => {
   if (value.match(/^[0-9a-fA-F]{24}$/)) return "user_id";
   if (value) return "username";
   return "unknown";
+};
+
+const acquireTransferLock = (senderId) => {
+  const key = senderId.toString();
+  const existing = transferLocks.get(key);
+
+  if (existing && existing > Date.now()) {
+    const error = new Error("Transfers are cooling down. Please wait a moment.");
+    error.code = "TRANSFER_COOLDOWN";
+    error.cooldownUntil = new Date(existing);
+    throw error;
+  }
+
+  const expiresAt = Date.now() + TRANSFER_COOLDOWN_MS;
+  transferLocks.set(key, expiresAt);
+  return () => {
+    if (transferLocks.get(key) === expiresAt) {
+      transferLocks.delete(key);
+    }
+  };
 };
 
 const getWalletIdentityProfile = async (userId) => {
@@ -227,12 +253,8 @@ const spendPoints = async (userId, amount, source, metadata = {}) => {
       throw error;
     }
 
-    const balanceBefore = wallet.balance;
-    const balanceAfter = balanceBefore - validatedAmount;
-
-    // Update wallet atomically
-    const updatedWallet = await Wallet.findByIdAndUpdate(
-      wallet._id,
+    const updatedWallet = await Wallet.findOneAndUpdate(
+      { _id: wallet._id, balance: { $gte: validatedAmount } },
       {
         $inc: {
           balance: -validatedAmount,
@@ -242,10 +264,19 @@ const spendPoints = async (userId, amount, source, metadata = {}) => {
       { returnDocument: "after", session }
     );
 
+    if (!updatedWallet) {
+      const error = new Error("Insufficient balance");
+      error.code = "INSUFFICIENT_BALANCE";
+      throw error;
+    }
+
     if (updatedWallet) {
       updatedWallet.updateLevel();
       await syncTokenEstimate(updatedWallet, session);
     }
+
+    const balanceBefore = Number(updatedWallet.balance || 0) + validatedAmount;
+    const balanceAfter = Number(updatedWallet.balance || 0);
 
     // Create immutable transaction record
     const transaction = new WalletTransaction({
@@ -280,7 +311,20 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
   validateUserId(senderId);
   validateUserId(receiverId);
   const validatedAmount = validateAmount(amount);
-  const cleanMetadata = sanitizeMetadata(metadata);
+  const transferAsset = String(metadata.asset || metadata.currency || "NEX_POINTS").trim().toUpperCase();
+  if (transferAsset !== "NEX_POINTS") {
+    const error = new Error("NEX Token transfers are prepared for a future release but are not active yet");
+    error.code = "TOKEN_TRANSFERS_DISABLED";
+    throw error;
+  }
+  const cleanMetadata = sanitizeMetadata({
+    ...metadata,
+    asset: "NEX_POINTS",
+    currency: "NEX_POINTS",
+    chain: "internal",
+    tokenStatus: "points_only",
+    futureTokenReady: true,
+  });
 
   if (senderId.toString() === receiverId.toString()) {
     const error = new Error("Cannot transfer to yourself");
@@ -296,19 +340,8 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
     const senderWallet = await getWallet(senderId);
     const receiverWallet = await getWallet(receiverId);
 
-    // Check sender has sufficient balance
-    if (senderWallet.balance < validatedAmount) {
-      const error = new Error("Insufficient balance");
-      error.code = "INSUFFICIENT_BALANCE";
-      throw error;
-    }
-
-    const senderBalanceBefore = senderWallet.balance;
-    const receiverBalanceBefore = receiverWallet.balance;
-
-    // Update sender
-    const updatedSender = await Wallet.findByIdAndUpdate(
-      senderWallet._id,
+    const updatedSender = await Wallet.findOneAndUpdate(
+      { _id: senderWallet._id, balance: { $gte: validatedAmount } },
       {
         $inc: {
           balance: -validatedAmount,
@@ -319,12 +352,17 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
       { returnDocument: "after", session }
     );
 
+    if (!updatedSender) {
+      const error = new Error("Insufficient balance");
+      error.code = "INSUFFICIENT_BALANCE";
+      throw error;
+    }
+
     if (updatedSender) {
       updatedSender.updateLevel();
       await syncTokenEstimate(updatedSender, session);
     }
 
-    // Update receiver
     const updatedReceiver = await Wallet.findByIdAndUpdate(
       receiverWallet._id,
       {
@@ -337,10 +375,19 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
       { returnDocument: "after", session }
     );
 
+    if (!updatedReceiver) {
+      const error = new Error("Receiver wallet update failed");
+      error.code = "WALLET_UPDATE_FAILED";
+      throw error;
+    }
+
     if (updatedReceiver) {
       updatedReceiver.updateLevel();
       await syncTokenEstimate(updatedReceiver, session);
     }
+
+    const senderBalanceBefore = Number(updatedSender.balance || 0) + validatedAmount;
+    const receiverBalanceBefore = Number(updatedReceiver.balance || 0) - validatedAmount;
 
     // Create send transaction
     const sendTransaction = new WalletTransaction({
@@ -348,7 +395,7 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
       type: TRANSACTION_TYPES.TRANSFER,
       amount: validatedAmount,
       balanceBefore: senderBalanceBefore,
-      balanceAfter: senderBalanceBefore - validatedAmount,
+      balanceAfter: Number(updatedSender.balance || 0),
       source: TRANSACTION_SOURCES.TRANSFER,
       description: `Transfer to user`,
       metadata: { ...cleanMetadata, recipientId: receiverId.toString() },
@@ -364,7 +411,7 @@ const transferPoints = async (senderId, receiverId, amount, metadata = {}) => {
       type: TRANSACTION_TYPES.TRANSFER,
       amount: validatedAmount,
       balanceBefore: receiverBalanceBefore,
-      balanceAfter: receiverBalanceBefore + validatedAmount,
+      balanceAfter: Number(updatedReceiver.balance || 0),
       source: TRANSACTION_SOURCES.TRANSFER,
       description: `Transfer from user`,
       metadata: { ...cleanMetadata, senderId: senderId.toString() },
@@ -416,12 +463,8 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       throw error;
     }
 
-    const senderBalanceBefore = senderWallet.balance;
-    const receiverBalanceBefore = receiverWallet.balance;
-
-    // Update sender
-    const updatedSender = await Wallet.findByIdAndUpdate(
-      senderWallet._id,
+    const updatedSender = await Wallet.findOneAndUpdate(
+      { _id: senderWallet._id, balance: { $gte: validatedAmount } },
       {
         $inc: {
           balance: -validatedAmount,
@@ -431,6 +474,12 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       },
       { returnDocument: "after", session }
     );
+
+    if (!updatedSender) {
+      const error = new Error("Insufficient balance for gift");
+      error.code = "INSUFFICIENT_BALANCE";
+      throw error;
+    }
 
     if (updatedSender) {
       updatedSender.updateLevel();
@@ -450,10 +499,19 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       { returnDocument: "after", session }
     );
 
+    if (!updatedReceiver) {
+      const error = new Error("Receiver wallet update failed");
+      error.code = "WALLET_UPDATE_FAILED";
+      throw error;
+    }
+
     if (updatedReceiver) {
       updatedReceiver.updateLevel();
       await syncTokenEstimate(updatedReceiver, session);
     }
+
+    const senderBalanceBefore = Number(updatedSender.balance || 0) + validatedAmount;
+    const receiverBalanceBefore = Number(updatedReceiver.balance || 0) - validatedAmount;
 
     // Create send transaction
     const sendTransaction = new WalletTransaction({
@@ -461,7 +519,7 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       type: TRANSACTION_TYPES.GIFT,
       amount: validatedAmount,
       balanceBefore: senderBalanceBefore,
-      balanceAfter: senderBalanceBefore - validatedAmount,
+      balanceAfter: Number(updatedSender.balance || 0),
       source: TRANSACTION_SOURCES.GIFT_RECEIVED,
       description: `Sent ${giftId} gift`,
       metadata: { ...sanitizeMetadata(metadata), giftId, recipientId: receiverId.toString() },
@@ -477,7 +535,7 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       type: TRANSACTION_TYPES.GIFT,
       amount: validatedAmount,
       balanceBefore: receiverBalanceBefore,
-      balanceAfter: receiverBalanceBefore + validatedAmount,
+      balanceAfter: Number(updatedReceiver.balance || 0),
       source: TRANSACTION_SOURCES.GIFT_RECEIVED,
       description: `Received ${giftId} gift`,
       metadata: { ...sanitizeMetadata(metadata), giftId, senderId: senderId.toString() },
@@ -577,7 +635,9 @@ const rewardDailyLogin = async (userId) => {
     wallet.totalSent = Number(wallet.totalSent || 0);
     wallet.streakCount = Number(wallet.streakCount || 0);
 
-    const reward = dailyRewardForStreak(wallet.streakCount);
+    const missedStreak = Boolean(lastLogin && now.getTime() - lastLogin.getTime() >= DAILY_LOGIN_COOLDOWN_MS * 2);
+    const rewardBaseStreak = missedStreak ? 0 : wallet.streakCount;
+    const reward = dailyRewardForStreak(rewardBaseStreak);
     const balanceBefore = wallet.balance;
     const balanceAfter = balanceBefore + reward.amount;
 
@@ -591,7 +651,6 @@ const rewardDailyLogin = async (userId) => {
     try {
       await wallet.save({ session });
     } catch (saveError) {
-      console.error("Wallet save failed", saveError);
       saveError.code = saveError.code || "WALLET_UPDATE_FAILED";
       throw saveError;
     }
@@ -607,7 +666,17 @@ const rewardDailyLogin = async (userId) => {
       metadata: sanitizeMetadata({
         date: now.toISOString(),
         streakDay: reward.streakDay,
+        cycleDay: reward.cycleDay,
+        monthDay: reward.monthDay,
+        weekIndex: reward.weekIndex,
+        monthIndex: reward.monthIndex,
         nextStreak: reward.nextStreak,
+        rewardType: reward.rewardType,
+        rewardLabel: reward.label,
+        multiplier: reward.multiplier,
+        isWeeklyBonus: reward.isWeeklyBonus,
+        isMonthlyBonus: reward.isMonthlyBonus,
+        streakReset: missedStreak,
         conversionRate: process.env.NEX_POINTS_PER_COIN || 1000,
         futureTokenReady: true,
       }),
@@ -621,6 +690,8 @@ const rewardDailyLogin = async (userId) => {
       transaction: transaction[0],
       rewardAmount: reward.amount,
       streakDay: reward.streakDay,
+      reward,
+      streakReset: missedStreak,
       nextClaimTime: new Date(now.getTime() + DAILY_LOGIN_COOLDOWN_MS),
     };
   } catch (error) {
@@ -635,6 +706,13 @@ const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) =>
   validateUserId(senderId);
   const identifier = String(payload.receiverId || payload.recipient || payload.identifier || payload.walletId || payload.nexHandle || payload.username || "").trim();
   const amount = validateAmount(payload.amount);
+  const asset = String(payload.asset || payload.currency || "NEX_POINTS").trim().toUpperCase();
+
+  if (asset !== "NEX_POINTS") {
+    const error = new Error("NEX Token transfers are prepared for a future release but are not active yet");
+    error.code = "TOKEN_TRANSFERS_DISABLED";
+    throw error;
+  }
 
   if (!identifier) {
     const error = new Error("Choose a wallet ID, NEX handle, or username");
@@ -665,6 +743,8 @@ const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) =>
     throw error;
   }
 
+  const releaseTransferLock = acquireTransferLock(senderId);
+  try {
   const recentTransfer = await WalletTransfer.findOne({
     senderId,
     status: { $in: ["pending", "completed"] },
@@ -685,6 +765,9 @@ const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) =>
     receiverWalletId: receiverUser.walletId,
     receiverIdentifier: identifier,
     amount,
+    asset: "NEX_POINTS",
+    chain: "internal",
+    tokenStatus: "points_only",
     status: "pending",
     method: identityMethodFor(identifier),
     memo: String(payload.memo || "").slice(0, 180),
@@ -702,6 +785,10 @@ const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) =>
       nexHandle: receiverUser.nexHandle,
       memo: payload.memo,
       transferMethod: audit.method,
+      asset: "NEX_POINTS",
+      currency: "NEX_POINTS",
+      chain: "internal",
+      tokenStatus: "points_only",
     });
 
     audit.status = "completed";
@@ -724,6 +811,9 @@ const transferByIdentifier = async (senderId, payload = {}, requestMeta = {}) =>
       },
     }).catch(() => null);
     throw error;
+  }
+  } finally {
+    releaseTransferLock();
   }
 };
 

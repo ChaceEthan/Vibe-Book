@@ -18,7 +18,7 @@ const statusForWalletError = (error = {}) => {
   if (error.code === "INSUFFICIENT_BALANCE") return 402;
   if (error.code === "TRANSFER_COOLDOWN") return 429;
   if (error.code === "RECIPIENT_NOT_FOUND") return 404;
-  if (["SELF_REFERRAL", "SELF_TRANSFER", "RECIPIENT_REQUIRED", "RECEIVE_DISABLED", "INVALID_QR_PAYLOAD", "QR_EXPIRED", "SELF_QR_SCAN"].includes(error.code)) return 400;
+  if (["SELF_REFERRAL", "SELF_TRANSFER", "RECIPIENT_REQUIRED", "RECEIVE_DISABLED", "TOKEN_TRANSFERS_DISABLED", "INVALID_QR_PAYLOAD", "QR_EXPIRED", "SELF_QR_SCAN"].includes(error.code)) return 400;
   if (error.name === "ValidationError" || error.name === "CastError") return 400;
 
   return 500;
@@ -165,6 +165,14 @@ const transferPoints = async (req, res, next) => {
 
     emitToUser(senderId, "wallet:update", senderWallet);
     emitToUser(result.receiverUser?._id || result.receiver?.userId, "wallet:update", receiverWallet);
+    emitToUser(senderId, "wallet:transfer", {
+      type: "transfer_sent",
+      amount: result.sendTransaction.amount,
+      wallet: senderWallet,
+      transaction: sendTransaction,
+      recipient: result.receiverUser?.username || result.receiverUser?.walletId || "creator",
+      message: "Transfer completed",
+    });
     emitToUser(result.receiverUser?._id || result.receiver?.userId, "wallet:reward", {
       type: "transfer_received",
       amount: result.receiveTransaction.amount,
@@ -239,6 +247,8 @@ const claimDailyReward = async (req, res) => {
       transaction,
       nextClaimTime,
       streakCount: Number(wallet?.streakCount ?? 0),
+      reward: result.reward,
+      streakReset: result.streakReset,
       message: "Daily reward claimed successfully",
     };
 
@@ -254,14 +264,12 @@ const claimDailyReward = async (req, res) => {
       nextClaimTime,
       streak: Number(wallet?.streakCount ?? 0),
       streakCount: Number(wallet?.streakCount ?? 0),
+      streakDay: result.streakDay,
+      rewardMeta: result.reward,
+      streakReset: result.streakReset,
     });
   } catch (error) {
-    console.error(
-      "[DAILY_REWARD_FATAL]",
-      error,
-      error?.message,
-      error?.stack
-    );
+    console.error("[wallet] daily reward failed", error?.message || error);
 
     if (res.headersSent) {
       return undefined;

@@ -76,6 +76,28 @@ const walletSchema = new mongoose.Schema(
         enum: ["points", "coin_ready", "migrated"],
         default: "points",
       },
+      tokenSymbol: {
+        type: String,
+        default: () => process.env.NEX_COIN_SYMBOL || "NEX",
+      },
+      tokenBalance: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      lockedTokenBalance: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      migrationEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      lastEstimateAt: {
+        type: Date,
+        default: null,
+      },
     },
   },
   {
@@ -119,6 +141,11 @@ walletSchema.methods.updateTokenEstimate = function () {
     estimatedCoins: estimate.estimatedCoins,
     exportable: true,
     stage: "points",
+    tokenSymbol: estimate.tokenSymbol,
+    tokenBalance: this.tokenMigration?.tokenBalance || 0,
+    lockedTokenBalance: this.tokenMigration?.lockedTokenBalance || 0,
+    migrationEnabled: false,
+    lastEstimateAt: new Date(),
   };
 
   return this;

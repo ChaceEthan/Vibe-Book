@@ -37,6 +37,22 @@ const walletTransferSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    asset: {
+      type: String,
+      enum: ["NEX_POINTS", "NEX_TOKEN"],
+      default: "NEX_POINTS",
+      index: true,
+    },
+    chain: {
+      type: String,
+      enum: ["internal", "future_blockchain"],
+      default: "internal",
+    },
+    tokenStatus: {
+      type: String,
+      enum: ["points_only", "token_disabled", "token_ready"],
+      default: "points_only",
+    },
     status: {
       type: String,
       enum: ["pending", "completed", "failed", "reversed"],

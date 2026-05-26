@@ -89,6 +89,42 @@ const initialsFor = (value = "VibeBook") =>
     .map((part) => part[0]?.toUpperCase())
     .join("") || "VB";
 
+const frameGradientFor = (frame = "") => ({
+  frame_starter_neon: "from-cyan-300 via-lime-300 to-emerald-500",
+  frame_gold_aura: "from-yellow-200 via-amber-400 to-orange-600",
+  frame_anime_energy: "from-pink-400 via-violet-500 to-sky-400",
+  frame_cyber_matrix: "from-slate-950 via-blue-600 to-teal-300",
+  frame_kigali_night: "from-indigo-950 via-fuchsia-600 to-yellow-300",
+  frame_diamond_elite: "from-cyan-200 via-white to-violet-500",
+  frame_flame_aura: "from-orange-300 via-red-500 to-rose-700",
+  frame_vip_prestige: "from-zinc-950 via-amber-500 to-white",
+  frame_minimal_luxury: "from-slate-100 via-zinc-300 to-slate-800",
+  frame_nex_genesis_founder: "from-black via-lime-300 to-cyan-200",
+  frame_neon_glow: "from-emerald-300 via-cyan-300 to-lime-300",
+  frame_gold_elite: "from-yellow-200 via-amber-400 to-orange-500",
+  frame_fire_aura: "from-orange-400 via-red-500 to-rose-600",
+  frame_diamond_ring: "from-cyan-200 via-sky-400 to-violet-500",
+  frame_rwanda_pride: "from-sky-500 via-yellow-300 to-emerald-500",
+  frame_creator_legend: "from-fuchsia-400 via-amber-300 to-cyan-300",
+  frame_cyber_pulse: "from-blue-500 via-indigo-500 to-teal-300",
+}[frame] || "");
+
+const FramedSafeAvatar = ({ user, src = "", alt = "", className = "" }) => {
+  const frame = user?.equippedFrame || user?.marketplace?.equippedFrame || "";
+  const gradient = frameGradientFor(frame);
+
+  if (!gradient) {
+    return <SafeAvatar user={user} src={src} alt={alt} className={className} />;
+  }
+
+  return (
+    <span className={`relative inline-flex shrink-0 rounded-full bg-gradient-to-br ${gradient} p-[2px] shadow-xl`}>
+      <span className="absolute inset-[-3px] rounded-full bg-inherit opacity-45 blur-sm" />
+      <SafeAvatar user={user} src={src} alt={alt} className={`${className} relative ring-2 ring-white/75`} />
+    </span>
+  );
+};
+
 const relativeTimeFor = (value) => {
   const timestamp = value ? new Date(value).getTime() : 0;
 
@@ -341,7 +377,7 @@ const FeedItem = memo(
         <div className="home-feed-caption absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-center gap-3">
             <Link to={profilePath} className="shrink-0" aria-label="Open creator profile">
-              <SafeAvatar user={profile} src={profileImage} className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
+              <FramedSafeAvatar user={profile} src={profileImage} className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
             </Link>
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2">
@@ -497,9 +533,7 @@ const CommentsSheet = ({
 
                 return (
                   <article key={key} className="flex gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-900 text-xs font-black text-white">
-                      <SafeAvatar user={comment.user || comment} src={avatar} className="h-full w-full object-cover" />
-                    </div>
+                    <FramedSafeAvatar user={comment.user || comment} src={avatar} className="h-10 w-10 rounded-full bg-slate-900 object-cover" />
                     <div className="min-w-0 flex-1">
                       <div className="flex min-w-0 items-center gap-2">
                         <p className="truncate text-sm font-black text-navy">{name}</p>

@@ -109,7 +109,7 @@ const getCatalog = async (filters = {}) => {
   await ensureCatalog();
   const query = {
     ...(filters.category ? { category: filters.category } : {}),
-    ...(filters.includeDisabled ? {} : { status: { $ne: "disabled" } }),
+    ...(filters.includeDisabled ? {} : { status: "active" }),
   };
   const items = await MarketplaceItem.find(query).sort({ category: 1, price: 1, rarity: 1 }).lean();
   return items.map(publicItem);
@@ -212,6 +212,12 @@ const assertCanBuy = async (userId, item, options = {}) => {
     throw error;
   }
 
+  if (String(item.currency || "NEX_POINTS").toUpperCase() !== "NEX_POINTS") {
+    const error = new Error("Token purchases are prepared for a future release but are not active yet");
+    error.code = "TOKEN_PURCHASES_DISABLED";
+    throw error;
+  }
+
   const numericPrice = Number(item.price);
   if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
     const error = new Error("Invalid item price");
@@ -236,6 +242,11 @@ const assertCanBuy = async (userId, item, options = {}) => {
 
   const inventory = await getInventory(userId, { session });
   const field = CATEGORY_TO_FIELD[item.category];
+  if (!field) {
+    const error = new Error("This marketplace category is not available yet");
+    error.code = "ITEM_UNAVAILABLE";
+    throw error;
+  }
   const existing = (inventory[field] || []).find((owned) => owned.itemId === item.itemId && (!owned.expiresAt || new Date(owned.expiresAt) > new Date()));
 
   if (existing && ![MARKETPLACE_CATEGORIES.BOOSTS, MARKETPLACE_CATEGORIES.FEATURED].includes(item.category)) {
@@ -314,6 +325,46 @@ const inventoryPushFor = (item, transactionId) => {
   };
 };
 
+const autoEquipInventoryItem = (inventory, item) => {
+  const now = new Date();
+
+  if (item.category === MARKETPLACE_CATEGORIES.FRAMES) {
+    inventory.ownedFrames.forEach((entry) => {
+      entry.equipped = entry.itemId === item.itemId;
+      if (entry.equipped) entry.lastEquippedAt = now;
+    });
+    inventory.active.frame = item.itemId;
+  }
+
+  if (item.category === MARKETPLACE_CATEGORIES.THEMES) {
+    inventory.ownedThemes.forEach((entry) => {
+      entry.equipped = entry.itemId === item.itemId;
+      if (entry.equipped) entry.lastEquippedAt = now;
+    });
+    inventory.active.theme = item.metadata?.themeKey || item.itemId;
+  }
+
+  if (item.category === MARKETPLACE_CATEGORIES.BADGES) {
+    const activeBadges = new Set(inventory.active.badges || []);
+    activeBadges.add(item.itemId);
+    inventory.active.badges = Array.from(activeBadges).slice(0, 5);
+    inventory.ownedBadges.forEach((entry) => {
+      entry.equipped = inventory.active.badges.includes(entry.itemId);
+      if (entry.equipped) entry.lastEquippedAt = now;
+    });
+  }
+
+  if (item.category === MARKETPLACE_CATEGORIES.REACTIONS) {
+    const activeReactions = new Set(inventory.active.reactions || []);
+    activeReactions.add(item.itemId);
+    inventory.active.reactions = Array.from(activeReactions).slice(0, 12);
+    inventory.ownedReactions.forEach((entry) => {
+      entry.equipped = inventory.active.reactions.includes(entry.itemId);
+      if (entry.equipped) entry.lastEquippedAt = now;
+    });
+  }
+};
+
 const addToInventory = async (userId, item, transactionId, session = null) => {
   const inventory = await getInventory(userId, { session });
   const field = CATEGORY_TO_FIELD[item.category];
@@ -328,15 +379,20 @@ const addToInventory = async (userId, item, transactionId, session = null) => {
     existing.quantity = Number(existing.quantity || 1);
     existing.owned = true;
     existing.expiresAt = entry.expiresAt || existing.expiresAt;
+    existing.metadata = { ...(existing.metadata || {}), ...(entry.metadata || {}) };
   } else {
     inventory[field].push(entry);
+  }
+
+  if ([MARKETPLACE_CATEGORIES.FRAMES, MARKETPLACE_CATEGORIES.THEMES, MARKETPLACE_CATEGORIES.BADGES, MARKETPLACE_CATEGORIES.REACTIONS].includes(item.category)) {
+    autoEquipInventoryItem(inventory, item);
   }
 
   await inventory.save({ ...(session ? { session } : {}) });
   return inventory;
 };
 
-const updateProfilePrestige = async (userId, inventory) => {
+const updateProfilePrestige = async (userId, inventory, session = null) => {
   const activeBadges = (inventory.ownedBadges || [])
     .filter((item) => item.equipped && (!item.expiresAt || new Date(item.expiresAt) > new Date()))
     .map((item) => item.itemId)
@@ -352,7 +408,7 @@ const updateProfilePrestige = async (userId, inventory) => {
       profileTheme: inventory.active?.theme || "classic",
       premiumBadge: activeBadges.length > 0,
     },
-  });
+  }, { ...(session ? { session } : {}) });
 };
 
 const activateBoost = async (userId, item, transactionId, session = null) => {
@@ -446,10 +502,8 @@ const purchaseItem = async (userId, itemId, options = {}) => {
       throw error;
     }
 
-    const balanceBefore = Number(wallet.balance || 0);
-    const balanceAfter = balanceBefore - price;
-    const updatedWallet = await Wallet.findByIdAndUpdate(
-      wallet._id,
+    const updatedWallet = await Wallet.findOneAndUpdate(
+      { _id: wallet._id, balance: { $gte: price } },
       {
         $inc: {
           balance: -price,
@@ -460,8 +514,8 @@ const purchaseItem = async (userId, itemId, options = {}) => {
     );
 
     if (!updatedWallet) {
-      const error = new Error("Wallet update failed");
-      error.code = "WALLET_UPDATE_FAILED";
+      const error = new Error("Insufficient balance");
+      error.code = "INSUFFICIENT_BALANCE";
       throw error;
     }
 
@@ -469,10 +523,15 @@ const purchaseItem = async (userId, itemId, options = {}) => {
     updatedWallet.updateTokenEstimate();
     await updatedWallet.save({ session });
 
+    const balanceBefore = Number(updatedWallet.balance || 0) + price;
+    const balanceAfter = Number(updatedWallet.balance || 0);
+
     const metadata = sanitizeMetadata({
       itemId: item.itemId,
       category: item.category,
       currency: item.currency || "NEX_POINTS",
+      asset: "NEX_POINTS",
+      tokenStatus: "points_only",
       futureTokenReady: true,
     });
     const [transaction] = await WalletTransaction.create([{
@@ -491,6 +550,10 @@ const purchaseItem = async (userId, itemId, options = {}) => {
     const inventory = await addToInventory(userId, item, transactionId, session);
     let boost = null;
     let featured = null;
+
+    if ([MARKETPLACE_CATEGORIES.FRAMES, MARKETPLACE_CATEGORIES.THEMES, MARKETPLACE_CATEGORIES.BADGES, MARKETPLACE_CATEGORIES.REACTIONS].includes(item.category)) {
+      await updateProfilePrestige(userId, inventory, session);
+    }
 
     if (item.category === MARKETPLACE_CATEGORIES.BOOSTS) {
       boost = await activateBoost(userId, item, transactionId, session);

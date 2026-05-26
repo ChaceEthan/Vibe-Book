@@ -111,6 +111,40 @@ const formatDuration = (target) => {
   return `${seconds}s`;
 };
 
+const rewardForStreakDay = (day = 1) => {
+  const streakDay = Math.max(1, Math.floor(Number(day || 1)));
+  if (streakDay % 30 === 0) return { amount: 500, kind: "Monthly", tone: "bg-fuchsia-500 text-white border-fuchsia-300" };
+  if (streakDay % 7 === 0) return { amount: 75, kind: "Boost", tone: "bg-orange-500 text-white border-orange-300" };
+  if (streakDay % 3 === 0) return { amount: 25, kind: "Bonus", tone: "bg-amber-400 text-navy border-amber-300" };
+  return { amount: 10, kind: "Daily", tone: "bg-white text-slate-500 border-slate-200" };
+};
+
+const dailyProgressForWallet = (wallet = {}) => {
+  if (wallet?.dailyProgress?.days?.length) return wallet.dailyProgress;
+  const currentStreak = Math.max(0, Math.floor(Number(wallet?.streakCount || 0)));
+  const nextStreak = currentStreak + 1;
+  const monthIndex = Math.max(1, Math.ceil(nextStreak / 30));
+  const monthStart = (monthIndex - 1) * 30 + 1;
+  return {
+    currentStreak,
+    nextStreak,
+    monthIndex,
+    monthStart,
+    monthEnd: monthStart + 29,
+    monthDay: ((nextStreak - 1) % 30) + 1,
+    days: Array.from({ length: 30 }, (_, index) => {
+      const streakDay = monthStart + index;
+      return {
+        streakDay,
+        monthDay: index + 1,
+        completed: streakDay <= currentStreak,
+        next: streakDay === nextStreak,
+        ...rewardForStreakDay(streakDay),
+      };
+    }),
+  };
+};
+
 const transactionIcon = (transaction = {}) => {
   const key = `${transaction.type || ""}:${transaction.source || ""}`.toLowerCase();
   if (key.includes("gift")) return Gift;
@@ -227,8 +261,8 @@ const BalanceHero = ({ user, wallet, socketConnected }) => {
       await navigator.clipboard?.writeText(walletId);
       setCopiedWalletId(true);
       window.setTimeout(() => setCopiedWalletId(false), 1600);
-    } catch (error) {
-      console.error("Wallet Error:", error);
+    } catch {
+      setCopiedWalletId(false);
     }
   };
 
@@ -305,37 +339,96 @@ const DailyClaimCard = ({ wallet, onClaim, locked, cooldown }) => {
     return () => window.clearInterval(timer);
   }, []);
   const cooldownActive = cooldown && new Date(cooldown).getTime() > now;
-  const streak = Math.min(7, Number(wallet?.streakCount || 0));
+  const progress = dailyProgressForWallet(wallet);
+  const streak = Number(progress.currentStreak || wallet?.streakCount || 0);
+  const nextDay = Number(progress.nextStreak || streak + 1);
+  const nextReward = rewardForStreakDay(nextDay);
+  const monthDay = Number(progress.monthDay || (((nextDay - 1) % 30) + 1));
+  const monthPercent = Math.min(100, Math.max(3, ((monthDay - 1) / 30) * 100));
+  const missedStreak = wallet?.lastLoginDate && now - new Date(wallet.lastLoginDate).getTime() >= 48 * 60 * 60 * 1000;
   const handleClaim = async () => {
-    try {
-      await onClaim?.();
-    } catch (error) {
-      console.error("Wallet Error:", error);
-    }
+    await onClaim?.();
   };
 
   return (
-    <section className="rounded-lg border border-orange-200 bg-gradient-to-br from-orange-50 via-white to-amber-50 p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <p className="text-base font-black text-navy">Daily reward</p>
-          <p className="mt-1 text-xs font-bold text-slate-500">Streak multipliers, mystery bonuses, and Day 7 prestige drops.</p>
-        </div>
-        <motion.span animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity }} className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg">
-          <Flame className="h-5 w-5 fill-white" />
-        </motion.span>
-      </div>
-      <div className="mt-4 grid grid-cols-7 gap-1.5">
-        {Array.from({ length: 7 }).map((_, index) => (
-          <div key={index} className={`flex aspect-square items-center justify-center rounded-lg border text-xs font-black ${index < streak ? "border-orange-300 bg-orange-500 text-white" : "border-slate-200 bg-white text-slate-400"}`}>
-            {index + 1}{index === 6 ? "*" : ""}
+    <section className="overflow-hidden rounded-lg border border-orange-200 bg-gradient-to-br from-orange-50 via-white to-amber-50 shadow-sm">
+      <div className="relative p-4">
+        <div className="absolute inset-0 wallet-grid opacity-30" />
+        <div className="relative flex items-center justify-between gap-3">
+          <div>
+            <p className="text-base font-black text-navy">Daily reward</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">Day {nextDay} is ready next. Every 7th day boosts, every 30th day prestiges.</p>
           </div>
-        ))}
+          <motion.span animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity }} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-orange-500 text-white shadow-lg">
+            <Flame className="h-5 w-5 fill-white" />
+          </motion.span>
+        </div>
+
+        <div className="relative mt-4 grid gap-3 rounded-lg border border-white/80 bg-white/80 p-3 shadow-sm backdrop-blur">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-orange-500">Infinite streak</p>
+              <p className="mt-1 text-3xl font-black text-navy">{formatNumber(streak)} days</p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Next reward</p>
+              <p className="mt-1 text-xl font-black text-orange-600">+{formatNumber(nextReward.amount)}</p>
+            </div>
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-orange-100">
+            <motion.div className="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-400 to-fuchsia-500" initial={{ width: 0 }} animate={{ width: `${monthPercent}%` }} />
+          </div>
+          <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wide text-slate-400">
+            <span>Month {formatNumber(progress.monthIndex || 1)}</span>
+            <span>Day {monthDay}/30</span>
+          </div>
+        </div>
+
+        <div className="relative mt-4 grid grid-cols-7 gap-1.5">
+          {asArray(progress.days).slice(0, 30).map((day) => {
+            const meta = rewardForStreakDay(day.streakDay);
+            const completed = Boolean(day.completed);
+            const isNext = Boolean(day.next);
+            const isPrestige = day.streakDay % 30 === 0;
+            const isBoost = !isPrestige && day.streakDay % 7 === 0;
+            return (
+              <motion.div
+                key={day.streakDay}
+                layout
+                className={`relative flex aspect-square min-h-9 items-center justify-center rounded-lg border text-[11px] font-black shadow-sm ${
+                  completed ? "border-orange-300 bg-orange-500 text-white" : isNext ? "border-slate-950 bg-slate-950 text-brand" : meta.tone
+                }`}
+                animate={isNext && !cooldownActive ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                transition={{ duration: 1.5, repeat: isNext && !cooldownActive ? Infinity : 0 }}
+                title={`Day ${day.streakDay}: +${meta.amount} NEX`}
+              >
+                {day.monthDay || (((day.streakDay - 1) % 30) + 1)}
+                {(isBoost || isPrestige) && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-brand ring-2 ring-white" />}
+              </motion.div>
+            );
+          })}
+        </div>
+
+        <div className="relative mt-3 grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-lg bg-white/85 p-2">
+            <p className="text-sm font-black text-navy">Day {nextDay}</p>
+            <p className="text-[10px] font-black uppercase text-slate-400">{nextReward.kind}</p>
+          </div>
+          <div className="rounded-lg bg-white/85 p-2">
+            <p className="text-sm font-black text-navy">7th</p>
+            <p className="text-[10px] font-black uppercase text-slate-400">Boost loop</p>
+          </div>
+          <div className="rounded-lg bg-white/85 p-2">
+            <p className="text-sm font-black text-navy">30th</p>
+            <p className="text-[10px] font-black uppercase text-slate-400">Prestige</p>
+          </div>
+        </div>
+        {missedStreak && <p className="relative mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs font-bold text-orange-700">Missed window detected. Your next claim starts a fresh streak.</p>}
+        <button type="button" className="btn-primary relative mt-4 w-full gap-2" onClick={handleClaim} disabled={locked || cooldownActive}>
+          {locked ? <Loader2 className="h-4 w-4 animate-spin" /> : cooldownActive ? <Clock className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+          {cooldownActive ? `Next claim in ${formatDuration(cooldown)}` : `Claim +${formatNumber(nextReward.amount)} NEX`}
+        </button>
       </div>
-      <button type="button" className="btn-primary mt-4 w-full gap-2" onClick={handleClaim} disabled={locked || cooldownActive}>
-        {locked ? <Loader2 className="h-4 w-4 animate-spin" /> : cooldownActive ? <Clock className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-        {cooldownActive ? `Next claim in ${formatDuration(cooldown)}` : "Claim Daily Reward"}
-      </button>
     </section>
   );
 };
@@ -345,8 +438,8 @@ const QuickAction = ({ icon: Icon, label, to, onClick, disabled }) => {
   const handleClick = async () => {
     try {
       await onClick?.();
-    } catch (error) {
-      console.error("Wallet Error:", error);
+    } catch {
+      return undefined;
     }
   };
   const content = (
@@ -428,7 +521,7 @@ const ReferralPage = ({ user, transactions, generateWalletQr, scanWalletQr, requ
           setQrText(result.data.qrText);
         }
       } catch (error) {
-        console.error("Wallet Error:", error);
+        if (!canceled) setQrText("");
       }
     };
     generate();
@@ -473,7 +566,6 @@ const ReferralPage = ({ user, transactions, generateWalletQr, scanWalletQr, requ
       setScanResult(result?.ok ? result?.data?.message || "QR scanned" : result?.message || "Unable to scan QR");
       if (result?.ok) setScanValue("");
     } catch (error) {
-      console.error("Wallet Error:", error);
       setScanResult("Unable to scan QR");
     }
   };
@@ -644,13 +736,17 @@ const TransferPage = ({ wallet, user, transferPoints, walletIdentity }) => {
       return;
     }
 
+    if (amount > Number(wallet?.balance || 0)) {
+      setMessage("Not enough NEX Points for this transfer.");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const result = await transferPoints({ receiverId: recipient, recipient, amount, memo: form.memo.trim() });
+      const result = await transferPoints({ receiverId: recipient, recipient, amount, memo: form.memo.trim(), asset: "NEX_POINTS" });
       setMessage(result?.ok ? "Transfer sent. NEX Points moved instantly." : result?.message || "Transfer failed.");
       if (result?.ok) setForm({ recipient: "", amount: "", memo: "" });
     } catch (error) {
-      console.error("Wallet Error:", error);
       setMessage("Transfer failed. Your balance was restored.");
     } finally {
       setSubmitting(false);
@@ -685,6 +781,10 @@ const TransferPage = ({ wallet, user, transferPoints, walletIdentity }) => {
       </section>
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <form onSubmit={submit} className="grid gap-3">
+          <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+            <span className="rounded-lg bg-slate-950 px-3 py-2 text-center text-xs font-black text-white">NEX Points</span>
+            <span className="rounded-lg px-3 py-2 text-center text-xs font-black text-slate-500">NEX Token later</span>
+          </div>
           <input className="field" placeholder="Wallet ID, @handle.pay, or username" value={form.recipient} onChange={(event) => { setConfirming(false); setForm((current) => ({ ...current, recipient: event.target.value })); }} />
           <input className="field" placeholder="Amount" inputMode="numeric" value={form.amount} onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value.replace(/[^\d]/g, "") }))} />
           <input className="field" placeholder="Memo (optional)" value={form.memo} maxLength={120} onChange={(event) => setForm((current) => ({ ...current, memo: event.target.value }))} />
@@ -738,8 +838,8 @@ const ReceivePage = ({ wallet, user, walletIdentity, receiveProfile, requestLock
     try {
       await navigator.clipboard?.writeText(value);
       pushNotification?.({ type: "copy", title: `${label} copied`, message: value });
-    } catch (error) {
-      console.error("Wallet Error:", error);
+    } catch {
+      pushNotification?.({ type: "warning", title: "Copy failed", message: "Unable to copy this wallet value." });
     }
   };
 
@@ -901,8 +1001,8 @@ const RewardsPage = ({ wallet, storeItems, inventory, storeLoading, requestLocks
     try {
       const result = await purchaseStoreItem(safeItemId, payload);
       if (result?.ok) setSelected(null);
-    } catch (error) {
-      console.error("Wallet Error:", error);
+    } catch {
+      return undefined;
     }
   };
 
@@ -1006,9 +1106,11 @@ const previewIconFor = (item = {}) => {
   return {
     "badge-check": BadgeCheck,
     "shield-check": ShieldCheck,
+    shield: ShieldCheck,
     crown: Crown,
     flame: Flame,
     gem: Gem,
+    medal: Medal,
     play: Play,
     radio: Radio,
     rocket: Rocket,
@@ -1090,7 +1192,7 @@ const PurchaseModal = ({ item, wallet, onClose, onConfirm, busy }) => {
           </div>
           <button type="button" className="btn-primary mt-4 w-full gap-2" disabled={disabled} onClick={() => onConfirm?.(safeItem, { postId })}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />}
-            {!safeItemId ? "Item unavailable" : canAfford ? "Unlock instantly" : "Need more NEX"}
+            {!safeItemId ? "Item unavailable" : canAfford ? ["frames", "badges", "reactions", "themes"].includes(safeItem.category) ? "Unlock and equip" : "Unlock instantly" : "Need more NEX"}
           </button>
         </div>
       </motion.section>
@@ -1109,8 +1211,16 @@ const StoreItemCard = ({ item, inventory, wallet, requestLocks, onBuy, onEquip }
   const canEquip = Boolean(safeItemId && !busy);
   const canBuy = Boolean(safeItemId && !busy && !comingSoon && canAfford);
   return (
-    <motion.article layout whileHover={{ y: -4 }} className={`overflow-hidden rounded-lg border bg-white shadow-sm ${rarityTone(safeItem.rarity).split(" ").find((part) => part.startsWith("border-")) || "border-slate-200"}`}>
+    <motion.article layout whileHover={{ y: -4 }} className={`relative overflow-hidden rounded-lg border bg-white shadow-sm ${rarityTone(safeItem.rarity).split(" ").find((part) => part.startsWith("border-")) || "border-slate-200"}`}>
       <StorePreview item={safeItem} />
+      <div className="pointer-events-none absolute left-2 right-2 top-2 flex items-center justify-between gap-2">
+        <span className="rounded-full border border-white/25 bg-slate-950/55 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white backdrop-blur">{safeItem.rarity || "common"}</span>
+        {(owned || equipped) && (
+          <span className={`rounded-full px-2 py-1 text-[10px] font-black uppercase tracking-wide backdrop-blur ${equipped ? "bg-brand text-navy" : "bg-white/85 text-slate-900"}`}>
+            {equipped ? "Active" : "Owned"}
+          </span>
+        )}
+      </div>
       <div className="p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -1154,8 +1264,8 @@ const NexStorePage = ({ wallet, storeItems, inventory, activeBoosts, featuredQue
     try {
       const result = await purchaseStoreItem(safeItemId, payload);
       if (result?.ok) setSelected(null);
-    } catch (error) {
-      console.error("Wallet Error:", error);
+    } catch {
+      return undefined;
     }
   };
 
@@ -1192,6 +1302,28 @@ const NexStorePage = ({ wallet, storeItems, inventory, activeBoosts, featuredQue
         <StatCard icon={Medal} label="Badges active" value={formatNumber(asArray(inventory?.active?.badges).length)} detail="Shown on profile and ranks" />
         <StatCard icon={Rocket} label="Active boosts" value={formatNumber(asArray(activeBoosts).length)} detail={asArray(featuredQueue).length ? "Featured queue live" : "No featured queue"} />
       </div>
+      <section className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-black text-navy">Active profile loadout</p>
+            <p className="mt-1 text-xs font-bold text-slate-500">Purchased cosmetics apply to your profile surfaces immediately.</p>
+          </div>
+          <ShieldCheck className="h-5 w-5 shrink-0 text-brand" />
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-4">
+          {[
+            ["Frame", inventory?.active?.frame || "None"],
+            ["Theme", inventory?.active?.theme || "Classic"],
+            ["Badges", `${asArray(inventory?.active?.badges).length}/5 active`],
+            ["Reactions", `${asArray(inventory?.active?.reactions).length}/12 active`],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-lg bg-slate-50 px-3 py-2">
+              <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</p>
+              <p className="mt-1 truncate text-xs font-black text-navy">{value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
       {storeLoading ? (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-72 animate-pulse rounded-lg bg-white" />)}</div>
       ) : (

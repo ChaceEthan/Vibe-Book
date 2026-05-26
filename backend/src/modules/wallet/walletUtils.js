@@ -5,6 +5,7 @@
  */
 
 const { USER_LEVELS } = require("./walletConstants");
+const { dailyRewardProgress } = require("../../utils/pointsCalculator");
 
 /**
  * Calculate user level based on lifetime earned points
@@ -80,8 +81,17 @@ const sanitizeMetadata = (metadata) => {
     "futureTokenReady",
     "date",
     "streakDay",
+    "cycleDay",
+    "monthDay",
+    "weekIndex",
+    "monthIndex",
     "nextStreak",
     "multiplier",
+    "rewardType",
+    "rewardLabel",
+    "isWeeklyBonus",
+    "isMonthlyBonus",
+    "streakReset",
     "mysteryBonus",
     "boostType",
     "postId",
@@ -105,6 +115,10 @@ const sanitizeMetadata = (metadata) => {
     "nexHandle",
     "memo",
     "transferMethod",
+    "asset",
+    "tokenStage",
+    "tokenStatus",
+    "chain",
   ];
 
   for (const key of allowedKeys) {
@@ -141,6 +155,7 @@ const formatWalletResponse = (wallet) => {
     levelName: wallet.levelName,
     tokenMigration: wallet.tokenMigration || {},
     tokenBalance: wallet.tokenMigration?.estimatedCoins || 0,
+    dailyProgress: dailyRewardProgress(wallet.streakCount),
     createdAt: wallet.createdAt,
     updatedAt: wallet.updatedAt,
   };

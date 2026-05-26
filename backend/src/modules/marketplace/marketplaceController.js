@@ -93,6 +93,7 @@ const purchaseItem = async (req, res, next) => {
     };
 
     emitToUser(userId, "store:purchase", payload);
+    emitToUser(userId, "wallet:update", payload.wallet);
     emitToUser(userId, "inventory:update", { inventory: result.inventory });
     if (result.boost) emitToUser(userId, "creator:boost", { boost: result.boost });
     if (result.featured) emitToUser(userId, "featured:update", { featured: result.featured });
@@ -110,7 +111,7 @@ const purchaseItem = async (req, res, next) => {
       return res.status(402).json({ success: false, message: "Not enough NEX Points for this purchase", data: null, code: error.code });
     }
 
-    if (["ALREADY_OWNED", "LEVEL_REQUIRED", "ITEM_NOT_FOUND", "ITEM_UNAVAILABLE", "INVALID_ITEM_PRICE", "BOOST_COOLDOWN", "POST_REQUIRED", "POST_NOT_FOUND", "FEATURED_DUPLICATE", "PURCHASE_LOCKED"].includes(error.code)) {
+    if (["ALREADY_OWNED", "LEVEL_REQUIRED", "ITEM_NOT_FOUND", "ITEM_UNAVAILABLE", "INVALID_ITEM_PRICE", "TOKEN_PURCHASES_DISABLED", "BOOST_COOLDOWN", "POST_REQUIRED", "POST_NOT_FOUND", "FEATURED_DUPLICATE", "PURCHASE_LOCKED"].includes(error.code)) {
       const status = error.statusCode || error.status || (error.code === "ITEM_NOT_FOUND" ? 404 : error.code === "BOOST_COOLDOWN" || error.code === "PURCHASE_LOCKED" ? 429 : 400);
       return res.status(status).json({
         success: false,

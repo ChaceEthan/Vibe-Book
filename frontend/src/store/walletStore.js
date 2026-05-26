@@ -5,6 +5,8 @@ import { getApiErrorMessage, marketplaceApi, walletApi } from "../services/api";
 import { connectSocket } from "../services/socket";
 
 const HISTORY_LIMIT = 20;
+const DAILY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const STREAK_MISS_MS = DAILY_COOLDOWN_MS * 2;
 let dailyClaimRequestInFlight = false;
 
 const DEFAULT_WALLET = {
@@ -20,6 +22,7 @@ const DEFAULT_WALLET = {
   levelName: "Starter",
   identity: {},
   tokenMigration: {},
+  dailyProgress: {},
   createdAt: null,
   updatedAt: null,
 };
@@ -123,6 +126,7 @@ const normalizeWallet = (wallet = {}) => {
     levelName: source.levelName || "Starter",
     identity: source.identity && typeof source.identity === "object" ? source.identity : {},
     tokenMigration: source.tokenMigration && typeof source.tokenMigration === "object" ? source.tokenMigration : {},
+    dailyProgress: source.dailyProgress && typeof source.dailyProgress === "object" ? source.dailyProgress : {},
     tokenBalance: Number(source.tokenBalance ?? source.tokenMigration?.estimatedCoins ?? 0),
   };
 };
@@ -173,16 +177,17 @@ const normalizeLeaderboardEntry = (entry = {}) => ({
 });
 
 const dailyRewardEstimate = (wallet = {}) => {
-  const nextStreak = Math.max(1, Number(wallet?.streakCount || 0) + 1);
+  const lastLoginMs = wallet?.lastLoginDate ? new Date(wallet.lastLoginDate).getTime() : 0;
+  const missedStreak = lastLoginMs && Date.now() - lastLoginMs >= STREAK_MISS_MS;
+  const baseStreak = missedStreak ? 0 : Number(wallet?.streakCount || 0);
+  const nextStreak = Math.max(1, baseStreak + 1);
   if (nextStreak % 30 === 0) return 500;
   if (nextStreak % 7 === 0) return 75;
   if (nextStreak % 3 === 0) return 25;
   return 10;
 };
 
-const logWalletError = (error) => {
-  console.error("Wallet Error:", error);
-};
+const logWalletError = () => undefined;
 
 const apiDataOrThrow = (response, fallback = "Wallet request failed.") => {
   const body = response?.data || {};
@@ -204,6 +209,25 @@ const itemIdOf = (itemOrId) => {
 };
 
 const purchaseLockKey = (itemId) => `purchase:${itemId}`;
+
+const syncUserCosmetics = (inventory = {}) => {
+  if (typeof window === "undefined" || !inventory || typeof inventory !== "object") return;
+  const activeBadges = asArray(inventory?.active?.badges).slice(0, 5);
+  const patch = {
+    equippedFrame: inventory?.active?.frame || "",
+    equippedBadges: activeBadges,
+    creatorBadges: activeBadges,
+    profileTheme: inventory?.active?.theme || "classic",
+    premiumBadge: activeBadges.length > 0,
+    marketplace: {
+      equippedFrame: inventory?.active?.frame || "",
+      equippedTheme: inventory?.active?.theme || "",
+      equippedBadges: activeBadges,
+      ownedReactions: asArray(inventory?.active?.reactions),
+    },
+  };
+  window.dispatchEvent(new CustomEvent("vibebook:user-patch", { detail: { user: patch } }));
+};
 
 export const useWalletStore = create((set, get) => ({
   wallet: DEFAULT_WALLET,
@@ -446,7 +470,6 @@ export const useWalletStore = create((set, get) => ({
     const storeItem = asArray(get().storeItems).find((entry) => itemIdOf(entry) === safeItemId);
     if (!storeItem?.price) {
       const error = new Error("Invalid item price");
-      console.error("Purchase failed:", error.message);
       pushNotification({ type: "warning", title: "Purchase failed", message: error.message });
       throw error;
     }
@@ -454,12 +477,16 @@ export const useWalletStore = create((set, get) => ({
     const amount = Number(storeItem.price);
     if (!Number.isFinite(amount) || amount <= 0) {
       const error = new Error("Invalid item price");
-      console.error("Purchase failed:", error.message);
       pushNotification({ type: "warning", title: "Purchase failed", message: error.message });
       throw error;
     }
 
     const previousWallet = normalizeWallet(get().wallet);
+    if (amount > Number(previousWallet.balance || 0)) {
+      const message = "Not enough NEX Points for this purchase.";
+      pushNotification({ type: "warning", title: "Purchase failed", message });
+      return { ok: false, message };
+    }
 
     set((state) => ({
       wallet: amount > 0 ? mergeWallet(state.wallet, {
@@ -482,10 +509,10 @@ export const useWalletStore = create((set, get) => ({
         featuredQueue: data?.featured ? [data.featured, ...asArray(state.featuredQueue)] : state.featuredQueue,
         transactions: prependTransaction(state.transactions, transaction),
       }));
+      if (data?.inventory) syncUserCosmetics(data.inventory);
       pushNotification({ type: "purchase", title: data?.item?.name || "Store item unlocked", message: data?.message || "Inventory updated." });
       return { ok: true, data };
     } catch (error) {
-      console.error("Purchase failed:", error?.response?.data || error.message);
       logWalletError(error);
       const message = getApiErrorMessage(error, "Purchase failed.");
       set((state) => ({
@@ -519,6 +546,7 @@ export const useWalletStore = create((set, get) => ({
       set((state) => ({
         inventory: data?.inventory || state.inventory,
       }));
+      if (data?.inventory) syncUserCosmetics(data.inventory);
       pushNotification({ type: "inventory", title: action === "unequip" ? "Item removed" : "Item equipped", message: data?.message || "Profile prestige updated." });
       return { ok: true, data };
     } catch (error) {
@@ -689,6 +717,13 @@ export const useWalletStore = create((set, get) => ({
       return { ok: false, message: "Enter a valid wallet ID, NEX handle, username, and amount." };
     }
 
+    const previousWallet = normalizeWallet(wallet);
+    if (amount > Number(previousWallet.balance || 0)) {
+      const message = "Not enough NEX Points for this transfer.";
+      pushNotification({ type: "warning", title: "Transfer blocked", message });
+      return { ok: false, message };
+    }
+
     set((state) => ({
       wallet: mergeWallet(state.wallet, { balance: Math.max(0, Number(state.wallet?.balance || 0) - amount) }),
       requestLocks: { ...state.requestLocks, transfer: true },
@@ -710,7 +745,7 @@ export const useWalletStore = create((set, get) => ({
       logWalletError(error);
       const message = getApiErrorMessage(error, "Transfer failed. Your balance was restored.");
       set({
-        wallet: normalizeWallet(wallet),
+        wallet: previousWallet,
         error: message,
       });
       pushNotification({ type: "warning", title: "Transfer failed", message });
@@ -752,6 +787,16 @@ export const useWalletStore = create((set, get) => ({
         : undefined;
       get().pushNotification({ id: notificationId, type: "reward", title: payload.message || "Reward earned", amount: payload.amount, message: payload.source || payload.type });
     };
+    const handleTransfer = (payload = {}) => {
+      if (!payload || typeof payload !== "object") return;
+      const transaction = payload.transaction ? normalizeTransaction(payload.transaction) : null;
+      set((state) => ({
+        wallet: payload.wallet ? normalizeWallet(payload.wallet) : state.wallet,
+        walletLoaded: true,
+        transactions: prependTransaction(state.transactions, transaction),
+      }));
+      get().pushNotification({ type: "transfer", title: payload.message || "Transfer completed", amount: payload.amount, message: payload.recipient ? `To ${payload.recipient}` : payload.type });
+    };
     const handleGift = (payload = {}) => {
       if (!payload || typeof payload !== "object") return;
       get().pushNotification({ type: "gift", title: payload.giftName || "Gift received", amount: payload.amount, message: payload.fromUserName ? `From ${payload.fromUserName}` : payload.message });
@@ -769,7 +814,10 @@ export const useWalletStore = create((set, get) => ({
       }));
     };
     const handleInventory = (payload = {}) => {
-      if (payload.inventory) set({ inventory: payload.inventory });
+      if (payload.inventory) {
+        set({ inventory: payload.inventory });
+        syncUserCosmetics(payload.inventory);
+      }
     };
     const handlePurchase = (payload = {}) => {
       const transaction = payload.transaction ? normalizeTransaction(payload.transaction) : null;
@@ -780,6 +828,7 @@ export const useWalletStore = create((set, get) => ({
         featuredQueue: payload.featured ? [payload.featured, ...asArray(state.featuredQueue)] : state.featuredQueue,
         transactions: prependTransaction(state.transactions, transaction),
       }));
+      if (payload.inventory) syncUserCosmetics(payload.inventory);
       get().pushNotification({ type: "purchase", title: payload.item?.name || "NEX purchase complete", message: payload.message || "Inventory synced." });
     };
     const handleRewardClaimed = (payload = {}) => {
@@ -802,6 +851,7 @@ export const useWalletStore = create((set, get) => ({
     socket.on("wallet:data", syncWallet);
     socket.on("wallet:update", syncWallet);
     socket.on("wallet:reward", handleReward);
+    socket.on("wallet:transfer", handleTransfer);
     socket.on("wallet:gift", handleGift);
     socket.on("wallet:balance", handleBalance);
     socket.on("wallet:balance-change", handleBalance);
@@ -823,6 +873,7 @@ export const useWalletStore = create((set, get) => ({
       socket.off("wallet:data", syncWallet);
       socket.off("wallet:update", syncWallet);
       socket.off("wallet:reward", handleReward);
+      socket.off("wallet:transfer", handleTransfer);
       socket.off("wallet:gift", handleGift);
       socket.off("wallet:balance", handleBalance);
       socket.off("wallet:balance-change", handleBalance);
