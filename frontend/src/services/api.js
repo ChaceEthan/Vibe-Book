@@ -20,6 +20,7 @@ const networkWarningCache = new Map();
 
 const warnOncePerWindow = (key, payload, windowMs = 60000) => {
   if (typeof console === "undefined") return;
+  if (!import.meta.env.DEV) return;
 
   const now = Date.now();
   const last = networkWarningCache.get(key) || 0;

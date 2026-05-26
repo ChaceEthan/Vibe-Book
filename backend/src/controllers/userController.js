@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 
 const Booking = require("../models/Booking");
 const Feed = require("../models/Feed");
+const LiveStream = require("../models/LiveStream");
 const User = require("../models/User");
 const { sendContactNotification } = require("../utils/emailService");
 const {
@@ -344,6 +345,39 @@ const getProfilePosts = async (user, viewer = null, req = null) => {
   return posts.map((post) => serializeProfilePost(post, viewer, req)).filter(Boolean);
 };
 
+const liveStreamIdFor = (stream = {}) => stream?._id?.toString?.() || stream?.id?.toString?.() || "";
+
+const activeLiveStreamMapFor = async (users = []) => {
+  const userIds = Array.from(
+    new Set(
+      users
+        .map((user) => user?._id?.toString?.() || user?.id?.toString?.() || "")
+        .filter(Boolean)
+    )
+  );
+
+  if (!userIds.length) {
+    return new Map();
+  }
+
+  const streams = await LiveStream.find({
+    creatorId: { $in: userIds },
+    isLive: true,
+    status: "live",
+  })
+    .select("_id creatorId viewerCount startedAt title")
+    .sort({ startedAt: -1 })
+    .lean();
+
+  return streams.reduce((map, stream) => {
+    const creatorId = stream.creatorId?.toString?.() || "";
+    if (creatorId && !map.has(creatorId)) {
+      map.set(creatorId, stream);
+    }
+    return map;
+  }, new Map());
+};
+
 const profileResponse = (user, viewer = null, options = {}) => {
   const isOwnProfile = Boolean(viewer && sameId(viewer._id, user?._id));
   const isFollowing = viewerFollowsProfile(viewer, user);
@@ -380,6 +414,8 @@ const profileResponse = (user, viewer = null, options = {}) => {
   };
   const followerCount = Array.isArray(user.followers) ? user.followers.length : 0;
   const followingCount = Array.isArray(user.following) ? user.following.length : 0;
+  const activeLiveStream = options.liveStream || null;
+  const activeLiveStreamId = liveStreamIdFor(activeLiveStream);
 
   return {
     _id: user._id,
@@ -452,6 +488,16 @@ const profileResponse = (user, viewer = null, options = {}) => {
     premiumBadge: user.premiumBadge || user.isPremium,
     isVerified: user.isVerified,
     verified: user.isVerified,
+    isLive: Boolean(activeLiveStreamId),
+    liveStreamId: activeLiveStreamId,
+    activeLiveStream: activeLiveStreamId
+      ? {
+          id: activeLiveStreamId,
+          title: activeLiveStream.title || "",
+          viewerCount: Number(activeLiveStream.viewerCount || 0),
+          startedAt: activeLiveStream.startedAt,
+        }
+      : null,
     verificationRequired: options.includePrivate ? Boolean(user.verificationRequired) : undefined,
     followers: options.includePrivate ? user.followers || [] : undefined,
     following: options.includePrivate ? user.following || [] : undefined,
@@ -500,7 +546,9 @@ const profileResponse = (user, viewer = null, options = {}) => {
 const getProfile = async (req, res, next) => {
   try {
     const posts = await getProfilePosts(req.user, req.user, req);
-    return res.json({ user: profileResponse(req.user, req.user, { includePrivate: true, posts, postCount: posts.length }) });
+    const activeLiveStreams = await activeLiveStreamMapFor([req.user]);
+    const liveStream = activeLiveStreams.get(req.user._id?.toString?.() || "");
+    return res.json({ user: profileResponse(req.user, req.user, { includePrivate: true, posts, postCount: posts.length, liveStream }) });
   } catch (error) {
     return next(error);
   }
@@ -522,6 +570,8 @@ const getUserById = async (req, res, next) => {
     const bookingStarted = await hasBookingOrPaymentAccess(req.user, user._id);
 
     const posts = await getProfilePosts(user, req.user, req);
+    const activeLiveStreams = await activeLiveStreamMapFor([user]);
+    const liveStream = activeLiveStreams.get(user._id?.toString?.() || "");
 
     if (req.user?._id && !sameId(req.user._id, user._id)) {
       User.findByIdAndUpdate(req.user._id, {
@@ -538,7 +588,7 @@ const getUserById = async (req, res, next) => {
       });
     }
 
-    return res.json({ user: profileResponse(user, req.user, { bookingStarted, posts, postCount: posts.length }) });
+    return res.json({ user: profileResponse(user, req.user, { bookingStarted, posts, postCount: posts.length, liveStream }) });
   } catch (error) {
     return next(error);
   }
@@ -672,7 +722,15 @@ const searchUsers = async (req, res, next) => {
       .select("-password")
       .sort({ isPremium: -1, premiumBadge: -1, isVerified: -1, averageRating: -1, createdAt: -1 });
 
-    return res.json({ users: users.map((user) => profileResponse(user, req.user)) });
+    const activeLiveStreams = await activeLiveStreamMapFor(users);
+
+    return res.json({
+      users: users.map((user) =>
+        profileResponse(user, req.user, {
+          liveStream: activeLiveStreams.get(user._id?.toString?.() || ""),
+        })
+      ),
+    });
   } catch (error) {
     return next(error);
   }

@@ -7,13 +7,20 @@
 const LiveStream = require("../../models/LiveStream");
 const LiveSession = require("../../models/LiveSession");
 const User = require("../../models/User");
-const { rewardLiveStream } = require("../wallet/walletService");
+const { rewardLiveStream, sendGift } = require("../wallet/walletService");
+const { GIFT_DEFINITIONS } = require("../wallet/walletConstants");
 const mongoose = require("mongoose");
 
 const ACTIVE_SESSION_STALE_MS = 90 * 1000;
 const VALID_CATEGORIES = new Set(["gaming", "music", "art", "talk", "performance", "education", "lifestyle", "other"]);
 const VALID_PRIVACY = new Set(["public", "friends", "private"]);
 const VALID_QUALITIES = new Set(["360p", "480p", "720p", "1080p"]);
+const LIVE_GIFT_CATALOG = Object.values(GIFT_DEFINITIONS).reduce((catalog, gift) => {
+  if (gift?.id) {
+    catalog[gift.id] = gift;
+  }
+  return catalog;
+}, {});
 
 const validateUserId = (userId) => {
   const id = userId?._id?.toString?.() || userId?.toString?.() || "";
@@ -60,6 +67,11 @@ const normalizeSettings = (streamData = {}) => {
 };
 
 const creatorSelect = "username name avatar profileImage profilePicture images walletId level levelName followers following isPremium premiumBadge isVerified marketplace creatorBadges";
+
+const giftForId = (giftId = "") => {
+  const key = String(giftId || "").trim().toLowerCase();
+  return LIVE_GIFT_CATALOG[key] || LIVE_GIFT_CATALOG.rose;
+};
 
 const reconcileViewerCount = async (streamId) => {
   const activeCount = await LiveSession.countDocuments({ streamId, isActive: true });
@@ -200,8 +212,8 @@ const joinLiveStream = async (streamId, viewerId = null, viewerName = "Guest") =
     throw new Error("Stream not found");
   }
 
-  if (stream.status === "ended") {
-    throw new Error("Stream has ended");
+  if (stream.status !== "live" || stream.isLive === false) {
+    throw new Error("Stream is not live");
   }
 
   let session = safeViewerId
@@ -265,6 +277,57 @@ const leaveLiveStream = async (sessionId) => {
 const touchLiveSession = async (sessionId) => {
   if (!mongoose.isValidObjectId(sessionId)) return null;
   return LiveSession.findByIdAndUpdate(sessionId, { $set: { updatedAt: new Date() } }, { returnDocument: "after" });
+};
+
+const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
+  const safeStreamId = validateStreamId(streamId);
+  const safeSenderId = validateUserId(senderId);
+  const gift = giftForId(giftId);
+
+  const stream = await LiveStream.findById(safeStreamId).populate("creatorId", creatorSelect);
+  if (!stream || stream.status === "ended" || stream.isLive === false) {
+    const error = new Error("Live stream is not available");
+    error.code = "STREAM_NOT_LIVE";
+    throw error;
+  }
+
+  if (stream.settings?.giftsEnabled === false) {
+    const error = new Error("Gifts are turned off for this live");
+    error.code = "LIVE_GIFTS_DISABLED";
+    throw error;
+  }
+
+  const creatorId = stream.creatorId?._id || stream.creatorId;
+  if (!creatorId) {
+    const error = new Error("Stream creator was not found");
+    error.code = "CREATOR_NOT_FOUND";
+    throw error;
+  }
+
+  const result = await sendGift(safeSenderId, creatorId, gift.id, gift.pointsCost, {
+    streamId: safeStreamId,
+    streamTitle: stream.title,
+    giftId: gift.id,
+    giftName: gift.name,
+    giftAnimation: gift.animation,
+    liveGift: true,
+    futureTokenReady: true,
+    ...(metadata || {}),
+  });
+
+  stream.stats = stream.stats || {};
+  stream.stats.giftsReceived = Number(stream.stats.giftsReceived || 0) + 1;
+  stream.stats.giftValue = Number(stream.stats.giftValue || 0) + gift.pointsCost;
+  await stream.save();
+
+  return {
+    stream,
+    gift,
+    senderWallet: result.sender,
+    receiverWallet: result.receiver,
+    sendTransaction: result.sendTransaction,
+    receiveTransaction: result.receiveTransaction,
+  };
 };
 
 /**
@@ -418,6 +481,7 @@ module.exports = {
   joinLiveStream,
   leaveLiveStream,
   touchLiveSession,
+  sendLiveGift,
   getActiveLiveStreams,
   getLiveStreamsByCategory,
   getCreatorLiveStreams,

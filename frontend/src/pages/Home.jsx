@@ -20,9 +20,9 @@ import PostMedia from "../components/PostMedia.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
 import LiveAvatar from "../components/LiveAvatar.jsx";
 import LiveDiscoveryRow from "../components/LiveDiscoveryRow.jsx";
-import LiveStreamViewer from "../components/LiveStreamViewer.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, getApiErrorMessage, isRetryableApiError, mediaUrl, userApi } from "../services/api";
+import { useLiveStreamStore } from "../store/livestreamStore";
 import { isValidPost, usePostStore } from "../store/postStore";
 
 const FEED_PAGE_SIZE = 10;
@@ -285,6 +285,8 @@ const FeedItem = memo(
     const profile = item.userId || {};
     const profileImage = profile.profilePicture || profile.profileImage || profile.images?.[0] || "/logo.png";
     const profilePath = isAuthenticated ? `/profile/${profile._id}` : "/login";
+    const liveStreamId = useLiveStreamStore((state) => state.liveCreatorIds[String(profile._id || profile.id || "")] || "");
+    const avatarPath = liveStreamId ? `/live/${liveStreamId}` : profilePath;
     const isOwnProfile = currentUser?._id && profile._id && currentUser._id === profile._id;
     const verified = Boolean(profile.verified || profile.isVerified);
     const comments = Array.isArray(item.comments) ? item.comments : [];
@@ -379,7 +381,7 @@ const FeedItem = memo(
 
         <div className="home-feed-caption absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] left-3 right-[5.1rem] z-20 text-white sm:bottom-[calc(5.4rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-center gap-3">
-            <Link to={profilePath} className="shrink-0" aria-label="Open creator profile">
+            <Link to={avatarPath} className="shrink-0" aria-label={liveStreamId ? "Join creator live" : "Open creator profile"}>
               <FramedSafeAvatar user={profile} src={profileImage} className="h-12 w-12 rounded-full object-cover ring-2 ring-white/60 shadow-xl" />
             </Link>
             <div className="min-w-0 flex-1">
@@ -612,7 +614,6 @@ const Home = () => {
   const [activePostId, setActivePostId] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(readFeedAudioPreference);
   const [audioUnlockToken, setAudioUnlockToken] = useState(0);
-  const [selectedLiveStream, setSelectedLiveStream] = useState(null);
   const scrollerRef = useRef(null);
   const loadMoreRef = useRef(null);
   const feedRequestRef = useRef("");
@@ -631,13 +632,13 @@ const Home = () => {
     const handleLiveStarted = (event) => {
       const stream = event.detail?.stream;
       if (stream?.id) {
-        setSelectedLiveStream(stream);
+        navigate(`/live/${stream.id}`);
       }
     };
 
     window.addEventListener("vibebook:live-started", handleLiveStarted);
     return () => window.removeEventListener("vibebook:live-started", handleLiveStarted);
-  }, []);
+  }, [navigate]);
 
   const replaceFeedItem = useCallback((nextItem, options = {}) => {
     replacePost(nextItem, options);
@@ -1360,7 +1361,7 @@ const Home = () => {
         {visibleFeed.length ? (
           <>
             <div className="sticky top-0 z-10 bg-slate-950 border-b border-white/10">
-              <LiveDiscoveryRow onStreamClick={(stream) => setSelectedLiveStream(stream)} />
+              <LiveDiscoveryRow onStreamClick={(stream) => stream?.id && navigate(`/live/${stream.id}`)} />
             </div>
             {visibleFeed.map((item, index) => (
               <FeedItem
@@ -1430,12 +1431,6 @@ const Home = () => {
         post={activeCommentPost}
       />
 
-      {selectedLiveStream && (
-        <LiveStreamViewer
-          streamId={selectedLiveStream.id}
-          onClose={() => setSelectedLiveStream(null)}
-        />
-      )}
     </section>
   );
 };

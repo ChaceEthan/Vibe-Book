@@ -1032,10 +1032,11 @@ const Upload = ({ open, initialType = "image", onClose }) => {
     setLiveSetupOpen(false);
     addToast("Livestream started", "success");
     window.dispatchEvent(new CustomEvent("vibebook:live-started", { detail: { stream } }));
-    navigate("/", { replace: false });
-    window.setTimeout(() => {
-      window.dispatchEvent(new CustomEvent("vibebook:live-started", { detail: { stream } }));
-    }, 80);
+    if (stream?.id) {
+      navigate(`/live/${stream.id}`, { replace: false });
+    } else {
+      navigate("/", { replace: false });
+    }
     onClose?.();
   };
 

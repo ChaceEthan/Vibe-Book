@@ -1,6 +1,8 @@
 // @ts-nocheck
 import {
   Crown,
+  Flame,
+  Gem,
   Gift,
   Heart,
   Loader2,
@@ -10,6 +12,8 @@ import {
   Share2,
   Smile,
   Sparkles,
+  Rocket,
+  Trophy,
   UserPlus,
   Users,
   Volume2,
@@ -22,11 +26,28 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SafeAvatar from "./SafeAvatar.jsx";
 import { connectSocket } from "../services/socket";
+import { getLivePreviewStream, releaseLivePreviewStream } from "../services/livePreviewStream";
 import { useLiveStreamStore } from "../store/livestreamStore";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const MAX_COMMENTS = 120;
 const HEARTBEAT_MS = 25000;
+
+const formatLiveDuration = (startedAt) => {
+  const started = startedAt ? new Date(startedAt).getTime() : 0;
+  if (!started || Number.isNaN(started)) return "0:00";
+
+  const totalSeconds = Math.max(0, Math.floor((Date.now() - started) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
 
 const reactionMeta = {
   heart: { Icon: Heart, className: "bg-red-500 text-white" },
@@ -39,9 +60,11 @@ const reactionMeta = {
 
 const giftOptions = [
   { id: "rose", name: "Rose", value: 10, Icon: Heart },
-  { id: "fire", name: "Fire", value: 50, Icon: Zap },
+  { id: "fire", name: "Fire", value: 50, Icon: Flame },
   { id: "crown", name: "Crown", value: 100, Icon: Crown },
-  { id: "diamond", name: "Diamond", value: 500, Icon: Sparkles },
+  { id: "lion", name: "Lion", value: 250, Icon: Trophy },
+  { id: "rocket", name: "Rocket", value: 750, Icon: Rocket },
+  { id: "universe", name: "Universe", value: 1500, Icon: Gem },
 ];
 
 const userIdFor = (user) => user?._id || user?.id || "";
@@ -50,9 +73,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const navigate = useNavigate();
   const { user: currentUser, token } = useAuth();
   const socketRef = useRef(null);
+  const previewVideoRef = useRef(null);
   const sessionIdRef = useRef("");
   const heartbeatRef = useRef(null);
   const reactionTimersRef = useRef(new Set());
+  const giftTimersRef = useRef(new Set());
+  const joinTimersRef = useRef(new Set());
   const mountedRef = useRef(false);
   const onCloseRef = useRef(onClose);
 
@@ -61,10 +87,16 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const [sending, setSending] = useState(false);
   const [muted, setMuted] = useState(false);
   const [reactionQueue, setReactionQueue] = useState([]);
+  const [giftEvents, setGiftEvents] = useState([]);
+  const [joinEvents, setJoinEvents] = useState([]);
+  const [giftLeaderboard, setGiftLeaderboard] = useState({});
+  const [sendingGiftId, setSendingGiftId] = useState("");
   const [showGiftMenu, setShowGiftMenu] = useState(false);
   const [localLoading, setLocalLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState("");
   const [ended, setEnded] = useState(false);
+  const [previewStream, setPreviewStream] = useState(null);
+  const [clockTick, setClockTick] = useState(0);
 
   const {
     currentStream,
@@ -79,10 +111,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   } = useLiveStreamStore();
 
   const creator = currentStream?.creator || {};
-  const isCreator = userIdFor(currentUser) && userIdFor(currentUser) === (creator.id || currentStream?.creatorId);
+  const isCreator = Boolean(userIdFor(currentUser) && String(userIdFor(currentUser)) === String(creator.id || currentStream?.creatorId || ""));
   const commentsEnabled = currentStream?.settings?.commentsEnabled !== false;
   const reactionsEnabled = currentStream?.settings?.allowReactions !== false;
   const giftsEnabled = currentStream?.settings?.giftsEnabled !== false;
+  const liveDuration = formatLiveDuration(currentStream?.startedAt || clockTick);
 
   const streamBackground = useMemo(() => {
     if (currentStream?.coverImage) {
@@ -90,6 +123,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }
     return {};
   }, [currentStream?.coverImage]);
+
+  const topSupporter = useMemo(() => {
+    return Object.values(giftLeaderboard)
+      .sort((left, right) => Number(right.total || 0) - Number(left.total || 0))[0];
+  }, [giftLeaderboard]);
 
   const addReactionBubble = (data) => {
     const id = data.id || `${data.reaction || "heart"}:${Date.now()}:${Math.random()}`;
@@ -124,6 +162,47 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   }, [onClose]);
 
   useEffect(() => {
+    const interval = window.setInterval(() => setClockTick(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!streamId) return undefined;
+
+    const mediaStream = getLivePreviewStream(streamId);
+    setPreviewStream(mediaStream);
+
+    return () => {
+      if (mediaStream) {
+        releaseLivePreviewStream(streamId);
+      }
+    };
+  }, [streamId]);
+
+  useEffect(() => {
+    const video = previewVideoRef.current;
+    if (!video || !previewStream) return undefined;
+
+    video.srcObject = previewStream;
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.play?.().catch(() => null);
+
+    return () => {
+      if (video.srcObject === previewStream) {
+        video.srcObject = null;
+      }
+    };
+  }, [previewStream]);
+
+  useEffect(() => {
+    previewStream?.getAudioTracks?.().forEach((track) => {
+      track.enabled = !muted;
+    });
+  }, [muted, previewStream]);
+
+  useEffect(() => {
     if (!streamId) return undefined;
 
     let canceled = false;
@@ -141,6 +220,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.off("livestream:reaction", handleReaction);
       activeSocket.off("livestream:gift", handleGift);
       activeSocket.off("livestream:viewers_updated", handleViewersUpdated);
+      activeSocket.off("livestream:viewer_joined", handleViewerJoined);
       activeSocket.off("livestream:ended", handleEnded);
       activeSocket.off("livestream:metadata_updated", handleMetadataUpdated);
       activeSocket.off("livestream:error", handleSocketError);
@@ -164,13 +244,72 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     function handleGift(data) {
       if (data.streamId && data.streamId !== streamId) return;
-      setStatusMessage(`${data.username || "Someone"} sent ${data.gift || "a gift"}`);
+      const giftMeta = giftOptions.find((gift) => gift.id === (data.giftId || data.gift)) || giftOptions[0];
+      const giftName = data.giftName || giftMeta.name;
+      const amount = Number(data.value || giftMeta.value || 0);
+      const senderId = data.userId || data.username || data.id || "viewer";
+      const id = data.id || `gift:${Date.now()}:${Math.random()}`;
+
+      setGiftEvents((current) => [
+        ...current,
+        {
+          ...data,
+          id,
+          giftName,
+          giftId: giftMeta.id,
+          value: amount,
+          left: 14 + Math.random() * 46,
+          bottom: 28 + Math.random() * 20,
+        },
+      ].slice(-12));
+      setGiftLeaderboard((current) => {
+        const previous = current[senderId] || { username: data.username || "Viewer", total: 0, count: 0 };
+        return {
+          ...current,
+          [senderId]: {
+            ...previous,
+            username: data.username || previous.username,
+            total: Number(previous.total || 0) + amount,
+            count: Number(previous.count || 0) + 1,
+          },
+        };
+      });
+      const timer = window.setTimeout(() => {
+        setGiftEvents((current) => current.filter((gift) => gift.id !== id));
+        giftTimersRef.current.delete(timer);
+      }, 3200);
+      giftTimersRef.current.add(timer);
+
+      setStatusMessage(`${data.username || "Someone"} sent ${giftName}`);
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
     }
 
     function handleViewersUpdated(data) {
       if (data.streamId && data.streamId !== streamId) return;
       updateViewerCount(Number(data.viewerCount || 0), data.maxViewers ?? null);
+    }
+
+    function handleViewerJoined(data) {
+      if (data.streamId && data.streamId !== streamId) return;
+      const viewer = data.viewer || {};
+      const joinedUserId = viewer.userId || data.userId || "";
+      if (joinedUserId && joinedUserId === userIdFor(currentUser)) return;
+
+      const id = `${joinedUserId || viewer.username || "viewer"}:${Date.now()}:${Math.random()}`;
+      setJoinEvents((current) => [
+        ...current,
+        {
+          id,
+          username: viewer.username || data.username || "Viewer",
+          avatar: viewer.avatar || "",
+        },
+      ].slice(-3));
+
+      const timer = window.setTimeout(() => {
+        setJoinEvents((current) => current.filter((event) => event.id !== id));
+        joinTimersRef.current.delete(timer);
+      }, 2400);
+      joinTimersRef.current.add(timer);
     }
 
     function handleEnded(data) {
@@ -210,6 +349,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.on("livestream:reaction", handleReaction);
       activeSocket.on("livestream:gift", handleGift);
       activeSocket.on("livestream:viewers_updated", handleViewersUpdated);
+      activeSocket.on("livestream:viewer_joined", handleViewerJoined);
       activeSocket.on("livestream:ended", handleEnded);
       activeSocket.on("livestream:metadata_updated", handleMetadataUpdated);
       activeSocket.on("livestream:error", handleSocketError);
@@ -280,10 +420,16 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       sessionIdRef.current = "";
       reactionTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       reactionTimersRef.current.clear();
+      giftTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      giftTimersRef.current.clear();
+      joinTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      joinTimersRef.current.clear();
       clearCurrentStream();
     };
   }, [
     clearCurrentStream,
+    currentUser?._id,
+    currentUser?.id,
     currentUser?.name,
     currentUser?.username,
     getStreamDetails,
@@ -337,14 +483,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   const sendGift = (giftId, giftValue) => {
     const activeSocket = socketRef.current;
-    if (!activeSocket || !streamId || !giftsEnabled) return;
+    if (!activeSocket || !streamId || !giftsEnabled || sendingGiftId) return;
 
-    activeSocket.emit("livestream:gift", { streamId, giftId, giftValue });
+    setSendingGiftId(giftId);
+    activeSocket.emit("livestream:gift", { streamId, giftId, giftValue }, (ack = {}) => {
+      setSendingGiftId("");
+      if (!ack.ok) {
+        setStatusMessage(ack.error || "Gift could not be sent");
+        window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
+      }
+    });
     setShowGiftMenu(false);
   };
 
   const handleShare = async () => {
-    const shareUrl = `${window.location.origin}${window.location.pathname}?live=${streamId}`;
+    const shareUrl = `${window.location.origin}/live/${streamId}`;
     try {
       if (navigator.share) {
         await navigator.share({ title: currentStream?.title || "VibeBook Live", url: shareUrl });
@@ -389,12 +542,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     >
       <div className="relative min-h-0 flex-1 overflow-hidden bg-slate-950">
         <div
-          className="absolute inset-0 bg-cover bg-center"
+          className={`absolute inset-0 bg-cover bg-center ${previewStream ? "opacity-0" : ""}`}
           style={streamBackground}
         />
+        {previewStream && (
+          <video
+            ref={previewVideoRef}
+            className="absolute inset-0 h-full w-full object-cover"
+            autoPlay
+            muted
+            playsInline
+          />
+        )}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(59,130,246,0.28),transparent_34%),linear-gradient(to_top,rgba(0,0,0,0.82),rgba(0,0,0,0.08),rgba(0,0,0,0.54))]" />
 
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className={`absolute inset-0 flex items-center justify-center ${previewStream ? "hidden" : ""}`}>
           <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-white/20 bg-white/10 backdrop-blur">
             <Radio className="h-14 w-14 text-red-500 drop-shadow-[0_0_26px_rgba(239,68,68,0.9)]" />
             <span className="absolute inset-0 animate-ping rounded-full border border-red-400/40" />
@@ -411,6 +573,15 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               <Users className="h-4 w-4" />
               {currentStream.viewerCount || 0}
             </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-black/45 px-3 py-1.5 text-xs font-bold backdrop-blur">
+              {liveDuration}
+            </span>
+            {topSupporter && (
+              <span className="hidden items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1.5 text-xs font-black text-slate-950 shadow-lg sm:inline-flex">
+                <Crown className="h-3.5 w-3.5" />
+                {topSupporter.username} - {topSupporter.total} NEX
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -526,8 +697,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                       type="button"
                       className="flex flex-col items-center gap-1 rounded-xl bg-white/10 p-3 text-xs font-black text-white transition hover:bg-white/20"
                       onClick={() => sendGift(gift.id, gift.value)}
+                      disabled={Boolean(sendingGiftId)}
                     >
-                      <Icon className="h-5 w-5" />
+                      {sendingGiftId === gift.id ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
                       <span>{gift.name}</span>
                       <span className="text-[0.68rem] text-white/55">{gift.value} NEX</span>
                     </button>
@@ -539,6 +711,38 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         </AnimatePresence>
 
         <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden">
+          {joinEvents.map((event, index) => (
+            <motion.div
+              key={event.id}
+              className="absolute left-4 flex items-center gap-2 rounded-full border border-white/15 bg-black/58 px-3 py-2 text-xs font-black text-white shadow-xl backdrop-blur sm:left-5"
+              initial={{ opacity: 0, y: 16, scale: 0.96 }}
+              animate={{ opacity: [0, 1, 1, 0], y: [16, 0, 0, -12], scale: [0.96, 1, 1, 0.98] }}
+              transition={{ duration: 2.4, ease: "easeOut" }}
+              style={{ bottom: `${42 + index * 3}%` }}
+            >
+              <SafeAvatar user={{ username: event.username, profilePicture: event.avatar }} src={event.avatar} className="h-7 w-7 rounded-full border border-white/50 object-cover" />
+              <span>{event.username} joined</span>
+            </motion.div>
+          ))}
+          {giftEvents.map((gift) => {
+            const giftMeta = giftOptions.find((item) => item.id === gift.giftId) || giftOptions[0];
+            const Icon = giftMeta.Icon;
+            return (
+              <motion.div
+                key={gift.id}
+                className="absolute flex items-center gap-2 rounded-full border border-white/15 bg-black/65 px-3 py-2 text-xs font-black text-white shadow-2xl backdrop-blur"
+                initial={{ y: 40, opacity: 0, scale: 0.9 }}
+                animate={{ y: -150, opacity: [0, 1, 1, 0], scale: [0.9, 1.05, 1, 0.96] }}
+                transition={{ duration: 3.2, ease: "easeOut" }}
+                style={{ left: `${gift.left}%`, bottom: `${gift.bottom}%` }}
+              >
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-amber-300 text-white">
+                  <Icon className="h-4 w-4" />
+                </span>
+                <span>{gift.username || "Viewer"} sent {gift.giftName}</span>
+              </motion.div>
+            );
+          })}
           {reactionQueue.map((reaction) => {
             const meta = reactionMeta[reaction.reaction] || reactionMeta.heart;
             const Icon = meta.Icon;

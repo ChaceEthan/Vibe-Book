@@ -16,6 +16,7 @@ import Home from "./pages/Home.jsx";
 import Inbox from "./pages/Inbox.jsx";
 import LegalPage from "./pages/LegalPage.jsx";
 import Login from "./pages/Login.jsx";
+import LiveRoom from "./pages/LiveRoom.jsx";
 import NotificationCenter from "./pages/NotificationCenter.jsx";
 import Profile from "./pages/Profile.jsx";
 import Register from "./pages/Register.jsx";
@@ -47,13 +48,23 @@ const ProtectedRoute = ({ children }) => {
 const App = () => {
   const location = useLocation();
   const isHome = location.pathname === "/";
+  const isLiveRoute = location.pathname.startsWith("/live/");
+  const isImmersive = isHome || isLiveRoute;
 
   return (
     <div className="flex min-h-screen flex-col bg-surface">
       <Navbar />
-      <main className={`flex-1 ${isHome ? "bg-slate-950 pb-0" : "pb-28"}`}>
+      <main className={`flex-1 ${isImmersive ? "bg-slate-950 pb-0" : "pb-28"}`}>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route
+            path="/live/:streamId"
+            element={
+              <ProtectedRoute>
+                <LiveRoom />
+              </ProtectedRoute>
+            }
+          />
           <Route path="/explore" element={<Explore />} />
           <Route path="/search" element={<Search />} />
           <Route
@@ -208,7 +219,7 @@ const App = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-      {!isHome && <Footer />}
+      {!isImmersive && <Footer />}
     </div>
   );
 };

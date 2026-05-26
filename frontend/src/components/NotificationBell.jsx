@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
 
-import SafeAvatar from "./SafeAvatar.jsx";
+import LiveAvatar from "./LiveAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { notificationApi } from "../services/api";
 import { connectSocket } from "../services/socket";
@@ -317,7 +317,7 @@ export function NotificationBell() {
         <div className="flex min-w-0 items-start gap-3">
           <div className="relative h-10 w-10 shrink-0">
             <div className={`flex h-full w-full items-center justify-center overflow-hidden rounded-full ${notification.read ? "bg-slate-100 text-slate-600" : "bg-slate-950 text-brand"}`}>
-              {actor || avatar ? <SafeAvatar user={actor} src={avatar} className="h-full w-full object-cover" /> : <Icon className="h-5 w-5" />}
+              {actor || avatar ? <LiveAvatar user={actor} src={avatar} wrapperClassName="h-full w-full" className="h-full w-full object-cover" /> : <Icon className="h-5 w-5" />}
             </div>
             {verified && <BadgeCheck className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full fill-sky-500 text-white ring-2 ring-white" />}
           </div>

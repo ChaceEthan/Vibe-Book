@@ -18,6 +18,7 @@ const purchaseService = require("./modules/marketplace/purchaseService");
 let ioInstance = null;
 const onlineUsers = new Map();
 const isProduction = process.env.NODE_ENV === "production";
+const socketWarningWindows = new Map();
 
 const getDateKey = () => new Date().toISOString().slice(0, 10);
 const logSocketError = (scope, error) => {
@@ -29,6 +30,14 @@ const logSocketError = (scope, error) => {
   }
 
   console.error(`[${scope}]`, error);
+};
+
+const warnSocketOnce = (key, message, windowMs = 60000) => {
+  const now = Date.now();
+  const previous = socketWarningWindows.get(key) || 0;
+  if (now - previous < windowMs) return;
+  socketWarningWindows.set(key, now);
+  console.warn(message);
 };
 
 const saveSocketDocument = async (document, scope) => {
@@ -305,7 +314,11 @@ const normalizeSocketToken = (value = "") => {
 };
 
 const getUserFromSocket = async (socket) => {
-  const token = normalizeSocketToken(socket.handshake.auth?.token || socket.handshake.headers?.authorization);
+  const token = normalizeSocketToken(
+    socket.handshake.auth?.token ||
+      socket.handshake.query?.token ||
+      socket.handshake.headers?.authorization
+  );
 
   if (!token) {
     return null;
@@ -318,7 +331,7 @@ const getUserFromSocket = async (socket) => {
 
 const initSocket = (server, corsOptions = {}) => {
   if (ioInstance) {
-    console.warn("[socket] initSocket called more than once; reusing existing instance");
+    warnSocketOnce("initSocket:duplicate", "[socket] initSocket called more than once; reusing existing instance");
     return ioInstance;
   }
 
@@ -361,20 +374,20 @@ const initSocket = (server, corsOptions = {}) => {
       const user = await getUserFromSocket(socket);
 
       if (!user || user.isBlocked || user.accountStatus === "suspended") {
-        console.warn(`[socket] unauthorized connection attempt from ${socket.id}`);
+        warnSocketOnce("auth:unauthorized", `[socket] unauthorized connection attempts are being rejected`);
         return next(new Error("Unauthorized"));
       }
 
       socket.user = user;
       return next();
     } catch (error) {
-      console.warn(`[socket] authentication failed for ${socket.id}: ${error.message}`);
+      warnSocketOnce("auth:failed", `[socket] authentication failures are being rejected: ${error.message}`);
       return next(new Error("Unauthorized"));
     }
   });
 
   ioInstance.engine.on("connection_error", (error) => {
-    console.warn(`[socket] connection error: ${error.message || error}`);
+    warnSocketOnce("engine:connection_error", `[socket] connection error: ${error.message || error}`);
   });
 
   ioInstance.on("connection", async (socket) => {

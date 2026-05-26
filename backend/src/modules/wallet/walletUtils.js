@@ -68,10 +68,14 @@ const sanitizeMetadata = (metadata) => {
   const safe = {};
   const allowedKeys = [
     "giftId",
+    "giftName",
+    "giftAnimation",
+    "liveGift",
     "referrerId",
     "referredUserId",
     "videoId",
     "streamId",
+    "streamTitle",
     "reason",
     "description",
     "contentId",
@@ -192,6 +196,7 @@ const generateTransactionDescription = (type, source, metadata) => {
     daily_login: "Daily login bonus",
     video_upload: "Video upload reward",
     live_stream: "Live stream starter reward",
+    gift_sent: "Gift sent",
     gift_received: "Gift received",
     referral: "Referral signup bonus",
     system_bonus: "System bonus",

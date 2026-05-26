@@ -10,9 +10,9 @@ const userIdFor = (user = {}) => idOf(user._id || user.id || user.userId || user
 
 const LiveAvatar = ({ user, src = "", alt = "", className = "", wrapperClassName = "", loading = "lazy", forceLive = false, ...props }) => {
   const userId = userIdFor(user || {});
-  const streamId = useLiveStreamStore((state) => (userId ? state.liveCreatorIds[userId] : ""));
+  const streamId = useLiveStreamStore((state) => (userId ? state.liveCreatorIds[userId] : "")) || user?.liveStreamId || user?.activeLiveStream?.id || "";
   const ensureLivePresence = useLiveStreamStore((state) => state.ensureLivePresence);
-  const isLive = forceLive || Boolean(streamId);
+  const isLive = forceLive || Boolean(streamId) || Boolean(user?.isLive);
 
   useEffect(() => {
     if (userId && !isLive) {

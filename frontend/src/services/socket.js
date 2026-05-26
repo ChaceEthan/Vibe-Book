@@ -10,6 +10,7 @@ let lastSocketWarningAt = 0;
 
 const warnSocketIssue = (message, payload = {}) => {
   if (typeof console === "undefined") return;
+  if (!import.meta.env.DEV) return;
 
   const now = Date.now();
   if (now - lastSocketWarningAt < 60000) {
@@ -66,13 +67,14 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     autoConnect: false,
     withCredentials: true,
     reconnection: true,
-    reconnectionAttempts: 8,
-    reconnectionDelay: 1000,
+    reconnectionAttempts: 10,
+    reconnectionDelay: 2000,
     reconnectionDelayMax: 12000,
     randomizationFactor: 0.6,
     timeout: 15000,
     path: SOCKET_PATH,
     transports: ["websocket", "polling"],
+    tryAllTransports: true,
   });
 
   socket.on("connect", () => {
@@ -81,8 +83,19 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 
   socket.on("connect_error", (error) => {
     connectRequested = false;
-    if (/unauthorized|jwt|token/i.test(error?.message || "") && !getStoredToken()) {
+    if (/unauthorized|jwt|token/i.test(error?.message || "")) {
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("vibebook:auth-invalid", {
+            detail: {
+              code: "SOCKET_AUTH_INVALID",
+              message: "Your realtime session expired. Please log in again.",
+            },
+          })
+        );
+      }
       disconnectSocket({ immediate: true });
+      return;
     }
     warnSocketIssue("[socket] connection failed", {
       message: error?.message || "Socket connection failed",
@@ -136,6 +149,12 @@ export const disconnectSocket = ({ immediate = false } = {}) => {
 
   clearDisconnectTimer();
 
+  if (immediate) {
+    socket.disconnect();
+    connectRequested = false;
+    return;
+  }
+
   const disconnect = () => {
     if (socket && !socket.connected && !socket.connecting) {
       connectRequested = false;
@@ -145,11 +164,6 @@ export const disconnectSocket = ({ immediate = false } = {}) => {
     socket?.disconnect();
     connectRequested = false;
   };
-
-  if (immediate) {
-    disconnect();
-    return;
-  }
 
   disconnectTimer = setTimeout(disconnect, 1200);
 };

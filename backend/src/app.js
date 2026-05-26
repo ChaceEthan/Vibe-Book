@@ -137,7 +137,6 @@ app.use("/api/upload", uploadLimiter, uploadRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/groups", groupRoutes);
-console.log("[routes] mounted /api/groups");
 app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);
 app.use("/api/payments", bookingLimiter, paymentRoutes);

@@ -5,9 +5,12 @@
  */
 
 const livestreamService = require("./livestreamService");
+const { formatWalletResponse, formatTransactionResponse } = require("../wallet/walletUtils");
+const { GIFT_DEFINITIONS } = require("../wallet/walletConstants");
+const { createNotification } = require("../../utils/notifications");
 
 const VALID_REACTIONS = new Set(["heart", "fire", "clap", "wow", "laugh", "cry"]);
-const VALID_GIFTS = new Set(["rose", "fire", "crown", "diamond"]);
+const VALID_GIFTS = new Set(Object.values(GIFT_DEFINITIONS).map((gift) => gift.id));
 
 const roomFor = (streamId) => `stream:${streamId}`;
 const idOf = (value) => value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
@@ -208,7 +211,7 @@ const setupLiveStreamSockets = (io) => {
       }
     });
 
-    socket.on("livestream:gift", (data = {}, callback) => {
+    socket.on("livestream:gift", async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
         if (!streamId || !data.giftId) {
@@ -217,17 +220,64 @@ const setupLiveStreamSockets = (io) => {
         }
 
         const gift = VALID_GIFTS.has(data.giftId) ? data.giftId : "rose";
+        const result = await livestreamService.sendLiveGift(streamId, socket.user?._id, gift, {
+          senderSocketId: socket.id,
+        });
+        const senderWallet = formatWalletResponse(result.senderWallet);
+        const receiverWallet = formatWalletResponse(result.receiverWallet);
+        const sendTransaction = formatTransactionResponse(result.sendTransaction);
+        const receiveTransaction = formatTransactionResponse(result.receiveTransaction);
+        const creatorId = idOf(result.stream?.creatorId);
         const payload = {
-          id: `${socket.id}:${Date.now()}`,
+          id: result.sendTransaction?._id?.toString?.() || `${socket.id}:${Date.now()}`,
           streamId,
           ...viewerPayloadFor(socket),
           gift,
-          value: Math.max(1, Math.min(1000, Number(data.giftValue) || 1)),
+          giftId: result.gift.id,
+          giftName: result.gift.name,
+          animation: result.gift.animation,
+          value: result.gift.pointsCost,
+          transactionId: result.sendTransaction?._id?.toString?.() || "",
           timestamp: nowIso(),
         };
 
+        socket.emit("wallet:update", senderWallet);
+        socket.emit("wallet:gift", {
+          type: "live_gift_sent",
+          giftId: result.gift.id,
+          giftName: result.gift.name,
+          amount: result.gift.pointsCost,
+          wallet: senderWallet,
+          transaction: sendTransaction,
+          message: `${result.gift.name} sent`,
+        });
+
+        if (creatorId) {
+          io.to(creatorId).emit("wallet:update", receiverWallet);
+          io.to(creatorId).emit("wallet:reward", {
+            type: "live_gift_received",
+            giftId: result.gift.id,
+            giftName: result.gift.name,
+            amount: result.gift.pointsCost,
+            wallet: receiverWallet,
+            transaction: receiveTransaction,
+            fromUserId: idOf(socket.user?._id),
+            fromUserName: socket.user?.username || socket.user?.name || "Viewer",
+            message: `${socket.user?.username || socket.user?.name || "Viewer"} sent ${result.gift.name}`,
+          });
+          createNotification({
+            userId: creatorId,
+            actorId: socket.user?._id,
+            type: "monetization",
+            title: "Live gift received",
+            message: `${socket.user?.username || socket.user?.name || "A viewer"} sent ${result.gift.name}`,
+            data: { streamId, giftId: result.gift.id, amount: result.gift.pointsCost },
+            dedupeKey: `live-gift:${payload.id}`,
+          }).catch(() => null);
+        }
+
         io.to(roomFor(streamId)).emit("livestream:gift", payload);
-        callback?.({ ok: true, gift: payload });
+        callback?.({ ok: true, gift: payload, wallet: senderWallet, transaction: sendTransaction });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send gift" });
       }

@@ -17,9 +17,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import PostMedia from "../components/PostMedia.jsx";
-import SafeAvatar from "../components/SafeAvatar.jsx";
+import LiveAvatar from "../components/LiveAvatar.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, userApi } from "../services/api";
+import { useLiveStreamStore } from "../store/livestreamStore";
 
 const RECENT_KEY = "vibebook:recent-searches";
 const tabs = ["Top", "Users", "Videos", "Hashtags", "Sounds"];
@@ -127,11 +128,13 @@ const UserResultCard = ({ currentUser, onFollow, user }) => {
   const verified = Boolean(user.isVerified || user.verified);
   const isSelf = currentUser?._id === user._id;
   const image = user.profilePicture || user.profileImage || user.images?.[0] || user.gallery?.[0] || "";
+  const liveStreamId = useLiveStreamStore((state) => state.liveCreatorIds[String(user._id || user.id || "")] || user.liveStreamId || "");
+  const profilePath = liveStreamId ? `/live/${liveStreamId}` : `/profile/${user._id}`;
 
   return (
     <article className="flex min-w-0 gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-soft transition hover:-translate-y-0.5 hover:shadow-lg">
-      <Link to={`/profile/${user._id}`} className="shrink-0">
-        <SafeAvatar user={user} src={image} className="h-16 w-16 rounded-full object-cover ring-2 ring-white" />
+      <Link to={profilePath} className="shrink-0">
+        <LiveAvatar user={user} src={image} className="h-16 w-16 rounded-full object-cover ring-2 ring-white" forceLive={Boolean(liveStreamId)} />
       </Link>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
@@ -168,12 +171,13 @@ const UserResultCard = ({ currentUser, onFollow, user }) => {
 const VideoCard = ({ post }) => {
   const creator = post.userId || {};
   const profileImage = creator.profilePicture || creator.profileImage || creator.images?.[0] || "";
+  const liveStreamId = useLiveStreamStore((state) => state.liveCreatorIds[String(creator._id || creator.id || "")] || creator.liveStreamId || "");
   const duration = Number(post.duration || 0);
   const minutes = Math.floor(duration / 60);
   const seconds = Math.floor(duration % 60).toString().padStart(2, "0");
 
   return (
-    <Link to={`/profile/${creator._id || ""}`} className="group block overflow-hidden rounded-lg bg-slate-950 shadow-soft transition hover:-translate-y-1 hover:shadow-xl">
+    <Link to={liveStreamId ? `/live/${liveStreamId}` : `/profile/${creator._id || ""}`} className="group block overflow-hidden rounded-lg bg-slate-950 shadow-soft transition hover:-translate-y-1 hover:shadow-xl">
       <div className="relative aspect-[9/14] overflow-hidden">
         <PostMedia post={post} className="h-full w-full" imageClassName="h-full w-full object-cover" videoClassName="h-full w-full object-cover" controls={false} muted minimal />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-slate-950/10" />
@@ -185,7 +189,7 @@ const VideoCard = ({ post }) => {
         <div className="absolute inset-x-0 bottom-0 p-3 text-white">
           <p className="line-clamp-2 text-xs font-bold leading-4">{post.caption || "VibeBook video"}</p>
           <div className="mt-2 flex min-w-0 items-center gap-2">
-            <SafeAvatar user={creator} src={profileImage} className="h-7 w-7 rounded-full object-cover ring-1 ring-white/70" />
+            <LiveAvatar user={creator} src={profileImage} className="h-7 w-7 rounded-full object-cover ring-1 ring-white/70" forceLive={Boolean(liveStreamId)} />
             <span className="min-w-0 truncate text-xs font-black">@{creator.username || creator.name || "creator"}</span>
           </div>
         </div>

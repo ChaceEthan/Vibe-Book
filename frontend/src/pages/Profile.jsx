@@ -46,6 +46,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import { bookingApi, feedApi, mediaUrl, paymentApi, userApi } from "../services/api";
 import { usePostStore } from "../store/postStore";
+import { useLiveStreamStore } from "../store/livestreamStore";
 import { useWalletStore } from "../store/walletStore";
 import { getSafeProfileImage, handleAvatarError, handleCoverError } from "../utils/profileImage";
 
@@ -522,7 +523,7 @@ const ProfileMediaViewer = ({
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-[103] bg-gradient-to-t from-slate-950 via-slate-950/65 to-transparent px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-20 sm:px-8">
         <div className="max-w-[min(84vw,42rem)]">
           <div className="flex items-center gap-3">
-            <SafeAvatar user={{ ...user, profilePicture }} className="h-10 w-10 rounded-full border border-white/30 object-cover" />
+            <LiveAvatar user={{ ...user, profilePicture }} className="h-10 w-10 rounded-full border border-white/30 object-cover" />
             <div className="min-w-0">
               <p className="truncate text-sm font-black">@{user?.username || "creator"}</p>
               <p className="text-xs font-semibold text-white/60">{activeIsVideo ? "Original video" : "Photo"} {activeItem?.duration ? `- ${formatDuration(activeItem.duration)}` : ""}</p>
@@ -559,7 +560,7 @@ const ProfileMediaViewer = ({
 
                   return (
                     <article key={key} className="flex gap-3">
-                      <SafeAvatar user={author} className="h-9 w-9 rounded-full bg-slate-100 object-cover" />
+                      <LiveAvatar user={author} className="h-9 w-9 rounded-full bg-slate-100 object-cover" />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <p className="truncate text-sm font-black text-navy">@{author.username || author.name || "creator"}</p>
@@ -597,7 +598,7 @@ const ProfileMediaViewer = ({
             )}
           </div>
           <form className="flex gap-2 border-t border-slate-200 bg-white p-3" onSubmit={submitComment}>
-            <SafeAvatar user={currentUser} className="h-10 w-10 rounded-full bg-slate-100 object-cover" />
+            <LiveAvatar user={currentUser} className="h-10 w-10 rounded-full bg-slate-100 object-cover" />
             <input
               className="field min-w-0 flex-1"
               value={commentText}
@@ -630,6 +631,9 @@ const Profile = () => {
   const replacePost = usePostStore((state) => state.replacePost);
   const applyPostLike = usePostStore((state) => state.applyPostLike);
   const removePost = usePostStore((state) => state.removePost);
+  const liveCreatorIds = useLiveStreamStore((state) => state.liveCreatorIds);
+  const ensureLivePresence = useLiveStreamStore((state) => state.ensureLivePresence);
+  const upsertLiveStream = useLiveStreamStore((state) => state.upsertLiveStream);
   const [user, setUser] = useState(null);
   const [activeImage, setActiveImage] = useState(0);
   const [previewImage, setPreviewImage] = useState("");
@@ -836,6 +840,10 @@ const Profile = () => {
   const frameGradient = frameClassFor(equippedFrame);
   const skills = Array.isArray(user?.skills) ? user.skills.filter(Boolean) : [];
   const isOwnProfile = currentUser?._id && user?._id && currentUser._id === user._id;
+  const profileUserId = user?._id || user?.id || "";
+  const activeLiveStreamId = profileUserId
+    ? liveCreatorIds[String(profileUserId)] || user?.liveStreamId || user?.activeLiveStream?.id || ""
+    : "";
   const isFollowing = Boolean(user?.isFollowing);
   const followsViewer = Boolean(user?.followsViewer || user?.followedYou);
   const isMutualFollow = Boolean(user?.isMutualFollow || user?.mutualFollow || (isFollowing && followsViewer));
@@ -852,6 +860,25 @@ const Profile = () => {
   const phone = cleanPhone(user?.phone || "");
   const contactUnlocked = Boolean(isOwnProfile || user?.contactUnlocked || contentUnlocked);
   const contactLocked = Boolean(!isOwnProfile && user?.contactLocked);
+
+  useEffect(() => {
+    if (profileUserId) {
+      ensureLivePresence?.();
+    }
+  }, [ensureLivePresence, profileUserId]);
+
+  useEffect(() => {
+    if (profileUserId && user?.activeLiveStream?.id) {
+      upsertLiveStream?.({
+        ...user.activeLiveStream,
+        id: user.activeLiveStream.id,
+        creatorId: profileUserId,
+        creator: user,
+        isLive: true,
+        status: "live",
+      });
+    }
+  }, [profileUserId, upsertLiveStream, user]);
   const profilePosts = useMemo(() => {
     const byId = new Map();
     const userId = user?._id || id;
@@ -1876,6 +1903,15 @@ const Profile = () => {
           <div className={`relative mx-auto -mt-16 h-32 w-32 rounded-full ${frameGradient ? `bg-gradient-to-br ${frameGradient} p-1 shadow-[0_0_32px_rgba(34,197,94,0.45)]` : "border-4 border-white bg-slate-100 shadow-xl"}`}>
             {frameGradient && <motion.span className="absolute inset-[-7px] rounded-full bg-inherit opacity-40 blur-md" animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} />}
             <LiveAvatar user={{ ...user, profilePicture: profilePicture || activeImageUrl }} alt={user.name} wrapperClassName="h-full w-full" className="relative h-full w-full rounded-full border-4 border-white object-cover" loading="eager" />
+            {activeLiveStreamId && (
+              <button
+                type="button"
+                className="absolute inset-0 z-10 rounded-full focus:outline-none focus:ring-4 focus:ring-red-400/60"
+                onClick={() => navigate(`/live/${activeLiveStreamId}`)}
+                aria-label="Join live stream"
+                title="Join live stream"
+              />
+            )}
             {isOwnProfile && (
               <>
                 <input ref={avatarInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/*" onChange={handleAvatarSelect} />
@@ -1991,6 +2027,16 @@ const Profile = () => {
           )}
 
           <div className="mx-auto mt-5 flex max-w-3xl flex-wrap items-center justify-center gap-2">
+            {activeLiveStreamId && (
+              <button
+                type="button"
+                className="btn-primary gap-2 bg-red-600 text-white hover:bg-red-700"
+                onClick={() => navigate(`/live/${activeLiveStreamId}`)}
+              >
+                <Video className="h-4 w-4" />
+                {isOwnProfile ? "View Live" : "Join Live"}
+              </button>
+            )}
             {isOwnProfile ? (
               <Link to="/settings" className="btn-primary gap-2">
                 <Pencil className="h-4 w-4" />

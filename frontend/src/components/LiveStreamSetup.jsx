@@ -1,11 +1,8 @@
 // @ts-nocheck
 import {
   AlertTriangle,
-  Bell,
-  Camera,
   ChevronLeft,
   Eye,
-  Image as ImageIcon,
   Loader2,
   Mic,
   MicOff,
@@ -24,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveStreamStore } from "../store/livestreamStore";
 import { useAuth } from "../context/AuthContext.jsx";
 import SafeAvatar from "./SafeAvatar.jsx";
+import { setLivePreviewStream } from "../services/livePreviewStream";
 
 const CATEGORIES = ["gaming", "music", "art", "talk", "performance", "education", "lifestyle", "other"];
 const PRIVACY_LEVELS = [
@@ -34,6 +32,7 @@ const PRIVACY_LEVELS = [
 const QUALITY_OPTIONS = ["360p", "480p", "720p", "1080p"];
 const BACKGROUND_THEMES = ["classic", "neon", "studio", "sunset"];
 const EFFECT_PRESETS = ["none", "soft-glow", "cinematic", "creator"];
+const SETUP_STEPS = ["Title", "Details", "Settings", "Preview"];
 
 const normalizeTags = (value = "") =>
   Array.from(
@@ -56,6 +55,9 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const micMutedRef = useRef(false);
   const mountedRef = useRef(true);
   const pendingStreamRef = useRef(null);
+  const handoffStreamRef = useRef(false);
+  const titleInputRef = useRef(null);
+  const descriptionInputRef = useRef(null);
 
   const [form, setForm] = useState({
     title: "",
@@ -90,11 +92,24 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [countdown, setCountdown] = useState(null);
   const [starting, setStarting] = useState(false);
+  const [setupStep, setSetupStep] = useState(0);
 
   const { endLiveStream, startLiveStream, loading } = useLiveStreamStore();
   const isBusy = starting || loading;
 
   const tags = useMemo(() => normalizeTags(tagText), [tagText]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (setupStep === 0) {
+        titleInputRef.current?.focus?.();
+      } else if (setupStep === 1) {
+        descriptionInputRef.current?.focus?.();
+      }
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [setupStep]);
 
   const updateForm = (patch) => {
     setForm((current) => ({ ...current, ...patch }));
@@ -209,6 +224,15 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
     mountedRef.current = false;
     window.clearInterval(countdownTimerRef.current);
     countdownResolveRef.current?.({ canceled: true });
+
+    if (handoffStreamRef.current) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      streamRef.current = null;
+      return;
+    }
+
     stopCurrentStream();
   }, [stopCurrentStream]);
 
@@ -275,8 +299,14 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const handleStart = async () => {
     if (startingRef.current) return;
 
+    if (setupStep < 3) {
+      setSetupStep(3);
+      return;
+    }
+
     if (!form.title.trim()) {
       setError("Add a live title before starting.");
+      setSetupStep(0);
       return;
     }
 
@@ -288,6 +318,15 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
     startingRef.current = true;
     setStarting(true);
     setError("");
+
+    const countdownResult = await runCountdown();
+    if (!mountedRef.current) return;
+
+    if (countdownResult?.canceled) {
+      setStarting(false);
+      startingRef.current = false;
+      return;
+    }
 
     const result = await startLiveStream({
       ...form,
@@ -302,7 +341,12 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
         micMuted,
       },
     });
-    if (!mountedRef.current) return;
+    if (!mountedRef.current) {
+      if (result.ok && result.stream?.id) {
+        endLiveStream(result.stream.id).catch(() => null);
+      }
+      return;
+    }
 
     if (!result.ok) {
       setStarting(false);
@@ -311,25 +355,179 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
       return;
     }
 
-    pendingStreamRef.current = result.stream;
-    const countdownResult = await runCountdown();
-    if (!mountedRef.current) return;
-
-    if (countdownResult?.canceled) {
-      if (result.stream?.id) {
-        endLiveStream(result.stream.id).catch(() => null);
-      }
-      pendingStreamRef.current = null;
-      setStarting(false);
-      startingRef.current = false;
-      return;
+    if (result.stream?.id && streamRef.current) {
+      handoffStreamRef.current = true;
+      setLivePreviewStream(result.stream.id, streamRef.current);
     }
 
     setStarting(false);
     startingRef.current = false;
     pendingStreamRef.current = null;
-    stopCamera();
     onStart?.(result.stream);
+  };
+
+  const goNextStep = () => {
+    if (setupStep === 0 && !form.title.trim()) {
+      setError("Add a live title before continuing.");
+      return;
+    }
+
+    setError("");
+    setSetupStep((current) => Math.min(3, current + 1));
+  };
+
+  const goPreviousStep = () => {
+    setError("");
+    setSetupStep((current) => Math.max(0, current - 1));
+  };
+
+  const renderSetupStep = () => {
+    if (setupStep === 0) {
+      return (
+        <div className="space-y-5">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-red-200">Go Live</p>
+            <h1 className="mt-2 text-4xl font-black leading-tight text-white sm:text-5xl">Name your live</h1>
+          </div>
+          <input
+            ref={titleInputRef}
+            className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-xl font-black text-white outline-none transition placeholder:text-white/35 focus:border-red-300"
+            value={form.title}
+            onChange={(event) => updateForm({ title: event.target.value })}
+            placeholder="What are you streaming?"
+            maxLength={120}
+            disabled={isBusy}
+          />
+        </div>
+      );
+    }
+
+    if (setupStep === 1) {
+      return (
+        <div className="space-y-5">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wide text-blue-200">Details</p>
+            <h1 className="mt-2 text-4xl font-black leading-tight text-white sm:text-5xl">Set the vibe</h1>
+          </div>
+          <textarea
+            ref={descriptionInputRef}
+            className="min-h-[10rem] w-full resize-none rounded-2xl border border-white/10 bg-white/10 px-4 py-4 text-base font-semibold leading-7 text-white outline-none transition placeholder:text-white/35 focus:border-blue-300"
+            value={form.description}
+            onChange={(event) => updateForm({ description: event.target.value })}
+            placeholder="Tell viewers what is happening."
+            maxLength={500}
+            disabled={isBusy}
+          />
+          <label className="block space-y-2">
+            <span className="text-xs font-black uppercase tracking-wide text-white/65">Tags</span>
+            <input
+              className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-white/35 focus:border-blue-300"
+              value={tagText}
+              onChange={(event) => setTagText(event.target.value)}
+              placeholder="music, kigali, creators"
+              disabled={isBusy}
+            />
+          </label>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-emerald-200">Settings</p>
+          <h1 className="mt-2 text-4xl font-black leading-tight text-white sm:text-5xl">Tune the room</h1>
+        </div>
+
+        <div>
+          <span className="text-xs font-black uppercase tracking-wide text-white/65">Category</span>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {CATEGORIES.map((category) => (
+              <button
+                key={category}
+                type="button"
+                className={`rounded-xl px-3 py-3 text-xs font-black capitalize transition ${
+                  form.category === category ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
+                }`}
+                onClick={() => updateForm({ category })}
+                disabled={isBusy}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block space-y-2">
+            <span className="text-xs font-black uppercase tracking-wide text-white/65">Audience</span>
+            <select
+              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-bold text-white outline-none"
+              value={form.privacyLevel}
+              onChange={(event) => updateForm({ privacyLevel: event.target.value })}
+              disabled={isBusy}
+            >
+              {PRIVACY_LEVELS.map((level) => (
+                <option key={level.value} value={level.value}>{level.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block space-y-2">
+            <span className="text-xs font-black uppercase tracking-wide text-white/65">Quality</span>
+            <select
+              className="w-full rounded-2xl border border-white/10 bg-slate-900 px-4 py-3 text-sm font-bold text-white outline-none"
+              value={form.selectedQuality}
+              onChange={(event) => updateForm({ selectedQuality: event.target.value })}
+              disabled={isBusy}
+            >
+              {QUALITY_OPTIONS.map((quality) => (
+                <option key={quality} value={quality}>{quality}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div>
+          <span className="text-xs font-black uppercase tracking-wide text-white/65">Live background</span>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {BACKGROUND_THEMES.map((theme) => (
+              <button
+                key={theme}
+                type="button"
+                className={`rounded-xl px-3 py-3 text-xs font-black capitalize transition ${
+                  form.backgroundTheme === theme ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
+                }`}
+                onClick={() => updateForm({ backgroundTheme: theme })}
+                disabled={isBusy}
+              >
+                {theme}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {[
+            ["commentsEnabled", "Comments"],
+            ["giftsEnabled", "Gifts"],
+            ["allowReactions", "Reactions"],
+            ["followerOnlyChat", "Followers"],
+            ["liveNotifications", "Notify"],
+            ["moderationEnabled", "Moderate"],
+          ].map(([field, label]) => (
+            <button
+              key={field}
+              type="button"
+              className={`rounded-2xl px-3 py-3 text-xs font-black transition ${form[field] ? "bg-white text-slate-950" : "bg-white/10 text-white/55"}`}
+              onClick={() => updateForm({ [field]: !form[field] })}
+              disabled={isBusy}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -365,8 +563,76 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
           </button>
         </header>
 
-        <main className="relative z-10 grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(18rem,42dvh)] gap-0 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-1">
-          <section className="relative min-h-0 overflow-hidden bg-slate-950">
+        <AnimatePresence initial={false}>
+          {setupStep < 3 && (
+            <motion.div
+              className="absolute inset-x-0 bottom-0 top-[4.25rem] z-40 overflow-y-auto bg-slate-950/98 px-4 py-5 backdrop-blur-xl sm:px-6"
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -18 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center gap-8 py-5">
+                <div className="flex items-center gap-2">
+                  {SETUP_STEPS.map((step, index) => (
+                    <button
+                      key={step}
+                      type="button"
+                      className={`h-2 flex-1 rounded-full transition ${index <= setupStep ? "bg-red-500" : "bg-white/12"}`}
+                      onClick={() => {
+                        if (index < setupStep || (index > setupStep && form.title.trim())) {
+                          setSetupStep(index);
+                        }
+                      }}
+                      aria-label={step}
+                      disabled={isBusy}
+                    />
+                  ))}
+                </div>
+
+                <motion.div
+                  key={setupStep}
+                  initial={{ opacity: 0, x: 18 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -18 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {renderSetupStep()}
+                </motion.div>
+
+                {error && (
+                  <div className="flex items-start gap-2 rounded-2xl border border-red-400/30 bg-red-500/10 p-3 text-sm font-bold text-red-100">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:opacity-45"
+                    onClick={goPreviousStep}
+                    disabled={setupStep === 0 || isBusy}
+                    aria-label="Previous setup step"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </button>
+                  <button
+                    type="button"
+                    className="flex min-w-0 flex-1 items-center justify-center rounded-full bg-white px-5 py-3.5 text-sm font-black text-slate-950 shadow-xl transition hover:scale-[1.01] disabled:opacity-60"
+                    onClick={goNextStep}
+                    disabled={isBusy}
+                  >
+                    {setupStep === 2 ? "Open Camera Preview" : "Next"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <main className="relative z-10 min-h-0 flex-1">
+          <section className="relative h-full min-h-0 overflow-hidden bg-black">
             <video
               ref={videoRef}
               autoPlay
@@ -389,338 +655,196 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
               </div>
             )}
 
-            <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/75 to-transparent p-4">
-              <div className="flex items-center gap-2">
-                <SafeAvatar user={user} className="h-10 w-10 rounded-full border-2 border-white/70 object-cover" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/75 via-black/10 to-black/90" />
+
+            <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-3 p-4 pt-16 sm:p-5 sm:pt-20">
+              <div className="flex min-w-0 items-center gap-2">
+                <SafeAvatar user={user} className="h-11 w-11 rounded-full border-2 border-white/70 object-cover" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-black">{user?.name || user?.username || "Creator"}</p>
-                  <p className="text-[0.68rem] font-bold uppercase tracking-wide text-white/65">{cameraReady ? "Preview ready" : "Camera loading"}</p>
+                  <p className="text-[0.68rem] font-black uppercase tracking-wide text-white/65">{cameraReady ? "Live ready" : "Camera loading"}</p>
                 </div>
               </div>
-              <div className="rounded-full bg-red-600 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide shadow-[0_0_24px_rgba(220,38,38,0.7)]">
-                Ready
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="rounded-full bg-black/45 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide text-white/80 backdrop-blur">
+                  {form.selectedQuality}
+                </span>
+                <span className="rounded-full bg-red-600 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide shadow-[0_0_24px_rgba(220,38,38,0.7)]">
+                  Live ready
+                </span>
               </div>
             </div>
 
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-4">
-              <div className="mx-auto flex max-w-md items-center justify-center gap-3">
+            <div className="absolute bottom-[9.75rem] left-4 right-24 max-w-xl sm:bottom-36 sm:left-6">
+              <p className="line-clamp-2 text-2xl font-black leading-tight text-white sm:text-4xl">{form.title || "Your live title"}</p>
+              {!!form.description && <p className="mt-2 line-clamp-2 text-sm font-semibold leading-6 text-white/72">{form.description}</p>}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full bg-white/12 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide text-white/75 backdrop-blur">{form.category}</span>
+                <span className="rounded-full bg-white/12 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide text-white/75 backdrop-blur">{form.privacyLevel}</span>
+                {tags.slice(0, 3).map((tag) => (
+                  <span key={tag} className="rounded-full bg-white/12 px-3 py-1 text-[0.68rem] font-black text-white/75 backdrop-blur">#{tag}</span>
+                ))}
+              </div>
+            </div>
+
+            <div className="absolute bottom-[9.25rem] right-3 flex flex-col items-center gap-3 sm:bottom-32 sm:right-5">
+              <button
+                type="button"
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${micMuted ? "bg-red-600 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}
+                onClick={() => setMicMuted((current) => !current)}
+                disabled={!cameraReady}
+                aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+              >
+                {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+              </button>
+              <button
+                type="button"
+                className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/25 disabled:opacity-60"
+                onClick={() => {
+                  setSelectedVideoDeviceId("");
+                  setFrontCamera((current) => !current);
+                }}
+                disabled={!cameraReady || isBusy}
+                aria-label="Switch camera"
+              >
+                <SwitchCamera className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${flashOn ? "bg-yellow-400 text-slate-950" : "bg-white/15 text-white hover:bg-white/25"}`}
+                onClick={toggleFlash}
+                disabled={!cameraReady || !flashSupported}
+                aria-label="Toggle flash"
+              >
+                <Zap className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${form.beautyFilter === "natural" ? "bg-white/15 text-white hover:bg-white/25" : "bg-pink-500 text-white"}`}
+                onClick={() => updateForm({ beautyFilter: form.beautyFilter === "natural" ? "soft" : "natural" })}
+                disabled={isBusy}
+                aria-label="Toggle beauty filter"
+              >
+                <Wand2 className="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${form.effectsPreset === "none" ? "bg-white/15 text-white hover:bg-white/25" : "bg-blue-500 text-white"}`}
+                onClick={() => {
+                  const currentIndex = EFFECT_PRESETS.indexOf(form.effectsPreset);
+                  updateForm({ effectsPreset: EFFECT_PRESETS[(currentIndex + 1) % EFFECT_PRESETS.length] });
+                }}
+                disabled={isBusy}
+                aria-label="Cycle filters"
+              >
+                <Sparkles className="h-5 w-5" />
+              </button>
+            </div>
+
+            <AnimatePresence>
+              {advancedOpen && (
+                <motion.div
+                  className="absolute inset-x-3 bottom-28 z-20 rounded-2xl border border-white/10 bg-black/78 p-3 backdrop-blur-xl sm:inset-x-auto sm:right-20 sm:w-80"
+                  initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 18, scale: 0.96 }}
+                >
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-black uppercase tracking-wide text-white/60">Quality</span>
+                      <select
+                        className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
+                        value={form.selectedQuality}
+                        onChange={(event) => updateForm({ selectedQuality: event.target.value })}
+                        disabled={isBusy}
+                      >
+                        {QUALITY_OPTIONS.map((quality) => (
+                          <option key={quality} value={quality}>{quality}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-black uppercase tracking-wide text-white/60">Background</span>
+                      <select
+                        className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
+                        value={form.backgroundTheme}
+                        onChange={(event) => updateForm({ backgroundTheme: event.target.value })}
+                        disabled={isBusy}
+                      >
+                        {BACKGROUND_THEMES.map((value) => (
+                          <option key={value} value={value}>{value}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-black uppercase tracking-wide text-white/60">Camera</span>
+                      <select
+                        className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
+                        value={selectedVideoDeviceId}
+                        onChange={(event) => setSelectedVideoDeviceId(event.target.value)}
+                        disabled={isBusy}
+                      >
+                        <option value="">Auto camera</option>
+                        {videoDevices.map((device, index) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {device.label || `Camera ${index + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-black uppercase tracking-wide text-white/60">Audio</span>
+                      <select
+                        className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
+                        value={selectedAudioDeviceId}
+                        onChange={(event) => setSelectedAudioDeviceId(event.target.value)}
+                        disabled={isBusy}
+                      >
+                        <option value="">Auto microphone</option>
+                        {audioDevices.map((device, index) => (
+                          <option key={device.deviceId} value={device.deviceId}>
+                            {device.label || `Microphone ${index + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {error && setupStep === 3 && (
+              <div className="absolute left-4 right-4 top-28 z-20 flex items-start gap-2 rounded-2xl border border-red-400/30 bg-red-500/15 p-3 text-sm font-bold text-red-100 backdrop-blur sm:left-6 sm:right-auto sm:max-w-md">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <div className="absolute inset-x-0 bottom-0 z-20 bg-gradient-to-t from-black via-black/72 to-transparent px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-14">
+              <div className="mx-auto flex max-w-md items-center gap-3">
                 <button
                   type="button"
-                  className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${micMuted ? "bg-red-600 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}
-                  onClick={() => setMicMuted((current) => !current)}
-                  disabled={!cameraReady}
-                  aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+                  className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white/10 text-white transition hover:bg-white/20 disabled:opacity-45"
+                  onClick={goPreviousStep}
+                  disabled={isBusy}
+                  aria-label="Back to live settings"
                 >
-                  {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                  <ChevronLeft className="h-5 w-5" />
                 </button>
                 <button
                   type="button"
-                  className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-white text-slate-950 shadow-xl transition hover:scale-105 disabled:opacity-60"
-                  onClick={() => {
-                    setSelectedVideoDeviceId("");
-                    setFrontCamera((current) => !current);
-                  }}
-                  disabled={!cameraReady || isBusy}
-                  aria-label="Switch camera"
+                  className="flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-red-600 to-blue-600 px-5 py-4 text-sm font-black text-white shadow-[0_20px_60px_rgba(37,99,235,0.28)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={handleStart}
+                  disabled={isBusy || !cameraReady || !form.title.trim()}
                 >
-                  <SwitchCamera className="h-6 w-6" />
-                </button>
-                <button
-                  type="button"
-                  className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${flashOn ? "bg-yellow-400 text-slate-950" : "bg-white/15 text-white hover:bg-white/25"}`}
-                  onClick={toggleFlash}
-                  disabled={!cameraReady || !flashSupported}
-                  aria-label="Toggle flash"
-                >
-                  <Zap className="h-5 w-5" />
+                  {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Radio className="h-5 w-5" />}
+                  {starting ? "Starting..." : "Start Live"}
                 </button>
               </div>
             </div>
           </section>
-
-          <aside className="relative flex min-h-0 flex-col overflow-hidden border-t border-white/10 bg-slate-950/95 backdrop-blur-xl lg:border-l lg:border-t-0">
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 text-xs font-black text-white/70 transition hover:text-white"
-                  onClick={handleClose}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  Upload
-                </button>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide text-white/70">
-                  {form.selectedQuality}
-                </span>
-              </div>
-
-              <div className="space-y-4">
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-black uppercase tracking-wide text-white/70">Live title</span>
-                  <input
-                    className="w-full rounded-xl border border-white/10 bg-white/10 px-3 py-3 text-sm font-bold text-white outline-none transition placeholder:text-white/35 focus:border-blue-400"
-                    value={form.title}
-                    onChange={(event) => updateForm({ title: event.target.value })}
-                    placeholder="What are you streaming?"
-                    maxLength={120}
-                    disabled={isBusy}
-                  />
-                </label>
-
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-black uppercase tracking-wide text-white/70">Description</span>
-                  <textarea
-                    className="min-h-[5rem] w-full resize-none rounded-xl border border-white/10 bg-white/10 px-3 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-white/35 focus:border-blue-400"
-                    value={form.description}
-                    onChange={(event) => updateForm({ description: event.target.value })}
-                    placeholder="Set the vibe for viewers."
-                    maxLength={500}
-                    disabled={isBusy}
-                  />
-                </label>
-
-                <div>
-                  <span className="text-xs font-black uppercase tracking-wide text-white/70">Category</span>
-                  <div className="mt-2 grid grid-cols-4 gap-2">
-                    {CATEGORIES.map((category) => (
-                      <button
-                        key={category}
-                        type="button"
-                        className={`rounded-lg px-2 py-2 text-[0.72rem] font-black capitalize transition ${
-                          form.category === category ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
-                        }`}
-                        onClick={() => updateForm({ category })}
-                        disabled={isBusy}
-                      >
-                        {category}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <span className="text-xs font-black uppercase tracking-wide text-white/70">Privacy</span>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {PRIVACY_LEVELS.map((level) => {
-                      const Icon = level.icon;
-                      return (
-                        <button
-                          key={level.value}
-                          type="button"
-                          className={`flex min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-black transition ${
-                            form.privacyLevel === level.value ? "bg-white text-slate-950" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
-                          }`}
-                          onClick={() => updateForm({ privacyLevel: level.value })}
-                          disabled={isBusy}
-                        >
-                          <Icon className="h-3.5 w-3.5 shrink-0" />
-                          <span className="truncate">{level.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-black uppercase tracking-wide text-white/70">Tags</span>
-                  <input
-                    className="w-full rounded-xl border border-white/10 bg-white/10 px-3 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-white/35 focus:border-blue-400"
-                    value={tagText}
-                    onChange={(event) => setTagText(event.target.value)}
-                    placeholder="music, kigali, creators"
-                    disabled={isBusy}
-                  />
-                  {!!tags.length && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {tags.map((tag) => (
-                        <span key={tag} className="rounded-full bg-white/10 px-2 py-1 text-[0.68rem] font-black text-white/75">
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </label>
-
-                <label className="block space-y-1.5">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-white/70">
-                    <ImageIcon className="h-3.5 w-3.5" />
-                    Cover image
-                  </span>
-                  <input
-                    className="w-full rounded-xl border border-white/10 bg-white/10 px-3 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-white/35 focus:border-blue-400"
-                    value={form.coverImage}
-                    onChange={(event) => updateForm({ coverImage: event.target.value })}
-                    placeholder="Optional image URL"
-                    disabled={isBusy}
-                  />
-                </label>
-
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    ["commentsEnabled", "Comments"],
-                    ["giftsEnabled", "Gifts"],
-                    ["allowReactions", "Reactions"],
-                  ].map(([field, label]) => (
-                    <button
-                      key={field}
-                      type="button"
-                      className={`rounded-xl px-2 py-3 text-xs font-black transition ${form[field] ? "bg-emerald-500 text-white" : "bg-white/10 text-white/55"}`}
-                      onClick={() => updateForm({ [field]: !form[field] })}
-                      disabled={isBusy}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                <AnimatePresence initial={false}>
-                  {advancedOpen && (
-                    <motion.div
-                      className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-3"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: "auto" }}
-                      exit={{ opacity: 0, height: 0 }}
-                    >
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="block space-y-1.5">
-                          <span className="text-xs font-black uppercase tracking-wide text-white/60">Quality</span>
-                          <select
-                            className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
-                            value={form.selectedQuality}
-                            onChange={(event) => updateForm({ selectedQuality: event.target.value })}
-                            disabled={isBusy}
-                          >
-                            {QUALITY_OPTIONS.map((quality) => (
-                              <option key={quality} value={quality}>{quality}</option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="block space-y-1.5">
-                          <span className="text-xs font-black uppercase tracking-wide text-white/60">Beauty</span>
-                          <select
-                            className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
-                            value={form.beautyFilter}
-                            onChange={(event) => updateForm({ beautyFilter: event.target.value })}
-                            disabled={isBusy}
-                          >
-                            {["natural", "soft", "bright", "studio"].map((value) => (
-                              <option key={value} value={value}>{value}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="block space-y-1.5">
-                          <span className="text-xs font-black uppercase tracking-wide text-white/60">Camera</span>
-                          <select
-                            className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
-                            value={selectedVideoDeviceId}
-                            onChange={(event) => setSelectedVideoDeviceId(event.target.value)}
-                            disabled={isBusy}
-                          >
-                            <option value="">Auto camera</option>
-                            {videoDevices.map((device, index) => (
-                              <option key={device.deviceId} value={device.deviceId}>
-                                {device.label || `Camera ${index + 1}`}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="block space-y-1.5">
-                          <span className="text-xs font-black uppercase tracking-wide text-white/60">Audio</span>
-                          <select
-                            className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
-                            value={selectedAudioDeviceId}
-                            onChange={(event) => setSelectedAudioDeviceId(event.target.value)}
-                            disabled={isBusy}
-                          >
-                            <option value="">Auto microphone</option>
-                            {audioDevices.map((device, index) => (
-                              <option key={device.deviceId} value={device.deviceId}>
-                                {device.label || `Microphone ${index + 1}`}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <label className="block space-y-1.5">
-                          <span className="text-xs font-black uppercase tracking-wide text-white/60">Theme</span>
-                          <select
-                            className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
-                            value={form.backgroundTheme}
-                            onChange={(event) => updateForm({ backgroundTheme: event.target.value })}
-                            disabled={isBusy}
-                          >
-                            {BACKGROUND_THEMES.map((value) => (
-                              <option key={value} value={value}>{value}</option>
-                            ))}
-                          </select>
-                        </label>
-
-                        <label className="block space-y-1.5">
-                          <span className="text-xs font-black uppercase tracking-wide text-white/60">Effects</span>
-                          <select
-                            className="w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-2.5 text-sm font-bold text-white outline-none"
-                            value={form.effectsPreset}
-                            onChange={(event) => updateForm({ effectsPreset: event.target.value })}
-                            disabled={isBusy}
-                          >
-                            {EFFECT_PRESETS.map((value) => (
-                              <option key={value} value={value}>{value}</option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          ["moderationEnabled", "Moderation", ShieldCheck],
-                          ["followerOnlyChat", "Follower chat", Users],
-                          ["liveNotifications", "Notify fans", Bell],
-                          ["pkBattleReady", "PK ready", Sparkles],
-                        ].map(([field, label, Icon]) => (
-                          <button
-                            key={field}
-                            type="button"
-                            className={`flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 py-2.5 text-xs font-black transition ${form[field] ? "bg-blue-600 text-white" : "bg-white/10 text-white/60"}`}
-                            onClick={() => updateForm({ [field]: !form[field] })}
-                            disabled={isBusy}
-                          >
-                            <Icon className="h-3.5 w-3.5 shrink-0" />
-                            <span className="truncate">{label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {error && (
-                  <div className="flex items-start gap-2 rounded-xl border border-red-400/30 bg-red-500/10 p-3 text-sm font-bold text-red-100">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="shrink-0 border-t border-white/10 bg-slate-950 p-4 sm:p-5">
-              <button
-                type="button"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-red-600 to-blue-600 px-5 py-3.5 text-sm font-black text-white shadow-[0_20px_60px_rgba(37,99,235,0.28)] transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
-                onClick={handleStart}
-                disabled={isBusy || !cameraReady || !form.title.trim()}
-              >
-                {isBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Radio className="h-5 w-5" />}
-                Start Live
-              </button>
-            </div>
-          </aside>
         </main>
 
         <AnimatePresence>

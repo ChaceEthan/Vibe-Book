@@ -520,7 +520,7 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       amount: validatedAmount,
       balanceBefore: senderBalanceBefore,
       balanceAfter: Number(updatedSender.balance || 0),
-      source: TRANSACTION_SOURCES.GIFT_RECEIVED,
+      source: TRANSACTION_SOURCES.GIFT_SENT,
       description: `Sent ${giftId} gift`,
       metadata: { ...sanitizeMetadata(metadata), giftId, recipientId: receiverId.toString() },
       status: TRANSACTION_STATUS.COMPLETED,
