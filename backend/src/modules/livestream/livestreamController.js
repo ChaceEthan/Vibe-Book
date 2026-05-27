@@ -108,6 +108,7 @@ const startLiveStream = async (req, res) => {
     const stream = await livestreamService.startLiveStream(userId, streamData);
     const payload = formatLiveStreamResponse(stream);
     getIo()?.emit("livestream:started", { stream: payload });
+    getIo()?.emit("live:started", { stream: payload });
     return res.status(201).json({
       ok: true,
       stream: payload,
@@ -143,7 +144,9 @@ const endLiveStream = async (req, res) => {
     const updatedStream = await livestreamService.endLiveStream(streamId);
     const payload = formatLiveStreamResponse(updatedStream);
     getIo()?.to(`stream:${streamId}`).emit("livestream:ended", { stream: payload });
+    getIo()?.to(`stream:${streamId}`).emit("live:ended", { stream: payload });
     getIo()?.emit("livestream:ended_global", { streamId, stream: payload });
+    getIo()?.emit("live:ended_global", { streamId, stream: payload });
     return res.json({
       ok: true,
       stream: payload,
@@ -176,7 +179,9 @@ const joinLiveStream = async (req, res) => {
       maxViewers: payload.maxViewers,
     };
     getIo()?.to(`stream:${streamId}`).emit("livestream:viewers_updated", viewerPayload);
+    getIo()?.to(`stream:${streamId}`).emit("live:viewers_updated", viewerPayload);
     getIo()?.emit("livestream:viewers_updated_global", viewerPayload);
+    getIo()?.emit("live:viewers_updated_global", viewerPayload);
     return res.status(201).json({
       ok: true,
       stream: payload,
@@ -214,7 +219,9 @@ const leaveLiveStream = async (req, res) => {
         maxViewers: payload.maxViewers,
       };
       getIo()?.to(`stream:${session.streamId}`).emit("livestream:viewers_updated", viewerPayload);
+      getIo()?.to(`stream:${session.streamId}`).emit("live:viewers_updated", viewerPayload);
       getIo()?.emit("livestream:viewers_updated_global", viewerPayload);
+      getIo()?.emit("live:viewers_updated_global", viewerPayload);
     }
     return res.json({
       ok: true,
@@ -351,6 +358,7 @@ const updateStreamMetadata = async (req, res) => {
     const updatedStream = await livestreamService.updateStreamMetadata(streamId, req.body);
     const payload = formatLiveStreamResponse(updatedStream);
     getIo()?.to(`stream:${streamId}`).emit("livestream:metadata_updated", { stream: payload });
+    getIo()?.to(`stream:${streamId}`).emit("live:metadata_updated", { stream: payload });
     return res.json({
       ok: true,
       stream: payload,

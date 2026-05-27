@@ -11,10 +11,57 @@ const { createNotification } = require("../../utils/notifications");
 
 const VALID_REACTIONS = new Set(["heart", "fire", "clap", "wow", "laugh", "cry"]);
 const VALID_GIFTS = new Set(Object.values(GIFT_DEFINITIONS).map((gift) => gift.id));
+const COMMENT_RATE_LIMIT_MS = 900;
+const GIFT_RATE_LIMIT_MS = 1200;
+const MAX_DEDUPE_IDS = 80;
+const LIVE_EVENT_ALIASES = {
+  "livestream:comment": "live:message",
+  "livestream:reaction": "live:reaction",
+  "livestream:gift": "live:gift",
+  "livestream:viewers_updated": "live:viewers_updated",
+  "livestream:viewer_joined": "live:viewer_joined",
+  "livestream:viewer_left": "live:viewer_left",
+  "livestream:ended": "live:ended",
+  "livestream:metadata_updated": "live:metadata_updated",
+};
 
 const roomFor = (streamId) => `stream:${streamId}`;
 const idOf = (value) => value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
 const nowIso = () => new Date().toISOString();
+
+const emitLiveRoomEvent = (io, streamId, eventName, payload) => {
+  const room = roomFor(streamId);
+  io.to(room).emit(eventName, payload);
+  const alias = LIVE_EVENT_ALIASES[eventName];
+  if (alias) {
+    io.to(room).emit(alias, payload);
+  }
+};
+
+const markDedupeId = (socket, scope, rawId = "") => {
+  const id = String(rawId || "").trim();
+  if (!id) return false;
+
+  const key = `live:${scope}:ids`;
+  const current = socket.data[key] || [];
+  if (current.includes(id)) return true;
+
+  current.push(id);
+  if (current.length > MAX_DEDUPE_IDS) {
+    current.splice(0, current.length - MAX_DEDUPE_IDS);
+  }
+  socket.data[key] = current;
+  return false;
+};
+
+const isRateLimited = (socket, scope, windowMs) => {
+  const key = `live:${scope}:lastAt`;
+  const now = Date.now();
+  const previous = Number(socket.data[key] || 0);
+  if (now - previous < windowMs) return true;
+  socket.data[key] = now;
+  return false;
+};
 
 const viewerPayloadFor = (socket, fallbackName = "Guest") => ({
   userId: idOf(socket.user?._id),
@@ -33,7 +80,7 @@ const emitViewerCount = async (io, streamId) => {
     maxViewers,
   };
 
-  io.to(roomFor(streamId)).emit("livestream:viewers_updated", payload);
+  emitLiveRoomEvent(io, streamId, "livestream:viewers_updated", payload);
   io.emit("livestream:viewers_updated_global", payload);
 
   return { viewerCount, maxViewers };
@@ -48,12 +95,18 @@ const leaveTrackedLiveSession = async (io, socket, reason = "leave") => {
 
   socket.leave(roomFor(live.streamId));
   socket.data.livestream = null;
+  socket.to(roomFor(live.streamId)).emit("live:peer-left", {
+    streamId: live.streamId,
+    socketId: socket.id,
+    reason,
+    timestamp: nowIso(),
+  });
 
   if (live.sessionId) {
     await livestreamService.leaveLiveStream(live.sessionId).catch(() => null);
   }
 
-  io.to(roomFor(live.streamId)).emit("livestream:viewer_left", {
+  emitLiveRoomEvent(io, live.streamId, "livestream:viewer_left", {
     streamId: live.streamId,
     viewer: viewerPayloadFor(socket),
     reason,
@@ -103,7 +156,7 @@ const setupLiveStreamSockets = (io) => {
         socket.data.livestream = { streamId, sessionId };
 
         const viewers = await emitViewerCount(io, streamId);
-        io.to(roomFor(streamId)).emit("livestream:viewer_joined", {
+        emitLiveRoomEvent(io, streamId, "livestream:viewer_joined", {
           streamId,
           viewer: viewerPayloadFor(socket, data.username),
           timestamp: nowIso(),
@@ -161,33 +214,44 @@ const setupLiveStreamSockets = (io) => {
       }
     });
 
-    socket.on("livestream:comment", (data = {}, callback) => {
+    const handleLiveComment = (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
         const text = String(data.text || "").trim().slice(0, 500);
+        const clientId = String(data.clientId || data.id || "").slice(0, 120);
 
         if (!streamId || !text) {
           callback?.({ ok: false, error: "Comment text required" });
           return;
         }
 
+        if (markDedupeId(socket, "comment", clientId)) {
+          callback?.({ ok: true, duplicate: true });
+          return;
+        }
+
+        if (isRateLimited(socket, "comment", COMMENT_RATE_LIMIT_MS)) {
+          callback?.({ ok: false, error: "Slow down before sending another comment" });
+          return;
+        }
+
         const payload = {
-          id: `${socket.id}:${Date.now()}`,
+          id: clientId || `${socket.id}:${Date.now()}`,
           streamId,
           ...viewerPayloadFor(socket, data.username),
           text,
           timestamp: nowIso(),
         };
 
-        io.to(roomFor(streamId)).emit("livestream:comment", payload);
+        emitLiveRoomEvent(io, streamId, "livestream:comment", payload);
         callback?.({ ok: true, comment: payload });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send comment" });
         socket.emit("livestream:error", { error: error.message || "Unable to send comment" });
       }
-    });
+    };
 
-    socket.on("livestream:reaction", (data = {}, callback) => {
+    const handleLiveReaction = (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
         if (!streamId) {
@@ -204,23 +268,35 @@ const setupLiveStreamSockets = (io) => {
           timestamp: nowIso(),
         };
 
-        io.to(roomFor(streamId)).emit("livestream:reaction", payload);
+        emitLiveRoomEvent(io, streamId, "livestream:reaction", payload);
         callback?.({ ok: true });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send reaction" });
       }
-    });
+    };
 
-    socket.on("livestream:gift", async (data = {}, callback) => {
+    const handleLiveGift = async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const clientId = String(data.clientId || data.id || "").slice(0, 120);
         if (!streamId || !data.giftId) {
           callback?.({ ok: false, error: "Gift payload required" });
           return;
         }
 
+        if (markDedupeId(socket, "gift", clientId)) {
+          callback?.({ ok: true, duplicate: true });
+          return;
+        }
+
+        if (isRateLimited(socket, "gift", GIFT_RATE_LIMIT_MS)) {
+          callback?.({ ok: false, error: "Please wait before sending another gift" });
+          return;
+        }
+
         const gift = VALID_GIFTS.has(data.giftId) ? data.giftId : "rose";
         const result = await livestreamService.sendLiveGift(streamId, socket.user?._id, gift, {
+          clientId,
           senderSocketId: socket.id,
         });
         const senderWallet = formatWalletResponse(result.senderWallet);
@@ -236,6 +312,9 @@ const setupLiveStreamSockets = (io) => {
           giftId: result.gift.id,
           giftName: result.gift.name,
           animation: result.gift.animation,
+          tier: result.gift.tier,
+          emoji: result.gift.emoji,
+          color: result.gift.color,
           value: result.gift.pointsCost,
           transactionId: result.sendTransaction?._id?.toString?.() || "",
           timestamp: nowIso(),
@@ -276,12 +355,73 @@ const setupLiveStreamSockets = (io) => {
           }).catch(() => null);
         }
 
-        io.to(roomFor(streamId)).emit("livestream:gift", payload);
+        emitLiveRoomEvent(io, streamId, "livestream:gift", payload);
         callback?.({ ok: true, gift: payload, wallet: senderWallet, transaction: sendTransaction });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send gift" });
       }
+    };
+
+    socket.on("livestream:comment", handleLiveComment);
+    socket.on("live:message", handleLiveComment);
+    socket.on("livestream:reaction", handleLiveReaction);
+    socket.on("live:reaction", handleLiveReaction);
+    socket.on("livestream:gift", handleLiveGift);
+    socket.on("live:gift", handleLiveGift);
+
+    const relayWebRtcPayload = (eventName, data = {}, callback) => {
+      const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+      const targetSocketId = String(data.targetSocketId || data.to || "").trim();
+
+      if (!streamId || !targetSocketId) {
+        callback?.({ ok: false, error: "Realtime video target required" });
+        return;
+      }
+
+      io.to(targetSocketId).emit(eventName, {
+        ...data,
+        streamId,
+        targetSocketId,
+        fromSocketId: socket.id,
+        timestamp: nowIso(),
+      });
+      callback?.({ ok: true });
+    };
+
+    socket.on("live:creator-ready", (data = {}, callback) => {
+      const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+      if (!streamId) {
+        callback?.({ ok: false, error: "Stream ID required" });
+        return;
+      }
+
+      socket.to(roomFor(streamId)).emit("live:creator-ready", {
+        streamId,
+        creatorSocketId: socket.id,
+        timestamp: nowIso(),
+      });
+      callback?.({ ok: true });
     });
+
+    socket.on("live:request-video", (data = {}, callback) => {
+      const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+      if (!streamId) {
+        callback?.({ ok: false, error: "Stream ID required" });
+        return;
+      }
+
+      socket.to(roomFor(streamId)).emit("live:viewer-ready", {
+        streamId,
+        viewerSocketId: socket.id,
+        viewer: viewerPayloadFor(socket, data.username),
+        timestamp: nowIso(),
+      });
+      callback?.({ ok: true });
+    });
+
+    socket.on("live:webrtc-offer", (data = {}, callback) => relayWebRtcPayload("live:webrtc-offer", data, callback));
+    socket.on("live:webrtc-answer", (data = {}, callback) => relayWebRtcPayload("live:webrtc-answer", data, callback));
+    socket.on("live:webrtc-ice", (data = {}, callback) => relayWebRtcPayload("live:webrtc-ice", data, callback));
 
     socket.on("livestream:update_viewers", async (data = {}, callback) => {
       try {

@@ -65,13 +65,19 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
     };
 
     socket.on("livestream:started", handleStarted);
+    socket.on("live:started", handleStarted);
     socket.on("livestream:ended_global", handleEnded);
+    socket.on("live:ended_global", handleEnded);
     socket.on("livestream:viewers_updated_global", handleViewers);
+    socket.on("live:viewers_updated_global", handleViewers);
 
     return () => {
       socket.off("livestream:started", handleStarted);
+      socket.off("live:started", handleStarted);
       socket.off("livestream:ended_global", handleEnded);
+      socket.off("live:ended_global", handleEnded);
       socket.off("livestream:viewers_updated_global", handleViewers);
+      socket.off("live:viewers_updated_global", handleViewers);
     };
   }, [applyViewerCount, getActiveLiveStreams, removeLiveStream, token, upsertLiveStream]);
 

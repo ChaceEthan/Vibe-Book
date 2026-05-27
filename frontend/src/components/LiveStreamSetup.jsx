@@ -210,7 +210,18 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
 
   useEffect(() => {
     startCamera();
-    return () => stopCamera();
+    return () => {
+      if (handoffStreamRef.current) {
+        cameraRequestRef.current += 1;
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
+        streamRef.current = null;
+        return;
+      }
+
+      stopCamera();
+    };
   }, [startCamera, stopCamera]);
 
   useEffect(() => {
