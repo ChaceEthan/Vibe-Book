@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
-import LiveAvatar from "./LiveAvatar.jsx";
+import SafeCoverImage from "./SafeCoverImage.jsx";
+
+const thumbnailFor = (stream = {}) => stream.thumbnail || stream.coverImage || stream.creator?.coverImage || stream.creator?.avatar || stream.creator?.profilePicture || "";
 
 const LiveDiscoveryRow = ({ onStreamClick }) => {
   const { token } = useAuth();
@@ -93,12 +95,9 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
   if (loading && activeLiveStreams.length === 0) {
     return (
-      <div className="flex gap-3 overflow-x-hidden px-4 py-3">
+      <div className="flex gap-3 overflow-x-hidden px-4 pb-3 pt-16">
         {[...Array(5)].map((_, index) => (
-          <div key={index} className="flex w-20 shrink-0 flex-col items-center gap-2">
-            <div className="h-16 w-16 animate-pulse rounded-full bg-white/10" />
-            <div className="h-2 w-12 animate-pulse rounded-full bg-white/10" />
-          </div>
+          <div key={index} className="h-40 w-28 shrink-0 animate-pulse rounded-lg bg-white/10" />
         ))}
       </div>
     );
@@ -110,7 +109,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
   return (
     <motion.section
-      className="relative py-3"
+      className="relative z-50 border-b border-white/10 bg-slate-950/96 pb-3 pt-16 shadow-[0_18px_36px_rgba(2,6,23,0.28)] backdrop-blur"
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
@@ -151,7 +150,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
       <div
         ref={containerRef}
-        className="flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="scroll-smooth flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onScroll={updateScrollState}
       >
         <AnimatePresence initial={false}>
@@ -160,36 +159,42 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
               key={stream.id}
               type="button"
               onClick={() => onStreamClick?.(stream)}
-              className="group w-20 shrink-0 text-left"
+              className="group relative h-40 w-28 shrink-0 overflow-hidden rounded-lg text-left shadow-xl outline-none ring-1 ring-white/10 transition focus-visible:ring-2 focus-visible:ring-white"
               initial={{ opacity: 0, scale: 0.92 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.92 }}
               whileTap={{ scale: 0.96 }}
             >
-              <div className="relative mx-auto h-[4.25rem] w-[4.25rem] rounded-full bg-gradient-to-tr from-red-500 via-blue-500 to-emerald-400 p-[3px] shadow-[0_0_28px_rgba(59,130,246,0.25)]">
-                <div className="h-full w-full rounded-full bg-slate-950 p-[2px]">
-                  <LiveAvatar
-                    user={stream.creator}
-                    src={stream.creator?.avatar}
-                    className="h-full w-full rounded-full object-cover"
-                    forceLive
-                  />
-                </div>
-                <span className="absolute -right-1 -top-1 inline-flex items-center gap-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[0.58rem] font-black text-white shadow-lg">
-                  <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-                  LIVE
+              <motion.span
+                className="pointer-events-none absolute inset-0 rounded-lg bg-gradient-to-tr from-red-500 via-blue-500 to-emerald-400 p-[2px]"
+                animate={{ opacity: [0.75, 1, 0.75] }}
+                transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              />
+              <span className="absolute inset-[2px] overflow-hidden rounded-[0.42rem] bg-slate-950">
+                <SafeCoverImage
+                  user={stream.creator}
+                  src={thumbnailFor(stream)}
+                  alt={stream.title || "Live preview"}
+                  className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                />
+                <span className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/5 to-black/82" />
+              </span>
+              <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-1 text-[0.58rem] font-black text-white shadow-lg">
+                <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+                LIVE
+              </span>
+              <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/68 px-2 py-1 text-[0.58rem] font-black text-white backdrop-blur">
+                <Users className="h-3 w-3" />
+                {stream.viewerCount || 0}
+              </span>
+              <span className="absolute inset-x-2 bottom-2 min-w-0">
+                <span className="block truncate text-xs font-black text-white">
+                  {stream.creator?.name || stream.creator?.username || "Live"}
                 </span>
-                <span className="absolute inset-x-1 -bottom-1 mx-auto flex max-w-[3.7rem] items-center justify-center gap-1 rounded-full bg-black/78 px-1.5 py-0.5 text-[0.62rem] font-black text-white backdrop-blur">
-                  <Users className="h-3 w-3" />
-                  {stream.viewerCount || 0}
+                <span className="mt-0.5 block truncate text-[0.66rem] font-semibold text-white/66">
+                  {stream.title || stream.category || "Live now"}
                 </span>
-              </div>
-              <p className="mt-2 truncate text-center text-xs font-black text-white">
-                {stream.creator?.name || stream.creator?.username || "Live"}
-              </p>
-              <p className="truncate text-center text-[0.68rem] font-semibold text-white/45">
-                {stream.title}
-              </p>
+              </span>
             </motion.button>
           ))}
         </AnimatePresence>

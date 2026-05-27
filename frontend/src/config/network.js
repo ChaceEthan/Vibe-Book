@@ -27,11 +27,15 @@ export const normalizeUrlRoot = (value = "", fallback = DEFAULT_BACKEND_URL) => 
 const rawApiRoot = import.meta.env.VITE_API_URL || DEFAULT_BACKEND_URL;
 const rawSocketRoot = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || DEFAULT_BACKEND_URL;
 const rawFrontendRoot = import.meta.env.VITE_APP_ROOT_URL || import.meta.env.VITE_FRONTEND_URL || DEFAULT_FRONTEND_URL;
+const normalizeSocketPath = (value = "/socket.io") => {
+  const path = String(value || "/socket.io").trim() || "/socket.io";
+  return path.startsWith("/") ? path : `/${path}`;
+};
 
 export const API_ROOT = normalizeUrlRoot(rawApiRoot, DEFAULT_BACKEND_URL).replace(/(?:\/api)+\/?$/i, "");
 export const API_BASE_URL = `${API_ROOT}/api`;
 export const SOCKET_URL = normalizeUrlRoot(rawSocketRoot, API_ROOT).replace(/(?:\/api)+\/?$/i, "");
-export const SOCKET_PATH = String(import.meta.env.VITE_SOCKET_PATH || import.meta.env.SOCKET_PATH || "/socket.io").trim() || "/socket.io";
+export const SOCKET_PATH = normalizeSocketPath(import.meta.env.VITE_SOCKET_PATH || "/socket.io");
 export const FRONTEND_BASE_URL = normalizeUrlRoot(rawFrontendRoot, DEFAULT_FRONTEND_URL);
 export const LIVE_STREAM_URL = normalizeUrlRoot(import.meta.env.VITE_LIVE_STREAM_URL || SOCKET_URL, SOCKET_URL);
 
@@ -45,5 +49,9 @@ if (import.meta.env.DEV && typeof console !== "undefined") {
 
   if (didUseSocketFallback) {
     console.warn("[env] VITE_SOCKET_URL is missing; using API host for sockets.", { SOCKET_URL, SOCKET_PATH });
+  }
+
+  if (SOCKET_PATH !== "/socket.io") {
+    console.warn("[env] VITE_SOCKET_PATH should match the backend Socket.IO path.", { SOCKET_PATH, expected: "/socket.io" });
   }
 }

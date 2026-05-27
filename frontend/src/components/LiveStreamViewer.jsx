@@ -1,11 +1,8 @@
 // @ts-nocheck
 import {
-  Ban,
   BookOpen,
   Check,
-  Copy,
   Eye,
-  Flag,
   Gift,
   Heart,
   Loader2,
@@ -17,6 +14,7 @@ import {
   Share2,
   Smile,
   Sparkles,
+  SwitchCamera,
   UserCheck,
   UserPlus,
   Users,
@@ -31,7 +29,7 @@ import { useNavigate } from "react-router-dom";
 import SafeAvatar from "./SafeAvatar.jsx";
 import { connectSocket } from "../services/socket";
 import { userApi } from "../services/api";
-import { getLivePreviewStream, releaseLivePreviewStream } from "../services/livePreviewStream";
+import { getLivePreviewStream, releaseLivePreviewStream, setLivePreviewStream } from "../services/livePreviewStream";
 import { useLiveStreamStore } from "../store/livestreamStore";
 import { useWalletStore } from "../store/walletStore";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -106,7 +104,6 @@ const premiumGiftOptions = [
 ];
 
 const liveGiftOptions = premiumGiftOptions;
-const quickGiftIds = ["heart", "rose", "flower", "like", "fire"];
 const userIdFor = (user) => user?._id || user?.id || "";
 const giftById = liveGiftOptions.reduce((map, gift) => ({ ...map, [gift.id]: gift }), {});
 const giftGroups = [
@@ -155,9 +152,15 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const giftTimersRef = useRef(new Set());
   const joinTimersRef = useRef(new Set());
   const peerConnectionsRef = useRef(new Map());
+  const pendingIceCandidatesRef = useRef(new Map());
+  const videoRetryTimerRef = useRef(null);
+  const hostEndCleanupTimerRef = useRef(null);
+  const hostMediaCleanupTimerRef = useRef(null);
   const previewStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const isCreatorRef = useRef(false);
+  const endedRef = useRef(false);
+  const creatorCameraRequestRef = useRef(0);
   const seenCommentIdsRef = useRef(new Set());
   const seenGiftIdsRef = useRef(new Set());
   const lastCommentAtRef = useRef(0);
@@ -189,8 +192,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const [followBusy, setFollowBusy] = useState(false);
   const [isFollowingCreator, setIsFollowingCreator] = useState(false);
   const [showCreatorCard, setShowCreatorCard] = useState(false);
-  const [reportedLive, setReportedLive] = useState(false);
   const [localLoading, setLocalLoading] = useState(true);
+  const [switchingCamera, setSwitchingCamera] = useState(false);
+  const [liveFacingMode, setLiveFacingMode] = useState("user");
+  const [cameraFlipNonce, setCameraFlipNonce] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const [ended, setEnded] = useState(false);
   const [previewStream, setPreviewStream] = useState(null);
@@ -258,7 +263,6 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     return Object.values(giftLeaderboard)
       .sort((left, right) => Number(right.total || 0) - Number(left.total || 0))[0];
   }, [giftLeaderboard]);
-  const quickGifts = useMemo(() => quickGiftIds.map((giftId) => giftById[giftId]).filter(Boolean), []);
   const selectedGift = giftById[selectedGiftId] || liveGiftOptions[0];
   const currentUserId = userIdFor(currentUser);
   const creatorId = String(creator.id || creator._id || liveStream?.creatorId || "");
@@ -298,6 +302,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   useEffect(() => {
     previewStreamRef.current = previewStream;
+
+    const facingMode = previewStream?.getVideoTracks?.()[0]?.getSettings?.().facingMode;
+    if (facingMode === "user" || facingMode === "environment") {
+      setLiveFacingMode(facingMode);
+    }
   }, [previewStream]);
 
   useEffect(() => {
@@ -307,6 +316,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   useEffect(() => {
     isCreatorRef.current = isCreator;
   }, [isCreator]);
+
+  useEffect(() => {
+    endedRef.current = ended;
+  }, [ended]);
 
   useEffect(() => {
     if (!isCreator && !walletLoaded) {
@@ -356,13 +369,53 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     const mediaStream = getLivePreviewStream(streamId);
     setPreviewStream(mediaStream);
+  }, [streamId]);
+
+  useEffect(() => {
+    if (!streamId || !isCreator || previewStream || localLoading || ended) {
+      return undefined;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaStream === "undefined") {
+      setStatusMessage("Camera is not available in this browser");
+      return undefined;
+    }
+
+    let canceled = false;
+    const requestId = creatorCameraRequestRef.current + 1;
+    creatorCameraRequestRef.current = requestId;
+    setStatusMessage("Restoring camera...");
+
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: liveFacingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: true,
+    }).then((stream) => {
+      if (canceled || creatorCameraRequestRef.current !== requestId) {
+        stream.getTracks?.().forEach((track) => track.stop());
+        return;
+      }
+
+      stream.getAudioTracks?.().forEach((track) => {
+        track.enabled = !muted;
+      });
+      previewStreamRef.current = stream;
+      setPreviewStream(stream);
+      setLivePreviewStream(streamId, stream);
+      setStatusMessage("");
+      socketRef.current?.emit("live:creator-ready", { streamId });
+    }).catch((error) => {
+      if (canceled || creatorCameraRequestRef.current !== requestId) return;
+      setStatusMessage(error?.name === "NotAllowedError" ? "Camera permission was denied" : "Camera could not restart");
+    });
 
     return () => {
-      if (mediaStream) {
-        releaseLivePreviewStream(streamId);
-      }
+      canceled = true;
     };
-  }, [streamId]);
+  }, [ended, isCreator, liveFacingMode, localLoading, muted, previewStream, streamId]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -407,13 +460,25 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   }, [isCreator, muted, previewStream]);
 
   useEffect(() => {
+    if (!localLoading && !isCreator) {
+      setMuted(true);
+    }
+  }, [isCreator, localLoading, streamId]);
+
+  useEffect(() => {
     if (!streamId) return undefined;
+
+    window.clearTimeout(hostEndCleanupTimerRef.current);
+    hostEndCleanupTimerRef.current = null;
+    window.clearTimeout(hostMediaCleanupTimerRef.current);
+    hostMediaCleanupTimerRef.current = null;
 
     let canceled = false;
     const viewerName = currentUser?.username || currentUser?.name || "Guest";
     const activeSocket = connectSocket(token, { liveStreamId: streamId });
     socketRef.current = activeSocket;
     setLocalLoading(true);
+    endedRef.current = false;
     setEnded(false);
     setStatusMessage("");
     setComments([]);
@@ -640,6 +705,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     function handleEnded(data) {
       if (data.streamId && data.streamId !== streamId && data.stream?.id !== streamId) return;
+      window.clearTimeout(hostEndCleanupTimerRef.current);
+      hostEndCleanupTimerRef.current = null;
+      endedRef.current = true;
       setEnded(true);
       setStatusMessage("Live has ended");
       removeLiveStream(streamId);
@@ -778,6 +846,28 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       giftTimersRef.current.clear();
       joinTimersRef.current.forEach((timer) => window.clearTimeout(timer));
       joinTimersRef.current.clear();
+      window.clearInterval(videoRetryTimerRef.current);
+      videoRetryTimerRef.current = null;
+      if (isCreatorRef.current && streamId && !endedRef.current) {
+        const streamToEnd = streamId;
+        window.clearTimeout(hostEndCleanupTimerRef.current);
+        hostEndCleanupTimerRef.current = window.setTimeout(() => {
+          if (!mountedRef.current && !endedRef.current) {
+            endedRef.current = true;
+            endLiveStream(streamToEnd).catch(() => null);
+          }
+        }, 1200);
+      }
+      if (isCreatorRef.current && previewStreamRef.current) {
+        const streamToRelease = streamId;
+        window.clearTimeout(hostMediaCleanupTimerRef.current);
+        hostMediaCleanupTimerRef.current = window.setTimeout(() => {
+          if (!mountedRef.current) {
+            releaseLivePreviewStream(streamToRelease);
+            previewStreamRef.current = null;
+          }
+        }, 1200);
+      }
       clearCurrentStream();
     };
   }, [
@@ -786,6 +876,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     currentUser?.id,
     currentUser?.name,
     currentUser?.username,
+    endLiveStream,
     getStreamDetails,
     joinLiveStream,
     leaveLiveStream,
@@ -812,6 +903,30 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         connection.close();
         peerConnectionsRef.current.delete(peerId);
       }
+      pendingIceCandidatesRef.current.delete(peerId);
+    };
+
+    const queueIceCandidate = (peerSocketId, candidate) => {
+      const peerId = String(peerSocketId || "");
+      if (!peerId || !candidate) return;
+
+      const pending = pendingIceCandidatesRef.current.get(peerId) || [];
+      pending.push(candidate);
+      pendingIceCandidatesRef.current.set(peerId, pending.slice(-24));
+    };
+
+    const flushPendingIceCandidates = async (peerSocketId, connection) => {
+      const peerId = String(peerSocketId || "");
+      const pending = pendingIceCandidatesRef.current.get(peerId) || [];
+      if (!peerId || !connection || !pending.length || !connection.remoteDescription) return;
+
+      pendingIceCandidatesRef.current.delete(peerId);
+      await Promise.allSettled(pending.map((candidate) => connection.addIceCandidate(candidate)));
+    };
+
+    const clearVideoRetry = () => {
+      window.clearInterval(videoRetryTimerRef.current);
+      videoRetryTimerRef.current = null;
     };
 
     const getPeerConnection = (peerSocketId) => {
@@ -838,10 +953,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         remoteStreamRef.current = stream;
         setRemoteStream(stream);
         setStatusMessage("");
+        clearVideoRetry();
       };
       connection.onconnectionstatechange = () => {
-        if (["failed", "disconnected", "closed"].includes(connection.connectionState)) {
+        if (["failed", "closed"].includes(connection.connectionState)) {
           closePeerConnection(peerId);
+        } else if (connection.connectionState === "disconnected" && !isCreatorRef.current) {
+          window.setTimeout(requestCreatorVideo, 1200);
         }
       };
 
@@ -865,6 +983,25 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         streamId,
         username: currentUser?.username || currentUser?.name || "Guest",
       });
+    };
+
+    const startVideoRetry = () => {
+      if (isCreatorRef.current || videoRetryTimerRef.current) return;
+
+      let attempts = 0;
+      videoRetryTimerRef.current = window.setInterval(() => {
+        if (!mountedRef.current || isCreatorRef.current || activeVideoTrackFor(remoteStreamRef.current)) {
+          clearVideoRetry();
+          return;
+        }
+
+        attempts += 1;
+        requestCreatorVideo();
+        if (attempts >= 8) {
+          clearVideoRetry();
+          setStatusMessage("Waiting for creator video...");
+        }
+      }, 5000);
     };
 
     const announceCreatorReady = () => {
@@ -904,6 +1041,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         const connection = getPeerConnection(creatorSocketId);
         if (!connection) return;
         await connection.setRemoteDescription(data.offer);
+        await flushPendingIceCandidates(creatorSocketId, connection);
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
         activeSocket.emit("live:webrtc-answer", {
@@ -924,6 +1062,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
       try {
         await connection.setRemoteDescription(data.answer);
+        await flushPendingIceCandidates(viewerSocketId, connection);
       } catch {
         closePeerConnection(viewerSocketId);
       }
@@ -936,7 +1075,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
       try {
         const connection = getPeerConnection(peerSocketId);
-        await connection?.addIceCandidate(data.candidate);
+        if (!connection) return;
+        if (!connection.remoteDescription) {
+          queueIceCandidate(peerSocketId, data.candidate);
+          return;
+        }
+        await connection.addIceCandidate(data.candidate);
       } catch {
         // ICE can arrive during renegotiation; the next candidate or offer recovers.
       }
@@ -947,6 +1091,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       closePeerConnection(data.socketId || data.fromSocketId);
       if (!isCreatorRef.current) {
         setRemoteStream(null);
+        startVideoRetry();
       }
     };
 
@@ -955,6 +1100,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         announceCreatorReady();
       } else {
         requestCreatorVideo();
+        startVideoRetry();
       }
     };
 
@@ -970,6 +1116,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       announceCreatorReady();
     } else {
       requestCreatorVideo();
+      startVideoRetry();
     }
 
     return () => {
@@ -982,6 +1129,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.off("connect", handleConnect);
       peerConnectionsRef.current.forEach((connection) => connection.close());
       peerConnectionsRef.current.clear();
+      pendingIceCandidatesRef.current.clear();
+      clearVideoRetry();
       if (!isCreatorRef.current) {
         remoteStreamRef.current?.getTracks?.().forEach((track) => track.stop());
         remoteStreamRef.current = null;
@@ -1032,8 +1181,19 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       }, 50);
     }
 
+    let acknowledged = false;
     const timeout = window.setTimeout(() => {
+      if (acknowledged) return;
+      acknowledged = true;
       setSending(false);
+      seenCommentIdsRef.current.delete(clientId);
+      setComments((prev) => prev.map((c) => (
+        c.id === clientId
+          ? { ...c, optimistic: false, failed: true, error: "Comment timed out" }
+          : c
+      )));
+      setStatusMessage("Comment timed out. Tap retry.");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
     }, 8000);
 
     activeSocket.emit(
@@ -1046,6 +1206,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         username: currentUser?.username || currentUser?.name || "Guest",
       },
       (ack = {}) => {
+        if (acknowledged) return;
+        acknowledged = true;
         window.clearTimeout(timeout);
         setSending(false);
         
@@ -1338,6 +1500,70 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     setActiveSheet("");
   };
 
+  const handleSwitchLiveCamera = async () => {
+    if (!isCreator || switchingCamera || ended || !previewStreamRef.current || !navigator.mediaDevices?.getUserMedia || typeof MediaStream === "undefined") {
+      return;
+    }
+
+    const currentLocalStream = previewStreamRef.current;
+    const nextFacingMode = liveFacingMode === "user" ? "environment" : "user";
+
+    setSwitchingCamera(true);
+    setStatusMessage("Switching camera...");
+
+    try {
+      const cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: nextFacingMode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+      const [nextVideoTrack] = cameraOnlyStream.getVideoTracks();
+
+      if (!nextVideoTrack) {
+        cameraOnlyStream.getTracks().forEach((track) => track.stop());
+        throw new Error("Camera track unavailable");
+      }
+
+      const nextLocalStream = currentLocalStream || new MediaStream();
+      const previousVideoTracks = nextLocalStream.getVideoTracks();
+      previousVideoTracks.forEach((track) => nextLocalStream.removeTrack(track));
+      nextLocalStream.addTrack(nextVideoTrack);
+      nextLocalStream.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
+      });
+
+      const replacements = [];
+      peerConnectionsRef.current.forEach((connection) => {
+        if (!connection || connection.connectionState === "closed") return;
+
+        const videoSender = connection.getSenders().find((sender) => sender.track?.kind === "video");
+        if (videoSender) {
+          replacements.push(videoSender.replaceTrack(nextVideoTrack));
+        } else {
+          connection.addTrack(nextVideoTrack, nextLocalStream);
+        }
+      });
+      await Promise.allSettled(replacements);
+
+      previousVideoTracks.forEach((track) => track.stop());
+      previewStreamRef.current = nextLocalStream;
+      setPreviewStream(nextLocalStream);
+      setLivePreviewStream(streamId, nextLocalStream);
+      setLiveFacingMode(nextFacingMode);
+      setCameraFlipNonce((current) => current + 1);
+      setStatusMessage(nextFacingMode === "user" ? "Front camera active" : "Back camera active");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1600);
+    } catch (error) {
+      setStatusMessage(error?.name === "NotAllowedError" ? "Camera permission was denied" : "Could not switch camera");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
+    } finally {
+      setSwitchingCamera(false);
+    }
+  };
+
   const handleShare = async () => {
     const shareUrl = `${window.location.origin}/live/${streamId}`;
     try {
@@ -1351,23 +1577,6 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     } catch {
       // Share cancellation is not an error for the viewer.
     }
-  };
-
-  const handleCopyLiveLink = async () => {
-    const shareUrl = `${window.location.origin}/live/${streamId}`;
-    try {
-      await navigator.clipboard?.writeText(shareUrl);
-      setStatusMessage("Live link copied");
-    } catch {
-      setStatusMessage(shareUrl);
-    }
-    window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
-  };
-
-  const openGiftTray = (giftId = selectedGiftId) => {
-    if (giftId) setSelectedGiftId(giftId);
-    setShowGiftMenu(true);
-    setActiveSheet("gifts");
   };
 
   const toggleGiftTray = () => {
@@ -1396,13 +1605,6 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (ack.ok) applyRoomState(ack);
       else if (ack.error) setStatusMessage(ack.error);
     });
-  };
-
-  const focusComments = () => {
-    setActiveSheet("");
-    setShowGiftMenu(false);
-    commentInputRef.current?.focus();
-    chatListRef.current?.scrollTo({ top: chatListRef.current.scrollHeight, behavior: "smooth" });
   };
 
   const handleFollowCreator = async () => {
@@ -1494,26 +1696,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     });
   };
 
-  const handleReportLive = (type = "report") => {
-    const activeSocket = socketRef.current;
-    if (!activeSocket || !streamId || reportedLive) return;
-    setReportedLive(true);
-    activeSocket.emit("live:report", { streamId, type, reason: type }, (ack = {}) => {
-      setStatusMessage(ack.ok ? "Report sent" : ack.error || "Report failed");
-      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
-    });
-  };
-
-  const handleBlockLive = () => {
-    handleReportLive("block");
-    setStatusMessage("Live hidden");
-    window.setTimeout(() => mountedRef.current && onCloseRef.current?.(), 700);
-  };
-
   const handleEndLive = async () => {
     if (!streamId || !isCreator) return;
+    window.clearTimeout(hostEndCleanupTimerRef.current);
+    hostEndCleanupTimerRef.current = null;
     const result = await endLiveStream(streamId);
     if (result.ok) {
+      endedRef.current = true;
       setEnded(true);
       onClose?.();
     } else {
@@ -1562,7 +1751,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         {previewStream && (
           <video
             ref={previewVideoRef}
-            className="absolute inset-0 h-full w-full object-cover"
+            className={`absolute inset-0 h-full w-full object-cover transition duration-300 ${liveFacingMode === "user" ? "-scale-x-100" : ""} ${switchingCamera ? "opacity-80 blur-[1px]" : ""}`}
             autoPlay
             muted
             playsInline
@@ -1571,6 +1760,18 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             onTouchEnd={handleDoubleTap}
           />
         )}
+        <AnimatePresence>
+          {switchingCamera && (
+            <motion.div
+              key={`camera-flip-${cameraFlipNonce}`}
+              className="pointer-events-none absolute inset-0 bg-white/10"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0, 1, 0] }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.28 }}
+            />
+          )}
+        </AnimatePresence>
         {remoteStream && !previewStream && (
           <video
             ref={remoteVideoRef}
@@ -1620,9 +1821,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               End
             </button>
           )}
-          <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
-            <X className="h-5 w-5" />
-          </button>
+          {!isCreator && (
+            <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
+              <X className="h-5 w-5" />
+            </button>
+          )}
         </div>
       </header>
 
@@ -1646,7 +1849,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                 {isFollowingCreator ? "Following" : "Follow"}
               </button>
               <button type="button" className="rounded-full bg-white/10 px-3 py-2 text-[0.68rem] font-black text-white" onClick={() => creatorId && navigate(`/profile/${creatorId}`)}>
-                Profile
+                View profile
               </button>
               <button type="button" className="rounded-full bg-white/10 px-3 py-2 text-[0.68rem] font-black text-white" onClick={() => creatorId && navigate(`/chat/${creatorId}`)} disabled={isCreator}>
                 Message
@@ -1661,9 +1864,14 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           <Heart className="h-5 w-5 fill-current text-red-400" />
           <span className="mt-0.5 text-[0.58rem] font-black leading-none">{compactNumber(heartCombo || liveMetrics.giftsReceived || 0)}</span>
         </button>
-        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={focusComments} aria-label="Open live comments">
-          <MessageCircle className="h-5 w-5" />
+        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={() => setMuted((current) => !current)} aria-label={muted ? (isCreator ? "Unmute microphone" : "Unmute live audio") : (isCreator ? "Mute microphone" : "Mute live audio")}>
+          {isCreator ? (muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />) : (muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />)}
         </button>
+        {isCreator && (
+          <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-55" onClick={handleSwitchLiveCamera} disabled={switchingCamera || ended || !previewStream} aria-label="Switch camera">
+            {switchingCamera ? <Loader2 className="h-5 w-5 animate-spin" /> : <SwitchCamera className="h-5 w-5" />}
+          </button>
+        )}
         <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={handleShare} aria-label="Share livestream">
           <Share2 className="h-5 w-5" />
         </button>
@@ -1942,30 +2150,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             </div>
           )}
 
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-white/10 bg-black/42 p-2 backdrop-blur">
-            <button type="button" className="shrink-0" onClick={() => creatorId && navigate(`/profile/${creatorId}`)} aria-label="Open host profile">
-              <SafeAvatar user={creator} src={creator.avatar} className="h-9 w-9 rounded-full border border-white/30 object-cover" />
-            </button>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-black">{creator.name || creator.username || "Creator"}</p>
-              <p className="truncate text-[0.68rem] font-bold text-white/58">{liveTitle}</p>
-            </div>
-            <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white" onClick={() => setMuted((current) => !current)} aria-label={muted ? "Unmute live audio" : "Mute live audio"}>
-              {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-            </button>
-            <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white" onClick={handleCopyLiveLink} aria-label="Copy live link">
-              <Copy className="h-4 w-4" />
-            </button>
-            {!isCreator && (
-              <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white disabled:opacity-50" onClick={() => handleReportLive("report")} disabled={reportedLive} aria-label="Report live">
-                <Flag className="h-4 w-4" />
-              </button>
-            )}
-            {!isCreator && (
-              <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white" onClick={handleBlockLive} aria-label="Block live">
-                <Ban className="h-4 w-4" />
-              </button>
-            )}
+          <div className="mb-2 max-w-md rounded-lg border border-white/10 bg-black/38 px-3 py-2 backdrop-blur">
+            <p className="truncate text-sm font-black">{liveTitle}</p>
+            {!!liveStream.description && <p className="mt-0.5 line-clamp-2 text-[0.68rem] font-semibold leading-4 text-white/58">{liveStream.description}</p>}
           </div>
 
           {isCreator && (
@@ -1974,17 +2161,6 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               <span><strong className="block text-sm">{compactNumber(liveMetrics.nexEarned)}</strong> NEX</span>
               <span><strong className="block truncate text-sm">{topSupporter?.username || "-"}</strong> Top</span>
               <span><strong className="block text-sm">{compactNumber(liveMetrics.peakViewers)}</strong> Peak</span>
-            </div>
-          )}
-
-          {quickGifts.length > 0 && !isCreator && (
-            <div className="mb-2 flex max-w-full gap-1.5 overflow-x-auto pr-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {quickGifts.map((gift) => (
-                <button key={gift.id} type="button" className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-black/42 px-2.5 text-[0.68rem] font-black text-white backdrop-blur disabled:opacity-50" onClick={() => openGiftTray(gift.id)} disabled={!giftsEnabled || ended}>
-                  <span className="text-base leading-none">{gift.emoji}</span>
-                  <span>{gift.value}</span>
-                </button>
-              ))}
             </div>
           )}
 

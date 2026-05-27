@@ -32,7 +32,8 @@ const PRIVACY_LEVELS = [
 const QUALITY_OPTIONS = ["360p", "480p", "720p", "1080p"];
 const BACKGROUND_THEMES = ["classic", "neon", "studio", "sunset"];
 const EFFECT_PRESETS = ["none", "soft-glow", "cinematic", "creator"];
-const SETUP_STEPS = ["Title", "Details", "Settings", "Preview"];
+const SETUP_STEPS = ["Title", "Description", "Settings", "Theme", "Preview"];
+const PREVIEW_STEP_INDEX = SETUP_STEPS.length - 1;
 
 const normalizeTags = (value = "") =>
   Array.from(
@@ -209,7 +210,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   }, [frontCamera, loadDevices, selectedAudioDeviceId, selectedVideoDeviceId, stopCurrentStream]);
 
   useEffect(() => {
-    if (setupStep !== 3) {
+    if (setupStep !== PREVIEW_STEP_INDEX) {
       setCameraLoading(false);
       return undefined;
     }
@@ -315,8 +316,8 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const handleStart = async () => {
     if (startingRef.current) return;
 
-    if (setupStep < 3) {
-      setSetupStep(3);
+    if (setupStep < PREVIEW_STEP_INDEX) {
+      setSetupStep(PREVIEW_STEP_INDEX);
       return;
     }
 
@@ -389,7 +390,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
     }
 
     setError("");
-    setSetupStep((current) => Math.min(3, current + 1));
+    setSetupStep((current) => Math.min(PREVIEW_STEP_INDEX, current + 1));
   };
 
   const goPreviousStep = () => {
@@ -448,7 +449,8 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
       );
     }
 
-    return (
+    if (setupStep === 2) {
+      return (
       <div className="space-y-5">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-emerald-200">Settings</p>
@@ -503,25 +505,6 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
           </label>
         </div>
 
-        <div>
-          <span className="text-xs font-black uppercase tracking-wide text-white/65">Live background</span>
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {BACKGROUND_THEMES.map((theme) => (
-              <button
-                key={theme}
-                type="button"
-                className={`rounded-xl px-3 py-3 text-xs font-black capitalize transition ${
-                  form.backgroundTheme === theme ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
-                }`}
-                onClick={() => updateForm({ backgroundTheme: theme })}
-                disabled={isBusy}
-              >
-                {theme}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           {[
             ["commentsEnabled", "Comments"],
@@ -542,6 +525,65 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
             </button>
           ))}
         </div>
+      </div>
+      );
+    }
+
+    return (
+      <div className="space-y-5">
+        <div>
+          <p className="text-xs font-black uppercase tracking-wide text-fuchsia-200">Theme</p>
+          <h1 className="mt-2 text-4xl font-black leading-tight text-white sm:text-5xl">Choose the look</h1>
+        </div>
+
+        <div>
+          <span className="text-xs font-black uppercase tracking-wide text-white/65">Live background</span>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {BACKGROUND_THEMES.map((theme) => (
+              <button
+                key={theme}
+                type="button"
+                className={`rounded-xl px-3 py-3 text-xs font-black capitalize transition ${
+                  form.backgroundTheme === theme ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
+                }`}
+                onClick={() => updateForm({ backgroundTheme: theme })}
+                disabled={isBusy}
+              >
+                {theme}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <span className="text-xs font-black uppercase tracking-wide text-white/65">Effects</span>
+          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {EFFECT_PRESETS.map((effect) => (
+              <button
+                key={effect}
+                type="button"
+                className={`rounded-xl px-3 py-3 text-xs font-black capitalize transition ${
+                  form.effectsPreset === effect ? "bg-blue-500 text-white shadow-lg shadow-blue-500/20" : "bg-white/10 text-white/70 hover:bg-white/15 hover:text-white"
+                }`}
+                onClick={() => updateForm({ effectsPreset: effect })}
+                disabled={isBusy}
+              >
+                {effect.replace("-", " ")}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="block space-y-2">
+          <span className="text-xs font-black uppercase tracking-wide text-white/65">Cover image URL</span>
+          <input
+            className="w-full rounded-2xl border border-white/10 bg-white/10 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-white/35 focus:border-fuchsia-300"
+            value={form.coverImage}
+            onChange={(event) => updateForm({ coverImage: event.target.value })}
+            placeholder="https://..."
+            disabled={isBusy}
+          />
+        </label>
       </div>
     );
   };
@@ -580,7 +622,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
         </header>
 
         <AnimatePresence initial={false}>
-          {setupStep < 3 && (
+          {setupStep < PREVIEW_STEP_INDEX && (
             <motion.div
               className="absolute inset-x-0 bottom-0 top-[4.25rem] z-40 overflow-y-auto bg-slate-950/98 px-4 py-5 backdrop-blur-xl sm:px-6"
               initial={{ opacity: 0, y: 18 }}
@@ -596,7 +638,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
                       type="button"
                       className={`h-2 flex-1 rounded-full transition ${index <= setupStep ? "bg-red-500" : "bg-white/12"}`}
                       onClick={() => {
-                        if (index < setupStep || (index > setupStep && form.title.trim())) {
+                        if (index <= setupStep) {
                           setSetupStep(index);
                         }
                       }}
@@ -639,7 +681,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
                     onClick={goNextStep}
                     disabled={isBusy}
                   >
-                    {setupStep === 2 ? "Open Camera Preview" : "Next"}
+                    {setupStep === PREVIEW_STEP_INDEX - 1 ? "Open Camera Preview" : "Next"}
                   </button>
                 </div>
               </div>
@@ -840,7 +882,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
               )}
             </AnimatePresence>
 
-            {error && setupStep === 3 && (
+            {error && setupStep === PREVIEW_STEP_INDEX && (
               <div className="absolute left-4 right-4 top-28 z-20 flex items-start gap-2 rounded-2xl border border-red-400/30 bg-red-500/15 p-3 text-sm font-bold text-red-100 backdrop-blur sm:left-6 sm:right-auto sm:max-w-md">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>

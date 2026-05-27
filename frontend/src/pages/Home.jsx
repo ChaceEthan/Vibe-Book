@@ -1360,7 +1360,7 @@ const Home = () => {
       >
         {visibleFeed.length ? (
           <>
-            <div className="sticky top-0 z-10 bg-slate-950 border-b border-white/10">
+            <div className="sticky top-0 z-40 bg-slate-950">
               <LiveDiscoveryRow onStreamClick={(stream) => stream?.id && navigate(`/live/${stream.id}`)} />
             </div>
             {visibleFeed.map((item, index) => (

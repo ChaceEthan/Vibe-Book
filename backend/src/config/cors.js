@@ -16,10 +16,13 @@ const normalizeOrigin = (value = "") => {
   }
 };
 
-const configuredOrigins = [
+const requiredOrigins = [
   "http://localhost:5173",
-  "http://localhost:3000",
   "https://vibe-book-kappa.vercel.app",
+];
+
+const configuredOrigins = [
+  ...requiredOrigins,
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
   process.env.FRONTEND_ORIGIN,
@@ -50,21 +53,8 @@ const logRejectedOrigin = (origin, context = "request") => {
   console.warn(`[cors] rejected ${context} origin: ${normalizedOrigin}`);
 };
 
-const corsOriginDelegate = (origin, callback) => {
-  if (!origin) {
-    return callback(null, true);
-  }
-
-  if (isOriginAllowed(origin)) {
-    return callback(null, normalizeOrigin(origin));
-  }
-
-  logRejectedOrigin(origin);
-  return callback(new Error("Not allowed by CORS"));
-};
-
 const corsOptions = {
-  origin: corsOriginDelegate,
+  origin: allowedOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma", "Expires", "X-Requested-With", "Accept", "Origin"],

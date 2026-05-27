@@ -74,7 +74,7 @@ const creatorSelect = "username name avatar profileImage profilePicture images w
 
 const giftForId = (giftId = "") => {
   const key = String(giftId || "").trim().toLowerCase();
-  return LIVE_GIFT_CATALOG[key] || LIVE_GIFT_CATALOG.rose;
+  return LIVE_GIFT_CATALOG[key] || null;
 };
 
 const reconcileViewerCount = async (streamId) => {
@@ -290,6 +290,12 @@ const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
   const senderName = String(metadata.senderName || "Viewer").trim().slice(0, 80) || "Viewer";
   const senderAvatar = String(metadata.senderAvatar || "").trim().slice(0, 500);
 
+  if (!gift) {
+    const error = new Error("Gift is not available");
+    error.code = "INVALID_LIVE_GIFT";
+    throw error;
+  }
+
   const stream = await LiveStream.findById(safeStreamId).populate("creatorId", creatorSelect);
   if (!stream || stream.status === "ended" || stream.isLive === false) {
     const error = new Error("Live stream is not available");
@@ -307,6 +313,12 @@ const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
   if (!creatorId) {
     const error = new Error("Stream creator was not found");
     error.code = "CREATOR_NOT_FOUND";
+    throw error;
+  }
+
+  if (creatorId.toString() === safeSenderId) {
+    const error = new Error("Hosts cannot gift their own live");
+    error.code = "LIVE_SELF_GIFT";
     throw error;
   }
 

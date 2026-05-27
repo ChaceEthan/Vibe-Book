@@ -351,7 +351,7 @@ const initSocket = (server, corsOptions = {}) => {
 
   ioInstance = new Server(server, {
     cors: socketCorsConfig,
-    path: process.env.SOCKET_PATH || "/socket.io",
+    path: "/socket.io",
     connectionStateRecovery: {
       maxDisconnectionDuration: 2 * 60 * 1000,
       skipMiddlewares: false,

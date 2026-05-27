@@ -122,6 +122,21 @@ const emitLiveRoomState = (io, streamId) => {
   return snapshot;
 };
 
+const ensureSocketInLiveRoom = (socket, streamId) => {
+  const id = idOf(streamId);
+  if (!id) return;
+
+  const room = roomFor(id);
+  if (!socket.rooms.has(room)) {
+    socket.join(room);
+  }
+
+  socket.data.livestream = {
+    ...(socket.data.livestream || {}),
+    streamId: id,
+  };
+};
+
 const upsertLiveRoomMember = (streamId, socket, options = {}) => {
   const state = stateFor(streamId);
   const existing = state.viewers.get(socket.id) || {};
@@ -191,6 +206,7 @@ const emitViewerCount = async (io, streamId) => {
 
   emitLiveRoomEvent(io, streamId, "livestream:viewers_updated", payload);
   io.emit("livestream:viewers_updated_global", payload);
+  io.emit("live:viewers_updated_global", payload);
 
   return { viewerCount, maxViewers };
 };
@@ -353,6 +369,8 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
 
+        ensureSocketInLiveRoom(socket, streamId);
+
         // Check for duplicate client ID
         if (markDedupeId(socket, "comment", clientId)) {
           callback?.({ ok: true, duplicate: true });
@@ -430,6 +448,8 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
 
+        ensureSocketInLiveRoom(socket, streamId);
+
         const reaction = VALID_REACTIONS.has(data.reaction) ? data.reaction : "heart";
         const payload = {
           id: `${socket.id}:${Date.now()}`,
@@ -455,6 +475,8 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
 
+        ensureSocketInLiveRoom(socket, streamId);
+
         if (markDedupeId(socket, "gift", clientId)) {
           callback?.({ ok: true, duplicate: true });
           return;
@@ -465,7 +487,12 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
 
-        const gift = VALID_GIFTS.has(data.giftId) ? data.giftId : "rose";
+        const gift = String(data.giftId || "").trim().toLowerCase();
+        if (!VALID_GIFTS.has(gift)) {
+          callback?.({ ok: false, error: "Gift is not available" });
+          return;
+        }
+
         const result = await livestreamService.sendLiveGift(streamId, socket.user?._id, gift, {
           clientId,
           senderSocketId: socket.id,
@@ -558,6 +585,8 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
 
+        ensureSocketInLiveRoom(socket, streamId);
+
         const payload = {
           id: `${socket.id}:${Date.now()}`,
           streamId,
@@ -585,6 +614,7 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
 
+        ensureSocketInLiveRoom(socket, streamId);
         upsertLiveRoomMember(streamId, socket, { username: data.username });
         callback?.({ ok: true, ...roomSnapshotFor(streamId) });
       } catch (error) {
@@ -950,6 +980,8 @@ const setupLiveStreamSockets = (io) => {
         return;
       }
 
+      ensureSocketInLiveRoom(socket, streamId);
+
       io.to(targetSocketId).emit(eventName, {
         ...data,
         streamId,
@@ -967,6 +999,8 @@ const setupLiveStreamSockets = (io) => {
         return;
       }
 
+      ensureSocketInLiveRoom(socket, streamId);
+
       socket.to(roomFor(streamId)).emit("live:creator-ready", {
         streamId,
         creatorSocketId: socket.id,
@@ -981,6 +1015,8 @@ const setupLiveStreamSockets = (io) => {
         callback?.({ ok: false, error: "Stream ID required" });
         return;
       }
+
+      ensureSocketInLiveRoom(socket, streamId);
 
       socket.to(roomFor(streamId)).emit("live:viewer-ready", {
         streamId,

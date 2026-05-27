@@ -1,3 +1,4 @@
+// @ts-nocheck
 const livePreviewStreams = new Map();
 
 export const setLivePreviewStream = (streamId, mediaStream) => {
