@@ -144,6 +144,26 @@ const liveStreamSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      mutedUsers: {
+        type: [mongoose.Schema.Types.ObjectId],
+        ref: "User",
+        default: [],
+      },
+      blockedUsers: {
+        type: [mongoose.Schema.Types.ObjectId],
+        ref: "User",
+        default: [],
+      },
+      slowModeEnabled: {
+        type: Boolean,
+        default: false,
+      },
+      slowModeSeconds: {
+        type: Number,
+        default: 10,
+        min: 0,
+        max: 120,
+      },
     },
     stats: {
       totalViews: {
@@ -170,6 +190,84 @@ const liveStreamSchema = new mongoose.Schema(
         type: Number,
         default: 0,
         min: 0,
+      },
+      topSupporters: {
+        type: [
+          {
+            userId: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "User",
+            },
+            username: {
+              type: String,
+              default: "Viewer",
+              maxlength: 80,
+            },
+            avatar: {
+              type: String,
+              default: "",
+            },
+            total: {
+              type: Number,
+              default: 0,
+              min: 0,
+            },
+            count: {
+              type: Number,
+              default: 0,
+              min: 0,
+            },
+            lastGiftAt: {
+              type: Date,
+              default: null,
+            },
+          },
+        ],
+        default: [],
+      },
+      giftLog: {
+        type: [
+          {
+            transactionId: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "WalletTransaction",
+            },
+            senderId: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "User",
+            },
+            senderName: {
+              type: String,
+              default: "Viewer",
+              maxlength: 80,
+            },
+            giftId: {
+              type: String,
+              default: "",
+              maxlength: 80,
+            },
+            giftName: {
+              type: String,
+              default: "",
+              maxlength: 120,
+            },
+            value: {
+              type: Number,
+              default: 0,
+              min: 0,
+            },
+            tier: {
+              type: String,
+              default: "small",
+              maxlength: 40,
+            },
+            createdAt: {
+              type: Date,
+              default: Date.now,
+            },
+          },
+        ],
+        default: [],
       },
     },
     scheduledStartTime: {

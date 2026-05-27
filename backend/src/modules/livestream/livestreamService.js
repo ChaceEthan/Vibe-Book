@@ -63,6 +63,10 @@ const normalizeSettings = (streamData = {}) => {
     backgroundTheme: String(streamData.backgroundTheme || "classic").trim().slice(0, 40),
     effectsPreset: String(streamData.effectsPreset || "none").trim().slice(0, 40),
     pkBattleReady: Boolean(streamData.pkBattleReady),
+    mutedUsers: Array.isArray(streamData.mutedUsers) ? streamData.mutedUsers.filter((id) => mongoose.isValidObjectId(id)).slice(0, 250) : [],
+    blockedUsers: Array.isArray(streamData.blockedUsers) ? streamData.blockedUsers.filter((id) => mongoose.isValidObjectId(id)).slice(0, 250) : [],
+    slowModeEnabled: Boolean(streamData.slowModeEnabled),
+    slowModeSeconds: Math.max(0, Math.min(120, Number(streamData.slowModeSeconds || 10))),
   };
 };
 
@@ -283,6 +287,8 @@ const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
   const safeStreamId = validateStreamId(streamId);
   const safeSenderId = validateUserId(senderId);
   const gift = giftForId(giftId);
+  const senderName = String(metadata.senderName || "Viewer").trim().slice(0, 80) || "Viewer";
+  const senderAvatar = String(metadata.senderAvatar || "").trim().slice(0, 500);
 
   const stream = await LiveStream.findById(safeStreamId).populate("creatorId", creatorSelect);
   if (!stream || stream.status === "ended" || stream.isLive === false) {
@@ -321,11 +327,58 @@ const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
   stream.stats = stream.stats || {};
   stream.stats.giftsReceived = Number(stream.stats.giftsReceived || 0) + 1;
   stream.stats.giftValue = Number(stream.stats.giftValue || 0) + gift.pointsCost;
+  const giftedAt = new Date();
+  const existingSupporters = Array.isArray(stream.stats.topSupporters) ? stream.stats.topSupporters.map((supporter) => ({
+    userId: supporter.userId,
+    username: supporter.username || "Viewer",
+    avatar: supporter.avatar || "",
+    total: Number(supporter.total || 0),
+    count: Number(supporter.count || 0),
+    lastGiftAt: supporter.lastGiftAt || null,
+  })) : [];
+  const supporterIndex = existingSupporters.findIndex((supporter) => supporter.userId?.toString?.() === safeSenderId);
+
+  if (supporterIndex >= 0) {
+    existingSupporters[supporterIndex] = {
+      ...existingSupporters[supporterIndex],
+      username: senderName,
+      avatar: senderAvatar || existingSupporters[supporterIndex].avatar,
+      total: Number(existingSupporters[supporterIndex].total || 0) + gift.pointsCost,
+      count: Number(existingSupporters[supporterIndex].count || 0) + 1,
+      lastGiftAt: giftedAt,
+    };
+  } else {
+    existingSupporters.push({
+      userId: safeSenderId,
+      username: senderName,
+      avatar: senderAvatar,
+      total: gift.pointsCost,
+      count: 1,
+      lastGiftAt: giftedAt,
+    });
+  }
+
+  stream.stats.topSupporters = existingSupporters
+    .sort((left, right) => Number(right.total || 0) - Number(left.total || 0))
+    .slice(0, 20);
+  const giftLogEntry = {
+    transactionId: result.sendTransaction?._id,
+    senderId: safeSenderId,
+    senderName,
+    giftId: gift.id,
+    giftName: gift.name,
+    value: gift.pointsCost,
+    tier: gift.tier,
+    createdAt: giftedAt,
+  };
+  stream.stats.giftLog = [giftLogEntry, ...(Array.isArray(stream.stats.giftLog) ? stream.stats.giftLog : [])].slice(0, 100);
   await stream.save();
 
   return {
     stream,
     gift,
+    giftLogEntry,
+    topSupporters: stream.stats.topSupporters,
     senderWallet: result.sender,
     receiverWallet: result.receiver,
     sendTransaction: result.sendTransaction,
