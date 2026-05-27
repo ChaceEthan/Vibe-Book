@@ -1,14 +1,5 @@
 // @ts-nocheck
-const LOCAL_DEV_PORTS = ["3000", "4173", "5173", "5174", "5175", "5176", "5177", "5178", "5179"];
-const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const rejectedOriginsLogged = new Set();
-
-const allowedOrigins = new Set([
-  "https://vibe-book-kappa.vercel.app",
-  "https://vibe-book-api.onrender.com",
-  ...LOCAL_DEV_PORTS.map((port) => `http://localhost:${port}`),
-  ...LOCAL_DEV_PORTS.map((port) => `http://127.0.0.1:${port}`),
-]);
 
 const normalizeOrigin = (value = "") => {
   const trimmed = String(value || "").trim().replace(/\/+$/, "");
@@ -18,24 +9,17 @@ const normalizeOrigin = (value = "") => {
   }
 
   try {
-    const parsed = new URL(trimmed);
+    const parsed = new URL(trimmed.replace(/^https?:\/\/https?:\/\//i, "https://"));
     return `${parsed.protocol}//${parsed.host}`;
   } catch {
     return trimmed;
   }
 };
 
-const addAllowedOrigins = (...origins) => {
-  origins.filter(Boolean).forEach((origin) => {
-    String(origin)
-      .split(",")
-      .map(normalizeOrigin)
-      .filter(Boolean)
-      .forEach((value) => allowedOrigins.add(value));
-  });
-};
-
-addAllowedOrigins(
+const configuredOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://vibe-book-kappa.vercel.app",
   process.env.CLIENT_URL,
   process.env.FRONTEND_URL,
   process.env.FRONTEND_ORIGIN,
@@ -43,80 +27,16 @@ addAllowedOrigins(
   process.env.PRODUCTION_FRONTEND_URL,
   process.env.APP_URL,
   process.env.CORS_ORIGIN,
-  process.env.RENDER_EXTERNAL_URL,
-  process.env.VERCEL_URL ? `https://${String(process.env.VERCEL_URL).replace(/^https?:\/\//, "")}` : ""
-);
+].flatMap((origin) => String(origin || "").split(","));
 
-const isVercelOrigin = (origin) => {
-  try {
-    const parsed = new URL(origin);
-    return parsed.protocol === "https:" && parsed.hostname.endsWith(".vercel.app");
-  } catch {
-    return false;
-  }
-};
-
-const isRenderOrigin = (origin) => {
-  try {
-    const parsed = new URL(origin);
-    return parsed.protocol === "https:" && parsed.hostname.endsWith(".onrender.com");
-  } catch {
-    return false;
-  }
-};
-
-const isValidPort = (port) => {
-  if (!port) {
-    return true;
-  }
-
-  const portNumber = Number(port);
-  return Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65535;
-};
-
-const isAllowedLocalDevOrigin = (origin) => {
-  try {
-    const parsed = new URL(origin);
-
-    return (
-      ["http:", "https:"].includes(parsed.protocol) &&
-      LOCAL_HOSTNAMES.has(parsed.hostname) &&
-      isValidPort(parsed.port)
-    );
-  } catch {
-    return false;
-  }
-};
-
-const isAllowedPrivateNetworkOrigin = (origin) => {
-  try {
-    const parsed = new URL(origin);
-    const host = parsed.hostname;
-
-    return (
-      ["http:", "https:"].includes(parsed.protocol) &&
-      isValidPort(parsed.port) &&
-      (/^192\.168\.(?:\d{1,3})\.(?:\d{1,3})$/.test(host) || /^10\.(?:\d{1,3})\.(?:\d{1,3})\.(?:\d{1,3})$/.test(host))
-    );
-  } catch {
-    return false;
-  }
-};
+const allowedOrigins = Array.from(new Set(configuredOrigins.map(normalizeOrigin).filter((origin) => origin && origin !== "*")));
 
 const isOriginAllowed = (origin) => {
   if (!origin) {
     return true;
   }
 
-  const normalizedOrigin = normalizeOrigin(origin);
-
-  return (
-    allowedOrigins.has(normalizedOrigin) ||
-    isAllowedLocalDevOrigin(normalizedOrigin) ||
-    isAllowedPrivateNetworkOrigin(normalizedOrigin) ||
-    isVercelOrigin(normalizedOrigin) ||
-    isRenderOrigin(normalizedOrigin)
-  );
+  return allowedOrigins.includes(normalizeOrigin(origin));
 };
 
 const logRejectedOrigin = (origin, context = "request") => {
@@ -131,12 +51,16 @@ const logRejectedOrigin = (origin, context = "request") => {
 };
 
 const corsOriginDelegate = (origin, callback) => {
+  if (!origin) {
+    return callback(null, true);
+  }
+
   if (isOriginAllowed(origin)) {
-    return callback(null, origin ? normalizeOrigin(origin) : true);
+    return callback(null, normalizeOrigin(origin));
   }
 
   logRejectedOrigin(origin);
-  return callback(null, false);
+  return callback(new Error("Not allowed by CORS"));
 };
 
 const corsOptions = {
@@ -149,10 +73,18 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
+const socketCorsOptions = {
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+};
+
 module.exports = {
   allowedOrigins,
   corsOptions,
   isOriginAllowed,
   logRejectedOrigin,
   normalizeOrigin,
+  socketCorsOptions,
 };

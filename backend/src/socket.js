@@ -14,6 +14,7 @@ const { createNotification } = require("./utils/notifications");
 const { initializeWalletSockets } = require("./modules/wallet/walletSocket");
 const { setupLiveStreamSockets } = require("./modules/livestream/livestreamSocket");
 const purchaseService = require("./modules/marketplace/purchaseService");
+const { socketCorsOptions } = require("./config/cors");
 
 let ioInstance = null;
 const onlineUsers = new Map();
@@ -336,19 +337,15 @@ const initSocket = (server, corsOptions = {}) => {
   }
 
   const socketCorsConfig = {
+    ...socketCorsOptions,
     credentials: true,
-    methods: corsOptions.methods || ["GET", "POST", "OPTIONS"],
+    methods: corsOptions.methods || socketCorsOptions.methods || ["GET", "POST"],
     allowedHeaders: corsOptions.allowedHeaders || ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
   };
 
-  // Handle different CORS origin formats
-  if (typeof corsOptions.origin === "string") {
+  if (Array.isArray(corsOptions.origin)) {
     socketCorsConfig.origin = corsOptions.origin;
-  } else if (Array.isArray(corsOptions.origin)) {
-    socketCorsConfig.origin = corsOptions.origin;
-  } else if (corsOptions.origin === true || !corsOptions.origin) {
-    socketCorsConfig.origin = true;
-  } else {
+  } else if (corsOptions.origin) {
     socketCorsConfig.origin = corsOptions.origin;
   }
 

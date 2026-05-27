@@ -80,7 +80,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   const [tagText, setTagText] = useState("");
   const [error, setError] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
-  const [cameraLoading, setCameraLoading] = useState(true);
+  const [cameraLoading, setCameraLoading] = useState(false);
   const [frontCamera, setFrontCamera] = useState(true);
   const [micMuted, setMicMuted] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
@@ -209,6 +209,11 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
   }, [frontCamera, loadDevices, selectedAudioDeviceId, selectedVideoDeviceId, stopCurrentStream]);
 
   useEffect(() => {
+    if (setupStep !== 3) {
+      setCameraLoading(false);
+      return undefined;
+    }
+
     startCamera();
     return () => {
       if (handoffStreamRef.current) {
@@ -222,7 +227,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
 
       stopCamera();
     };
-  }, [startCamera, stopCamera]);
+  }, [setupStep, startCamera, stopCamera]);
 
   useEffect(() => {
     micMutedRef.current = micMuted;
@@ -549,7 +554,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
       exit={{ opacity: 0 }}
     >
       <div className="relative flex h-full w-full flex-col overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_20%_15%,rgba(59,130,246,0.28),transparent_32%),radial-gradient(circle_at_80%_0%,rgba(244,63,94,0.22),transparent_30%)]" />
+        <div className="pointer-events-none absolute inset-0 z-0 bg-slate-950" />
 
         <header className="relative z-20 flex shrink-0 items-center justify-between px-3 py-3 sm:px-5">
           <button
@@ -662,6 +667,15 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
                     <Loader2 className="mx-auto h-7 w-7 animate-spin text-white" />
                   )}
                   <p className="mt-2 text-sm font-bold text-white">{error || "Opening camera..."}</p>
+                  {error && (
+                    <button
+                      type="button"
+                      className="mt-3 rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950"
+                      onClick={startCamera}
+                    >
+                      Retry camera
+                    </button>
+                  )}
                 </div>
               </div>
             )}

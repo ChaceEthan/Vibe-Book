@@ -24,8 +24,8 @@ export const normalizeUrlRoot = (value = "", fallback = DEFAULT_BACKEND_URL) => 
   return trimSlashes(next);
 };
 
-const rawApiRoot = import.meta.env.VITE_API_URL || import.meta.env.SERVER_URL || DEFAULT_BACKEND_URL;
-const rawSocketRoot = import.meta.env.VITE_SOCKET_URL || rawApiRoot;
+const rawApiRoot = import.meta.env.VITE_API_URL || DEFAULT_BACKEND_URL;
+const rawSocketRoot = import.meta.env.VITE_SOCKET_URL || import.meta.env.VITE_API_URL || DEFAULT_BACKEND_URL;
 const rawFrontendRoot = import.meta.env.VITE_APP_ROOT_URL || import.meta.env.VITE_FRONTEND_URL || DEFAULT_FRONTEND_URL;
 
 export const API_ROOT = normalizeUrlRoot(rawApiRoot, DEFAULT_BACKEND_URL).replace(/(?:\/api)+\/?$/i, "");

@@ -1,24 +1,26 @@
 /**
  * Premium Gift Animation Definitions
- * Enhanced TikTok-style animations for live gifts
+ * Metadata-only hooks used by live gift payloads and future sound/rendering work.
  */
 
 const GIFT_SYSTEM = {
   SMALL: {
     tier: "small",
-    animationDuration: 2.2,
+    animationDuration: 2200,
     particleCount: 9,
     scale: 0.8,
+    soundReady: true,
   },
   MEDIUM: {
     tier: "medium",
-    animationDuration: 2.8,
+    animationDuration: 3000,
     particleCount: 16,
-    scale: 1.0,
+    scale: 1,
+    soundReady: true,
   },
   PREMIUM: {
     tier: "premium",
-    animationDuration: 3.5,
+    animationDuration: 4800,
     particleCount: 28,
     scale: 1.3,
     fullscreen: true,
@@ -29,131 +31,125 @@ const GIFT_SYSTEM = {
 const PREMIUM_GIFT_ANIMATIONS = {
   floating_hearts: {
     name: "Floating Hearts",
-    particles: "❤️",
+    particles: "\u2764\uFE0F",
     effect: "float_up",
+    sound: "gift-heart",
   },
   flying_roses: {
     name: "Flying Roses",
-    particles: "🌹",
+    particles: "\uD83C\uDF39",
     effect: "spiral",
+    sound: "gift-rose",
   },
-  bouquet_bloom: {
-    name: "Bouquet Bloom",
-    particles: "💐",
-    effect: "bloom",
-  },
-  fire_burst: {
-    name: "Fire Burst",
-    particles: "🔥",
-    effect: "explosion",
-  },
-  diamond_sparkle: {
-    name: "Diamond Sparkle",
-    particles: "💎",
-    effect: "sparkle",
-  },
-  crown_shine: {
-    name: "Crown Shine",
-    particles: "👑",
-    effect: "rotating_glow",
-  },
-  rocket_launch: {
-    name: "Rocket Launch",
-    particles: "🚀",
-    effect: "launch",
-  },
-  car_sweep: {
-    name: "Car Sweep",
-    particles: "🏎️",
-    effect: "sweep",
-  },
-  magic_box: {
-    name: "Magic Box",
-    particles: "🎁",
-    effect: "explosion",
-  },
-  lion_roar: {
-    name: "Lion Roar",
-    particles: "🦁",
-    effect: "fullscreen_glow",
-  },
-  universe_burst: {
-    name: "Universe Burst",
-    particles: "🌌",
-    effect: "fullscreen_burst",
-  },
-  castle_glow: {
-    name: "Castle Glow",
-    particles: "🏰",
-    effect: "glow_cascade",
-  },
-  dragon_flight: {
-    name: "Dragon Flight",
-    particles: "🐉",
-    effect: "fullscreen_sweep",
-  },
-  galaxy_storm: {
-    name: "Galaxy Storm",
-    particles: "✨",
-    effect: "fullscreen_storm",
-  },
-};
-
-// New VibeBook premium gift
-const VIBEBOOK_GIFT = {
-  id: "vibebook_book",
-  name: "VibeBook Book Gift",
-  emoji: "📘",
-  pointsCost: 1000,
-  tier: "premium",
-  animation: "vibebook_celebration",
-  color: "#3b82f6", // Blue gradient
-  special: true,
-  fullscreen: true,
-};
-
-Object.assign(PREMIUM_GIFT_ANIMATIONS, {
   flower_bloom: {
     name: "Flower Bloom",
     particles: "\uD83C\uDF38",
     effect: "bloom",
+    sound: "gift-flower",
   },
-  coffee_steam: {
-    name: "Coffee Steam",
-    particles: "\u2615",
-    effect: "steam_rise",
+  like_pop: {
+    name: "Like Pop",
+    particles: "\uD83D\uDC4D",
+    effect: "pop_burst",
+    sound: "gift-like",
   },
-  super_star_spin: {
-    name: "Super Star Spin",
-    particles: "\u2B50",
-    effect: "orbit",
+  fire_burst: {
+    name: "Fire Burst",
+    particles: "\uD83D\uDD25",
+    effect: "explosion",
+    sound: "gift-fire",
+  },
+  crown_shine: {
+    name: "Crown Shine",
+    particles: "\uD83D\uDC51",
+    effect: "rotating_glow",
+    sound: "gift-crown",
+  },
+  rocket_launch: {
+    name: "Rocket Launch",
+    particles: "\uD83D\uDE80",
+    effect: "launch",
+    sound: "gift-rocket",
+  },
+  diamond_sparkle: {
+    name: "Diamond Sparkle",
+    particles: "\uD83D\uDC8E",
+    effect: "sparkle",
+    sound: "gift-diamond",
+  },
+  super_chat_wave: {
+    name: "Super Chat Wave",
+    particles: "\uD83D\uDCAC",
+    effect: "chat_wave",
+    sound: "gift-super-chat",
+  },
+  music_notes: {
+    name: "Music Notes",
+    particles: "\uD83C\uDFB5",
+    effect: "note_float",
+    sound: "gift-music",
+  },
+  lion_roar: {
+    name: "Lion Roar",
+    particles: "\uD83E\uDD81",
+    effect: "fullscreen_glow",
+    sound: "gift-lion",
+  },
+  castle_glow: {
+    name: "Castle Glow",
+    particles: "\uD83C\uDFF0",
+    effect: "glow_cascade",
+    sound: "gift-castle",
   },
   galaxy_swirl: {
     name: "Galaxy Swirl",
     particles: "\uD83C\uDF0C",
-    effect: "swirl",
+    effect: "fullscreen_swirl",
+    sound: "gift-galaxy",
   },
-  golden_crown_coronation: {
-    name: "Golden Crown Coronation",
-    particles: "\uD83D\uDC51",
-    effect: "fullscreen_coronation",
+  jet_flyby: {
+    name: "Jet Flyby",
+    particles: "\u2708\uFE0F",
+    effect: "fullscreen_flyby",
+    sound: "gift-jet",
   },
-  vibebook_celebration: {
+  dragon_flight: {
+    name: "Dragon Flight",
+    particles: "\uD83D\uDC09",
+    effect: "fullscreen_sweep",
+    sound: "gift-dragon",
+  },
+  vibebook_3d_book: {
     name: "VibeBook Celebration",
     particles: "\uD83D\uDCD8",
-    effect: "fullscreen_book",
+    effect: "fullscreen_3d_book",
+    sound: "gift-vibebook",
   },
-});
+};
+
+const VIBEBOOK_GIFT = {
+  id: "vibebook_book",
+  name: "VibeBook Gift",
+  emoji: "\uD83D\uDCD8",
+  pointsCost: 1000,
+  tier: "premium",
+  animation: "vibebook_3d_book",
+  color: "#14b8a6",
+  colors: ["#14b8a6", "#2563eb", "#a7f3d0"],
+  special: true,
+  fullscreen: true,
+  soundReady: true,
+};
 
 const VIBEBOOK_GIFT_ANIMATION = {
   name: "VibeBook Celebration",
-  animation: "vibebook_celebration",
-  description: "Exclusive VibeBook premium gift with custom animation",
+  animation: "vibebook_3d_book",
+  description: "Exclusive VibeBook premium gift with a glowing green and blue 3D book animation",
   effects: [
     "fullscreen_overlay",
-    "rotating_book",
+    "rotating_3d_book",
     "particle_storm",
-    "golden_glow",
+    "green_blue_glow",
     "confetti_burst",
   ],
 };

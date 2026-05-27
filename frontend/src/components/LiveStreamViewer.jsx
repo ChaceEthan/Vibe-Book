@@ -33,6 +33,7 @@ import { connectSocket } from "../services/socket";
 import { userApi } from "../services/api";
 import { getLivePreviewStream, releaseLivePreviewStream } from "../services/livePreviewStream";
 import { useLiveStreamStore } from "../store/livestreamStore";
+import { useWalletStore } from "../store/walletStore";
 import { useAuth } from "../context/AuthContext.jsx";
 
 const MAX_COMMENTS = 120;
@@ -86,25 +87,26 @@ const legacyGiftOptions = [
 ];
 
 const premiumGiftOptions = [
-  { id: "heart", name: "Heart", value: 1, emoji: "\u2764\uFE0F", tier: "small", rarity: "common", colors: ["#fb7185", "#f43f5e", "#ffffff"], animation: "floating_hearts", comboMultiplier: 1 },
-  { id: "rose", name: "Rose", value: 5, emoji: "\uD83C\uDF39", tier: "small", rarity: "common", colors: ["#f43f5e", "#be123c", "#fecdd3"], animation: "flying_roses", comboMultiplier: 1.1 },
-  { id: "flower", name: "Flower", value: 10, emoji: "\uD83C\uDF38", tier: "small", rarity: "common", colors: ["#f9a8d4", "#a78bfa", "#86efac"], animation: "flower_bloom", comboMultiplier: 1.15 },
-  { id: "coffee", name: "Coffee", value: 15, emoji: "\u2615", tier: "small", rarity: "common", colors: ["#f59e0b", "#92400e", "#fde68a"], animation: "coffee_steam", comboMultiplier: 1.15 },
-  { id: "fire", name: "Fire", value: 25, emoji: "\uD83D\uDD25", tier: "small", rarity: "rare", colors: ["#fb923c", "#ef4444", "#fef3c7"], animation: "fire_burst", comboMultiplier: 1.25 },
-  { id: "crown", name: "Crown", value: 50, emoji: "\uD83D\uDC51", tier: "medium", rarity: "rare", colors: ["#facc15", "#f97316", "#fff7ed"], animation: "crown_shine", comboMultiplier: 1.35 },
-  { id: "diamond", name: "Diamond", value: 100, emoji: "\uD83D\uDC8E", tier: "medium", rarity: "rare", colors: ["#67e8f9", "#38bdf8", "#ffffff"], animation: "diamond_sparkle", comboMultiplier: 1.45 },
-  { id: "rocket", name: "Rocket", value: 150, emoji: "\uD83D\uDE80", tier: "medium", rarity: "epic", colors: ["#60a5fa", "#f97316", "#f8fafc"], animation: "rocket_launch", comboMultiplier: 1.6 },
-  { id: "super_star", name: "Super Star", value: 250, emoji: "\u2B50", tier: "medium", rarity: "epic", colors: ["#fde047", "#f59e0b", "#ffffff"], animation: "super_star_spin", comboMultiplier: 1.8 },
-  { id: "lion", name: "Lion", value: 500, emoji: "\uD83E\uDD81", tier: "premium", rarity: "legendary", colors: ["#f59e0b", "#d97706", "#fff7ed"], animation: "lion_roar", comboMultiplier: 2.2, fullscreen: true },
-  { id: "castle", name: "Castle", value: 750, emoji: "\uD83C\uDFF0", tier: "premium", rarity: "legendary", colors: ["#818cf8", "#312e81", "#f5f3ff"], animation: "castle_glow", comboMultiplier: 2.45 },
-  { id: "galaxy", name: "Galaxy", value: 900, emoji: "\uD83C\uDF0C", tier: "premium", rarity: "mythic", colors: ["#e879f9", "#4f46e5", "#22d3ee"], animation: "galaxy_swirl", comboMultiplier: 2.6 },
-  { id: "vibebook_book", name: "VibeBook Book Gift", value: 1000, emoji: "\uD83D\uDCD8", tier: "premium", rarity: "exclusive", colors: ["#22d3ee", "#a78bfa", "#f472b6", "#facc15"], animation: "vibebook_celebration", comboMultiplier: 3, fullscreen: true, special: true },
-  { id: "universe", name: "Universe", value: 1200, emoji: "\uD83C\uDF20", tier: "premium", rarity: "mythic", colors: ["#c084fc", "#1e1b4b", "#38bdf8"], animation: "universe_burst", comboMultiplier: 3.2, fullscreen: true },
-  { id: "golden_crown", name: "Golden Crown", value: 1500, emoji: "\uD83D\uDC51", tier: "premium", rarity: "exclusive", colors: ["#facc15", "#f59e0b", "#ffffff"], animation: "golden_crown_coronation", comboMultiplier: 3.5, fullscreen: true },
+  { id: "heart", name: "Heart", value: 1, emoji: "\u2764\uFE0F", tier: "small", rarity: "common", colors: ["#fb7185", "#f43f5e", "#ffffff"], animation: "floating_hearts", animationDuration: 1800, comboMultiplier: 1, sound: "gift-heart" },
+  { id: "rose", name: "Rose", value: 5, emoji: "\uD83C\uDF39", tier: "small", rarity: "common", colors: ["#f43f5e", "#be123c", "#fecdd3"], animation: "flying_roses", animationDuration: 2100, comboMultiplier: 1.1, sound: "gift-rose" },
+  { id: "flower", name: "Flower", value: 10, emoji: "\uD83C\uDF38", tier: "small", rarity: "common", colors: ["#f9a8d4", "#a78bfa", "#86efac"], animation: "flower_bloom", animationDuration: 2200, comboMultiplier: 1.15, sound: "gift-flower" },
+  { id: "like", name: "Like", value: 15, emoji: "\uD83D\uDC4D", tier: "small", rarity: "common", colors: ["#60a5fa", "#22d3ee", "#ffffff"], animation: "like_pop", animationDuration: 1700, comboMultiplier: 1.15, sound: "gift-like" },
+  { id: "fire", name: "Fire", value: 25, emoji: "\uD83D\uDD25", tier: "small", rarity: "rare", colors: ["#fb923c", "#ef4444", "#fef3c7"], animation: "fire_burst", animationDuration: 2400, comboMultiplier: 1.25, sound: "gift-fire" },
+  { id: "crown", name: "Crown", value: 50, emoji: "\uD83D\uDC51", tier: "medium", rarity: "rare", colors: ["#facc15", "#f97316", "#fff7ed"], animation: "crown_shine", animationDuration: 2600, comboMultiplier: 1.35, sound: "gift-crown" },
+  { id: "rocket", name: "Rocket", value: 100, emoji: "\uD83D\uDE80", tier: "medium", rarity: "rare", colors: ["#60a5fa", "#f97316", "#f8fafc"], animation: "rocket_launch", animationDuration: 2800, comboMultiplier: 1.5, sound: "gift-rocket" },
+  { id: "diamond", name: "Diamond", value: 150, emoji: "\uD83D\uDC8E", tier: "medium", rarity: "epic", colors: ["#67e8f9", "#38bdf8", "#ffffff"], animation: "diamond_sparkle", animationDuration: 2800, comboMultiplier: 1.65, sound: "gift-diamond" },
+  { id: "super_chat", name: "Super Chat", value: 200, emoji: "\uD83D\uDCAC", tier: "medium", rarity: "epic", colors: ["#a78bfa", "#2563eb", "#f8fafc"], animation: "super_chat_wave", animationDuration: 3000, comboMultiplier: 1.75, sound: "gift-super-chat" },
+  { id: "music", name: "Music", value: 250, emoji: "\uD83C\uDFB5", tier: "medium", rarity: "epic", colors: ["#34d399", "#06b6d4", "#ecfeff"], animation: "music_notes", animationDuration: 3000, comboMultiplier: 1.85, sound: "gift-music" },
+  { id: "lion", name: "Lion", value: 500, emoji: "\uD83E\uDD81", tier: "premium", rarity: "legendary", colors: ["#f59e0b", "#d97706", "#fff7ed"], animation: "lion_roar", animationDuration: 4200, comboMultiplier: 2.2, fullscreen: true, sound: "gift-lion" },
+  { id: "castle", name: "Castle", value: 750, emoji: "\uD83C\uDFF0", tier: "premium", rarity: "legendary", colors: ["#818cf8", "#312e81", "#f5f3ff"], animation: "castle_glow", animationDuration: 4200, comboMultiplier: 2.45, sound: "gift-castle" },
+  { id: "galaxy", name: "Galaxy", value: 900, emoji: "\uD83C\uDF0C", tier: "premium", rarity: "mythic", colors: ["#e879f9", "#4f46e5", "#22d3ee"], animation: "galaxy_swirl", animationDuration: 4500, comboMultiplier: 2.6, fullscreen: true, sound: "gift-galaxy" },
+  { id: "vibebook_book", name: "VibeBook Gift", value: 1000, emoji: "\uD83D\uDCD8", tier: "premium", rarity: "exclusive", colors: ["#14b8a6", "#2563eb", "#a7f3d0"], animation: "vibebook_3d_book", animationDuration: 5200, comboMultiplier: 3, fullscreen: true, special: true, sound: "gift-vibebook" },
+  { id: "jet", name: "Jet", value: 1200, emoji: "\u2708\uFE0F", tier: "premium", rarity: "mythic", colors: ["#93c5fd", "#1d4ed8", "#f8fafc"], animation: "jet_flyby", animationDuration: 4600, comboMultiplier: 3.2, fullscreen: true, sound: "gift-jet" },
+  { id: "dragon", name: "Dragon", value: 1500, emoji: "\uD83D\uDC09", tier: "premium", rarity: "mythic", colors: ["#34d399", "#064e3b", "#f8fafc"], animation: "dragon_flight", animationDuration: 5000, comboMultiplier: 3.5, fullscreen: true, sound: "gift-dragon" },
 ];
 
 const liveGiftOptions = premiumGiftOptions;
-const quickGiftIds = ["heart", "rose", "coffee", "fire", "crown"];
+const quickGiftIds = ["heart", "rose", "flower", "like", "fire"];
 const userIdFor = (user) => user?._id || user?.id || "";
 const giftById = liveGiftOptions.reduce((map, gift) => ({ ...map, [gift.id]: gift }), {});
 const giftGroups = [
@@ -186,6 +188,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const [panelBusyId, setPanelBusyId] = useState("");
   const [followBusy, setFollowBusy] = useState(false);
   const [isFollowingCreator, setIsFollowingCreator] = useState(false);
+  const [showCreatorCard, setShowCreatorCard] = useState(false);
   const [reportedLive, setReportedLive] = useState(false);
   const [localLoading, setLocalLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState("");
@@ -207,6 +210,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     updateViewerCount,
     upsertLiveStream,
   } = useLiveStreamStore();
+  const wallet = useWalletStore((state) => state.wallet);
+  const walletLoaded = useWalletStore((state) => state.walletLoaded);
+  const loadWallet = useWalletStore((state) => state.loadWallet);
 
   const fallbackLiveStream = useMemo(() => {
     if (!previewStream) return null;
@@ -301,6 +307,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   useEffect(() => {
     isCreatorRef.current = isCreator;
   }, [isCreator]);
+
+  useEffect(() => {
+    if (!isCreator && !walletLoaded) {
+      loadWallet?.();
+    }
+  }, [isCreator, loadWallet, walletLoaded]);
 
   useEffect(() => {
     const following = currentUser?.following || [];
@@ -479,7 +491,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     function handleGift(data) {
       if (data.streamId && data.streamId !== streamId) return;
       const giftId = data.giftId || data.gift;
-      const eventId = data.id || data.transactionId || `gift:${giftId}:${data.userId || data.username || "viewer"}:${data.timestamp || Date.now()}`;
+      const eventId = data.clientId || data.id || data.transactionId || `gift:${giftId}:${data.userId || data.username || "viewer"}:${data.timestamp || Date.now()}`;
       if (seenGiftIdsRef.current.has(eventId)) return;
       seenGiftIdsRef.current.add(eventId);
       if (seenGiftIdsRef.current.size > 180) {
@@ -978,8 +990,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     };
   }, [currentUser?.name, currentUser?.username, isCreator, localLoading, previewStream, streamId]);
 
-  const sendComment = () => {
-    const text = commentText.trim();
+  const sendComment = (retryText = "", retryId = "") => {
+    const text = String(retryText || commentText).trim();
     const activeSocket = socketRef.current;
 
     if (!text || !activeSocket || !streamId || !commentsEnabled) return;
@@ -991,7 +1003,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     lastCommentAtRef.current = Date.now();
     setSending(true);
-    setCommentText("");
+    if (!retryText) {
+      setCommentText("");
+    }
+    if (retryId) {
+      setComments((prev) => prev.filter((comment) => comment.id !== retryId));
+      seenCommentIdsRef.current.delete(retryId);
+    }
 
     const clientId = `comment:${streamId}:${userIdFor(currentUser) || "guest"}:${Date.now()}`;
     const optimisticComment = {
@@ -1033,8 +1051,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         
         if (!ack.ok) {
           seenCommentIdsRef.current.delete(clientId);
-          setComments((prev) => prev.filter((c) => c.id !== clientId));
-          setCommentText(text);
+          setComments((prev) => prev.map((c) => (
+            c.id === clientId
+              ? { ...c, optimistic: false, failed: true, error: ack.error || "Comment failed" }
+              : c
+          )));
           setStatusMessage(ack.error || "Comment failed");
           window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
         } else {
@@ -1121,7 +1142,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }
   };
 
-  const sendGift = (giftId, giftValue) => {
+  const sendGift = async (giftId, giftValue) => {
     const activeSocket = socketRef.current;
     if (!activeSocket || !streamId || !giftsEnabled || sendingGiftId || isCreator) {
       if (isCreator) setStatusMessage("Hosts cannot gift their own live");
@@ -1135,11 +1156,155 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }
 
     const giftMeta = giftById[giftId] || selectedGift;
-    lastGiftAtRef.current = Date.now();
+    const pointCost = Math.max(0, Number(giftValue || giftMeta.value || 0));
+    if (!pointCost) {
+      setStatusMessage("Gift is not available");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+      return;
+    }
+
     setSendingGiftId(giftId);
-    activeSocket.emit("live:gift", { streamId, giftId, giftValue, clientId: `gift:${streamId}:${giftId}:${Date.now()}` }, (ack = {}) => {
+    let latestWallet = wallet;
+    if (!walletLoaded && loadWallet) {
+      latestWallet = await loadWallet();
+    }
+
+    const currentBalance = Number(latestWallet?.balance ?? wallet?.balance ?? 0);
+    if (currentBalance < pointCost) {
+      setSendingGiftId("");
+      setStatusMessage("Not enough NEX points");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
+      return;
+    }
+
+    const clientId = `gift:${streamId}:${giftId}:${Date.now()}`;
+    const senderKey = userIdFor(currentUser) || activeSocket.id || "viewer";
+    const senderName = currentUser?.username || currentUser?.name || "You";
+    const tier = giftMeta.tier || "small";
+    const optimisticGift = {
+      id: clientId,
+      clientId,
+      streamId,
+      userId: userIdFor(currentUser),
+      username: senderName,
+      gift: giftMeta.id,
+      giftId: giftMeta.id,
+      giftName: giftMeta.name,
+      emoji: giftMeta.emoji,
+      tier,
+      rarity: giftMeta.rarity,
+      value: pointCost,
+      colors: giftMeta.colors || [],
+      fullscreen: Boolean(giftMeta.fullscreen || giftMeta.special),
+      special: Boolean(giftMeta.special),
+      soundHook: giftMeta.sound || `gift-${giftMeta.id.replace(/_/g, "-")}`,
+      left: 14 + Math.random() * 46,
+      bottom: 28 + Math.random() * 20,
+      particles: makeGiftParticles(tier),
+      optimistic: true,
+      timestamp: new Date().toISOString(),
+    };
+    let giftRemovalTimer = null;
+    let acknowledged = false;
+
+    const rollbackOptimisticGift = () => {
+      seenGiftIdsRef.current.delete(clientId);
+      if (giftRemovalTimer) {
+        window.clearTimeout(giftRemovalTimer);
+        giftTimersRef.current.delete(giftRemovalTimer);
+      }
+      setGiftEvents((current) => current.filter((gift) => gift.id !== clientId));
+      setLiveMetrics((current) => ({
+        ...current,
+        giftsReceived: Math.max(0, Number(current.giftsReceived || 0) - 1),
+        nexEarned: Math.max(0, Number(current.nexEarned || 0) - pointCost),
+      }));
+      setGiftLeaderboard((current) => {
+        const previous = current[senderKey];
+        if (!previous) return current;
+        const nextCount = Math.max(0, Number(previous.count || 0) - 1);
+        const nextTotal = Math.max(0, Number(previous.total || 0) - pointCost);
+        if (!nextCount && !nextTotal) {
+          const { [senderKey]: _removed, ...rest } = current;
+          return rest;
+        }
+        return {
+          ...current,
+          [senderKey]: {
+            ...previous,
+            count: nextCount,
+            total: nextTotal,
+          },
+        };
+      });
+      useWalletStore.setState((state) => ({
+        wallet: {
+          ...state.wallet,
+          balance: Number(state.wallet?.balance || 0) + pointCost,
+          lifetimeSpent: Math.max(0, Number(state.wallet?.lifetimeSpent || 0) - pointCost),
+          totalSent: Math.max(0, Number(state.wallet?.totalSent || 0) - pointCost),
+          updatedAt: new Date().toISOString(),
+        },
+        walletLoaded: true,
+      }));
+    };
+
+    seenGiftIdsRef.current.add(clientId);
+    setGiftEvents((current) => [...current, optimisticGift].slice(-12));
+    setLiveMetrics((current) => ({
+      ...current,
+      giftsReceived: Number(current.giftsReceived || 0) + 1,
+      nexEarned: Number(current.nexEarned || 0) + pointCost,
+    }));
+    setGiftLeaderboard((current) => {
+      const previous = current[senderKey] || { username: senderName, total: 0, count: 0 };
+      return {
+        ...current,
+        [senderKey]: {
+          ...previous,
+          username: senderName,
+          total: Number(previous.total || 0) + pointCost,
+          count: Number(previous.count || 0) + 1,
+        },
+      };
+    });
+    useWalletStore.setState((state) => ({
+      wallet: {
+        ...state.wallet,
+        balance: Math.max(0, Number(state.wallet?.balance || 0) - pointCost),
+        lifetimeSpent: Number(state.wallet?.lifetimeSpent || 0) + pointCost,
+        totalSent: Number(state.wallet?.totalSent || 0) + pointCost,
+        updatedAt: new Date().toISOString(),
+      },
+      walletLoaded: true,
+    }));
+
+    giftRemovalTimer = window.setTimeout(() => {
+      setGiftEvents((current) => current.filter((gift) => gift.id !== clientId));
+      giftTimersRef.current.delete(giftRemovalTimer);
+    }, Math.max(3400, Number(giftMeta.animationDuration || 0) + 500));
+    giftTimersRef.current.add(giftRemovalTimer);
+
+    lastGiftAtRef.current = Date.now();
+    const ackTimer = window.setTimeout(() => {
+      if (acknowledged) return;
+      acknowledged = true;
+      giftTimersRef.current.delete(ackTimer);
+      setSendingGiftId("");
+      rollbackOptimisticGift();
+      setStatusMessage("Gift send timed out. Try again.");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2600);
+    }, 12000);
+    giftTimersRef.current.add(ackTimer);
+
+    activeSocket.emit("live:gift", { streamId, giftId, giftValue: pointCost, clientId }, (ack = {}) => {
+      if (acknowledged) return;
+      acknowledged = true;
+      window.clearTimeout(ackTimer);
+      giftTimersRef.current.delete(ackTimer);
       setSendingGiftId("");
       if (!ack.ok) {
+        rollbackOptimisticGift();
         setStatusMessage(ack.error || "Gift could not be sent");
         window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
       } else {
@@ -1147,6 +1312,24 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           ...current,
           [giftId]: Number(current[giftId] || 0) + 1,
         }));
+        if (Array.isArray(ack.gift?.topSupporters) && ack.gift.topSupporters.length) {
+          setGiftLeaderboard(ack.gift.topSupporters.reduce((map, supporter) => ({
+            ...map,
+            [supporter.userId || supporter.username]: {
+              username: supporter.username || "Viewer",
+              total: Number(supporter.total || 0),
+              count: Number(supporter.count || 0),
+            },
+          }), {}));
+        }
+        if (ack.wallet) {
+          useWalletStore.setState((state) => ({
+            wallet: { ...state.wallet, ...ack.wallet },
+            walletLoaded: true,
+          }));
+        } else {
+          loadWallet?.();
+        }
         setStatusMessage(`${giftMeta.name} sent`);
         window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
       }
@@ -1410,17 +1593,25 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         )}
       </div>
 
-      <header className="absolute inset-x-0 top-0 z-30 flex items-center justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-5">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2.5 py-1 text-[0.64rem] font-black shadow-[0_0_18px_rgba(220,38,38,0.65)]">
-            <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-            LIVE
-          </span>
-          <span className="rounded-full bg-black/45 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">{liveDuration}</span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">
-            <Users className="h-3.5 w-3.5" />
-            {compactNumber(liveStream.viewerCount || liveViewers.length || 0)}
-          </span>
+      <header className="absolute inset-x-0 top-0 z-30 flex items-start justify-between gap-3 px-3 pb-3 pt-[calc(0.75rem+env(safe-area-inset-top))] sm:px-5">
+        <div className="relative flex min-w-0 items-start gap-2">
+          <button type="button" className="flex shrink-0 flex-col items-center" onClick={() => setShowCreatorCard((current) => !current)} aria-label="Open host profile card">
+            <SafeAvatar user={creator} src={creator.avatar} className="h-12 w-12 rounded-full border-2 border-white object-cover shadow-[0_0_22px_rgba(255,255,255,0.34)]" />
+            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[0.58rem] font-black shadow-[0_0_18px_rgba(220,38,38,0.65)]">
+              <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              LIVE
+            </span>
+          </button>
+          <div className="min-w-0 pt-1">
+            <p className="max-w-[48vw] truncate text-sm font-black">{creator.name || creator.username || "Creator"}</p>
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
+              <span className="rounded-full bg-black/45 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">{liveDuration}</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">
+                <Users className="h-3.5 w-3.5" />
+                {compactNumber(liveStream.viewerCount || liveViewers.length || 0)}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
@@ -1435,22 +1626,43 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         </div>
       </header>
 
-      <div className="absolute right-2 top-[calc(4.6rem+env(safe-area-inset-top))] z-30 flex max-h-[calc(100dvh-13.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col items-center gap-2 overflow-visible sm:right-5 sm:top-1/2 sm:-translate-y-1/2">
-        <button type="button" className="relative h-12 w-12 rounded-full transition hover:scale-105" onClick={() => creatorId && navigate(`/profile/${creatorId}`)} aria-label="Open host profile">
-          <SafeAvatar user={creator} src={creator.avatar} className="h-12 w-12 rounded-full border-2 border-white object-cover shadow-[0_0_22px_rgba(255,255,255,0.34)]" />
-        </button>
-        <button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-950 shadow-lg transition hover:scale-105 disabled:opacity-60" onClick={handleFollowCreator} disabled={isCreator || followBusy || isFollowingCreator} aria-label={isFollowingCreator ? "Following host" : "Follow host"}>
-          {followBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : isFollowingCreator ? <UserCheck className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />}
-        </button>
+      <AnimatePresence>
+        {showCreatorCard && (
+          <motion.div
+            className="absolute left-3 top-[calc(5.9rem+env(safe-area-inset-top))] z-40 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl border border-white/10 bg-black/84 p-3 text-white shadow-2xl backdrop-blur-xl sm:left-5"
+            initial={{ opacity: 0, y: -8, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.96 }}
+          >
+            <div className="flex items-center gap-3">
+              <SafeAvatar user={creator} src={creator.avatar} className="h-12 w-12 rounded-full border border-white/25 object-cover" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-black">{creator.name || creator.username || "Creator"}</p>
+                <p className="truncate text-[0.68rem] font-bold text-white/55">{creator.username ? `@${creator.username}` : liveTitle}</p>
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <button type="button" className="rounded-full bg-white px-3 py-2 text-[0.68rem] font-black text-slate-950 disabled:opacity-55" onClick={handleFollowCreator} disabled={isCreator || followBusy || isFollowingCreator}>
+                {isFollowingCreator ? "Following" : "Follow"}
+              </button>
+              <button type="button" className="rounded-full bg-white/10 px-3 py-2 text-[0.68rem] font-black text-white" onClick={() => creatorId && navigate(`/profile/${creatorId}`)}>
+                Profile
+              </button>
+              <button type="button" className="rounded-full bg-white/10 px-3 py-2 text-[0.68rem] font-black text-white" onClick={() => creatorId && navigate(`/chat/${creatorId}`)} disabled={isCreator}>
+                Message
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="absolute right-2 top-[calc(6rem+env(safe-area-inset-top))] z-30 flex max-h-[calc(100dvh-14.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col items-center gap-2 overflow-visible sm:right-5 sm:top-1/2 sm:-translate-y-1/2">
         <button type="button" className="flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-50" onClick={() => sendReaction("heart")} disabled={!reactionsEnabled || ended} aria-label="Send heart reaction">
           <Heart className="h-5 w-5 fill-current text-red-400" />
           <span className="mt-0.5 text-[0.58rem] font-black leading-none">{compactNumber(heartCombo || liveMetrics.giftsReceived || 0)}</span>
         </button>
         <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={focusComments} aria-label="Open live comments">
           <MessageCircle className="h-5 w-5" />
-        </button>
-        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-amber-300 text-slate-950 shadow-[0_0_22px_rgba(252,211,77,0.38)] transition hover:scale-105 disabled:opacity-50" onClick={toggleGiftTray} disabled={!giftsEnabled || ended || isCreator} aria-label="Open gifts">
-          <Gift className="h-5 w-5" />
         </button>
         <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={handleShare} aria-label="Share livestream">
           <Share2 className="h-5 w-5" />
@@ -1788,6 +2000,15 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                 >
                   <span className="mr-2 font-black text-white">{comment.username || "Guest"}</span>
                   <span className="break-words font-semibold text-white/82">{comment.text}</span>
+                  {comment.failed && (
+                    <button
+                      type="button"
+                      className="ml-2 rounded-full bg-white/15 px-2 py-0.5 text-[0.62rem] font-black text-white"
+                      onClick={() => sendComment(comment.text, comment.id)}
+                    >
+                      Retry
+                    </button>
+                  )}
                 </motion.div>
               ))}
             </AnimatePresence>
