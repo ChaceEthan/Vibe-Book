@@ -445,6 +445,8 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
   validateUserId(senderId);
   validateUserId(receiverId);
   const validatedAmount = validateAmount(giftPointsValue);
+  const cleanMetadata = sanitizeMetadata(metadata);
+  const giftLabel = cleanMetadata.giftName || giftId;
 
   if (senderId.toString() === receiverId.toString()) {
     throw new Error("Cannot gift to yourself");
@@ -521,8 +523,8 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       balanceBefore: senderBalanceBefore,
       balanceAfter: Number(updatedSender.balance || 0),
       source: TRANSACTION_SOURCES.GIFT_SENT,
-      description: `Sent ${giftId} gift`,
-      metadata: { ...sanitizeMetadata(metadata), giftId, recipientId: receiverId.toString() },
+      description: `Sent ${giftLabel} gift`,
+      metadata: { ...cleanMetadata, giftId, recipientId: receiverId.toString() },
       status: TRANSACTION_STATUS.COMPLETED,
       relatedUserId: receiverId,
     });
@@ -537,8 +539,8 @@ const sendGift = async (senderId, receiverId, giftId, giftPointsValue, metadata 
       balanceBefore: receiverBalanceBefore,
       balanceAfter: Number(updatedReceiver.balance || 0),
       source: TRANSACTION_SOURCES.GIFT_RECEIVED,
-      description: `Received ${giftId} gift`,
-      metadata: { ...sanitizeMetadata(metadata), giftId, senderId: senderId.toString() },
+      description: `Received ${giftLabel} gift`,
+      metadata: { ...cleanMetadata, giftId, senderId: senderId.toString() },
       status: TRANSACTION_STATUS.COMPLETED,
       relatedUserId: senderId,
     });
@@ -1107,6 +1109,7 @@ const getTransactionHistory = async (userId, limit = 50, offset = 0) => {
   validateUserId(userId);
 
   const transactions = await WalletTransaction.find({ userId })
+    .populate("relatedUserId", "username name avatar profileImage profilePicture walletId")
     .sort({ createdAt: -1 })
     .skip(offset)
     .limit(limit)

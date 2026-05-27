@@ -371,7 +371,7 @@ const PostMedia = ({
           key={`${post?._id || rawUrl}-${retryCount}`}
           ref={mediaRef}
           src={src}
-          className={`relative z-10 h-full w-full object-contain ${videoClassName}`}
+        className={`relative z-10 h-full w-full object-cover ${videoClassName}`}
           muted={isMuted}
           loop={loop}
           playsInline
@@ -458,7 +458,7 @@ const PostMedia = ({
         ref={mediaRef}
         src={src}
         alt={alt}
-        className={`relative z-10 h-full w-full object-contain ${imageClassName}`}
+        className={`relative z-10 h-full w-full object-cover ${imageClassName}`}
         onError={handleMediaError}
         onLoad={() => {
           handleMediaReady();

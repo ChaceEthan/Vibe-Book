@@ -7,6 +7,23 @@
 const { USER_LEVELS } = require("./walletConstants");
 const { dailyRewardProgress } = require("../../utils/pointsCalculator");
 
+const idOf = (value) => value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
+
+const relatedUserFor = (value) => {
+  if (!value || typeof value !== "object" || !value._id) {
+    return null;
+  }
+
+  return {
+    id: idOf(value),
+    username: value.username || "",
+    name: value.name || value.username || "User",
+    avatar: value.avatar || value.profilePicture || value.profileImage || "",
+    profilePicture: value.profilePicture || value.profileImage || value.avatar || "",
+    walletId: value.walletId || "",
+  };
+};
+
 /**
  * Calculate user level based on lifetime earned points
  */
@@ -123,6 +140,10 @@ const sanitizeMetadata = (metadata) => {
     "receiverIdentifier",
     "receiverWalletId",
     "senderWalletId",
+    "senderName",
+    "senderAvatar",
+    "recipientName",
+    "recipientAvatar",
     "nexHandle",
     "memo",
     "transferMethod",
@@ -180,6 +201,8 @@ const formatTransactionResponse = (transaction) => {
     return null;
   }
 
+  const relatedUser = relatedUserFor(transaction.relatedUserId);
+
   return {
     _id: transaction._id,
     type: transaction.type,
@@ -190,7 +213,8 @@ const formatTransactionResponse = (transaction) => {
     balanceAfter: transaction.balanceAfter,
     status: transaction.status,
     metadata: transaction.metadata || {},
-    relatedUserId: transaction.relatedUserId,
+    relatedUserId: relatedUser?.id || transaction.relatedUserId,
+    relatedUser,
     createdAt: transaction.createdAt,
   };
 };

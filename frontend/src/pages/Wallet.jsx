@@ -167,11 +167,21 @@ const isLiveGiftTransaction = (transaction = {}) => {
   return key.includes("gift") || key.includes("live_stream") || key.includes("stream earnings") || Boolean(metadata.liveGift || metadata.streamId);
 };
 
+const transactionPersonLabel = (transaction = {}) => {
+  const relatedUser = safeObject(transaction.relatedUser);
+  const metadata = safeObject(transaction.metadata);
+  const name = relatedUser.name || relatedUser.username || metadata.senderName || metadata.recipientName || "";
+
+  if (!name) return "";
+  return isDebitTransaction(transaction) ? `To ${name}` : `From ${name}`;
+};
+
 const TransactionRow = ({ transaction }) => {
   const item = safeObject(transaction);
   const Icon = transactionIcon(item);
   const isDebit = isDebitTransaction(item);
   const tone = isDebit ? "text-rose-600 bg-rose-50" : item.source === "referral" ? "text-sky-600 bg-sky-50" : "text-emerald-700 bg-emerald-50";
+  const personLabel = transactionPersonLabel(item);
 
   return (
     <article className="flex items-center gap-3 border-b border-slate-100 p-3 last:border-b-0">
@@ -181,7 +191,7 @@ const TransactionRow = ({ transaction }) => {
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-black text-navy">{item.description || item.source || "Wallet transaction"}</p>
         <p className="mt-1 truncate text-xs font-semibold text-slate-500">
-          {new Date(item.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - {item.status || "completed"}
+          {personLabel ? `${personLabel} - ` : ""}{new Date(item.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - {item.status || "completed"}
         </p>
       </div>
       <p className={`text-sm font-black ${isDebit ? "text-rose-600" : "text-emerald-600"}`}>

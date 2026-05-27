@@ -27,6 +27,7 @@ import { isValidPost, usePostStore } from "../store/postStore";
 
 const FEED_PAGE_SIZE = 10;
 const FEED_AUDIO_PREFERENCE_KEY = "vibebook:feed-audio";
+const STEM_TERMS = ["stem", "science", "technology", "engineering", "math", "education", "coding", "robotics", "ai"];
 
 const readFeedAudioPreference = () => {
   try {
@@ -344,8 +345,8 @@ const FeedItem = memo(
           post={item}
           alt={profile.name || "VibeBook media"}
           className="home-feed-media group h-full w-full"
-          imageClassName="h-full w-full object-contain"
-          videoClassName="h-full w-full object-contain"
+          imageClassName="h-full w-full object-cover"
+          videoClassName="h-full w-full object-cover"
           placeholderClassName="h-full w-full"
           active={isActive}
           audioUnlockToken={audioUnlockToken}
@@ -592,6 +593,7 @@ const CommentsSheet = ({
 
 const Home = () => {
   const { isAuthenticated, user: currentUser } = useAuth();
+  const activeLiveStreams = useLiveStreamStore((state) => state.activeLiveStreams);
   const posts = usePostStore((state) => state.posts);
   const setPosts = usePostStore((state) => state.setPosts);
   const mergePosts = usePostStore((state) => state.mergePosts);
@@ -872,10 +874,45 @@ const Home = () => {
           return Boolean(item?.userId?.isFollowing);
         }
 
+        if (feedMode === "stem") {
+          const haystack = [
+            item.caption,
+            item.category,
+            item.userId?.category,
+            ...(Array.isArray(item.tags) ? item.tags : []),
+          ].join(" ").toLowerCase();
+
+          return STEM_TERMS.some((term) => haystack.includes(term));
+        }
+
         return true;
       }),
     [validPosts, feedMode]
   );
+
+  const handleFeedTab = useCallback((value) => {
+    if (value === "explore") {
+      navigate("/explore");
+      return;
+    }
+
+    if (value === "live") {
+      if (activeLiveStreams[0]?.id) {
+        navigate(`/live/${activeLiveStreams[0].id}`);
+        return;
+      }
+
+      scrollerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    if (value === "following" && !isAuthenticated) {
+      navigate("/login");
+      return;
+    }
+
+    setFeedMode(value);
+  }, [activeLiveStreams, isAuthenticated, navigate]);
 
   const activeCommentPost = useMemo(() => visibleFeed.find((item) => item._id === commentOpen), [commentOpen, visibleFeed]);
   const nextVideoPreloadUrl = useMemo(() => {
@@ -1311,28 +1348,27 @@ const Home = () => {
 
   return (
     <section className="home-feed-viewport relative overflow-hidden bg-slate-950 text-white">
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex justify-center pt-3">
-        <div className="pointer-events-auto flex rounded-full bg-slate-950/55 p-1 text-xs font-black text-white shadow-xl backdrop-blur">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex justify-center px-2 pt-3">
+        <div className="pointer-events-auto flex max-w-full gap-1 overflow-x-auto rounded-full bg-slate-950/42 p-1 text-xs font-black text-white shadow-xl backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {[
-            { value: "for-you", label: "For You" },
+            { value: "live", label: "LIVE" },
+            { value: "stem", label: "STEM" },
+            { value: "explore", label: "Explore" },
             { value: "following", label: "Following" },
-          ].map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`rounded-full px-4 py-2 transition ${feedMode === option.value ? "bg-white text-navy" : "text-white/75 hover:text-white"}`}
-              onClick={() => {
-                if (option.value === "following" && !isAuthenticated) {
-                  navigate("/login");
-                  return;
-                }
-
-                setFeedMode(option.value);
-              }}
-            >
-              {option.label}
-            </button>
-          ))}
+            { value: "for-you", label: "For You" },
+          ].map((option) => {
+            const active = option.value === feedMode;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`shrink-0 rounded-full px-3.5 py-2 transition sm:px-4 ${active ? "bg-white text-navy" : "text-white/75 hover:text-white"}`}
+                onClick={() => handleFeedTab(option.value)}
+              >
+                {option.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1360,7 +1396,7 @@ const Home = () => {
       >
         {visibleFeed.length ? (
           <>
-            <div className="sticky top-0 z-40 bg-slate-950">
+            <div className="sticky top-0 z-40 bg-transparent">
               <LiveDiscoveryRow onStreamClick={(stream) => stream?.id && navigate(`/live/${stream.id}`)} />
             </div>
             {visibleFeed.map((item, index) => (

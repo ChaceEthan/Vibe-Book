@@ -151,6 +151,8 @@ const normalizeTransaction = (transaction = {}) => ({
   balanceAfter: Number(transaction?.balanceAfter ?? 0),
   status: transaction?.status || "completed",
   metadata: transaction?.metadata && typeof transaction.metadata === "object" ? transaction.metadata : {},
+  relatedUser: transaction?.relatedUser && typeof transaction.relatedUser === "object" ? transaction.relatedUser : null,
+  relatedUserId: transaction?.relatedUserId || transaction?.relatedUser?.id || "",
   createdAt: transaction?.createdAt || new Date().toISOString(),
 });
 

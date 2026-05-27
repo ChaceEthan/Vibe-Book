@@ -1,14 +1,12 @@
 // @ts-nocheck
 import {
-  BarChart3,
-  Compass,
   Home,
   LogIn,
   MessageCircle,
   Plus,
   Settings,
   User,
-  Wallet,
+  Users,
 } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +14,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Upload from "./Upload.jsx";
 import NotificationBell from "./NotificationBell.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useLanguage } from "../context/LanguageContext.jsx";
 import { messageApi } from "../services/api";
 import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
@@ -37,7 +34,6 @@ const Navbar = () => {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadType, setUploadType] = useState("image");
   const { isAuthenticated, user, token } = useAuth();
-  const { language, languages, setLanguage } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const notificationCacheRef = useRef(new Map());
@@ -50,14 +46,14 @@ const Navbar = () => {
   const bottomNavItems = useMemo(
     () => [
       { to: "/", label: "Home", icon: Home },
-      { to: "/explore", label: "Explore", icon: Compass },
+      { to: "/search", label: "Friends", icon: Users },
       { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
       { to: isAuthenticated && user?._id ? `/profile/${user._id}` : "/login", label: "Profile", icon: User },
     ],
     [isAuthenticated, unreadCount, user?._id]
   );
 
-  const activeLanguage = languages.find((item) => item.code === language);
+  const isHome = location.pathname === "/";
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -235,53 +231,16 @@ const Navbar = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <header className={`sticky top-0 z-50 backdrop-blur ${isHome ? "border-b border-transparent bg-white/90" : "border-b border-slate-200 bg-white/95"}`}>
         <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
-          <Link to="/" className="flex shrink-0 items-center gap-1.5 sm:gap-3" onClick={refreshHomeIfActive}>
+          <Link to="/" className={`flex shrink-0 items-center gap-1.5 overflow-hidden transition-all sm:gap-3 ${isHome ? "pointer-events-none w-0 opacity-0" : ""}`} onClick={refreshHomeIfActive}>
             <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
             <span className="whitespace-nowrap text-base font-black text-navy sm:text-lg">VibeBook</span>
           </Link>
 
           <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2">
-            <NavLink
-              to="/creator-studio"
-              aria-label="Creator Studio"
-              className={({ isActive }) =>
-                `inline-flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-lg border text-slate-600 transition hover:border-brand hover:bg-brand/10 hover:text-navy md:w-auto md:px-3 md:text-sm md:font-bold ${
-                  isActive ? "border-brand bg-brand/15 text-navy" : "border-slate-200 bg-white"
-                }`
-              }
-            >
-              <BarChart3 className="h-4 w-4 shrink-0" />
-              <span className="hidden md:inline">Creator Studio</span>
-            </NavLink>
-            <select
-              className="h-9 w-11 shrink-0 rounded-lg border border-slate-200 bg-white px-1 text-xs font-bold uppercase text-slate-600 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 sm:w-16 sm:px-2"
-              aria-label="Language"
-              title={activeLanguage?.label || "Language"}
-              value={language}
-              onChange={(event) => setLanguage(event.target.value)}
-            >
-              {languages.map((item) => (
-                <option key={item.code} value={item.code}>
-                  {item.code.toUpperCase()}
-                </option>
-              ))}
-            </select>
             {isAuthenticated ? (
               <>
-                <NavLink
-                  to="/wallet"
-                  aria-label="NEX Wallet"
-                  className={({ isActive }) =>
-                    `inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-slate-600 transition hover:border-brand hover:bg-brand/10 hover:text-navy ${
-                      isActive ? "border-brand bg-brand/15 text-navy" : "border-slate-200 bg-white"
-                    }`
-                  }
-                  title="NEX Wallet"
-                >
-                  <Wallet className="h-5 w-5" />
-                </NavLink>
                 <NotificationBell />
                 <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings & Privacy" title="Settings & Privacy">
                   <Settings className="h-5 w-5" />

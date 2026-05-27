@@ -590,7 +590,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
 
   return (
     <motion.div
-      className="fixed inset-0 z-[100] flex bg-black text-white"
+      className="fixed inset-0 z-[100] flex bg-slate-950 text-white"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -690,7 +690,7 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
         </AnimatePresence>
 
         <main className="relative z-10 min-h-0 flex-1">
-          <section className="relative h-full min-h-0 overflow-hidden bg-black">
+          <section className="relative h-full min-h-0 overflow-hidden bg-slate-950">
             <video
               ref={videoRef}
               autoPlay
@@ -754,68 +754,67 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
               </div>
             </div>
 
-            <div className="absolute bottom-[9.25rem] right-3 flex flex-col items-center gap-3 sm:bottom-32 sm:right-5">
-              <button
-                type="button"
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${micMuted ? "bg-red-600 text-white" : "bg-white/15 text-white hover:bg-white/25"}`}
-                onClick={() => setMicMuted((current) => !current)}
-                disabled={!cameraReady}
-                aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
-              >
-                {micMuted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/25 disabled:opacity-60"
-                onClick={() => {
-                  setSelectedVideoDeviceId("");
-                  setFrontCamera((current) => !current);
-                }}
-                disabled={!cameraReady || isBusy}
-                aria-label="Switch camera"
-              >
-                <SwitchCamera className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${flashOn ? "bg-yellow-400 text-slate-950" : "bg-white/15 text-white hover:bg-white/25"}`}
-                onClick={toggleFlash}
-                disabled={!cameraReady || !flashSupported}
-                aria-label="Toggle flash"
-              >
-                <Zap className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${form.beautyFilter === "natural" ? "bg-white/15 text-white hover:bg-white/25" : "bg-pink-500 text-white"}`}
-                onClick={() => updateForm({ beautyFilter: form.beautyFilter === "natural" ? "soft" : "natural" })}
-                disabled={isBusy}
-                aria-label="Toggle beauty filter"
-              >
-                <Wand2 className="h-5 w-5" />
-              </button>
-              <button
-                type="button"
-                className={`inline-flex h-12 w-12 items-center justify-center rounded-full backdrop-blur transition ${form.effectsPreset === "none" ? "bg-white/15 text-white hover:bg-white/25" : "bg-blue-500 text-white"}`}
-                onClick={() => {
-                  const currentIndex = EFFECT_PRESETS.indexOf(form.effectsPreset);
-                  updateForm({ effectsPreset: EFFECT_PRESETS[(currentIndex + 1) % EFFECT_PRESETS.length] });
-                }}
-                disabled={isBusy}
-                aria-label="Cycle filters"
-              >
-                <Sparkles className="h-5 w-5" />
-              </button>
-            </div>
-
             <AnimatePresence>
               {advancedOpen && (
                 <motion.div
-                  className="absolute inset-x-3 bottom-28 z-20 rounded-2xl border border-white/10 bg-black/78 p-3 backdrop-blur-xl sm:inset-x-auto sm:right-20 sm:w-80"
+                  className="absolute inset-x-3 bottom-28 z-20 rounded-2xl border border-white/10 bg-black/78 p-3 backdrop-blur-xl sm:inset-x-auto sm:right-5 sm:w-96"
                   initial={{ opacity: 0, y: 18, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 18, scale: 0.96 }}
                 >
+                  <div className="mb-3 grid grid-cols-5 gap-2">
+                    <button
+                      type="button"
+                      className={`flex h-11 items-center justify-center rounded-xl transition ${micMuted ? "bg-red-600 text-white" : "bg-white/10 text-white hover:bg-white/20"}`}
+                      onClick={() => setMicMuted((current) => !current)}
+                      disabled={!cameraReady}
+                      aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+                    >
+                      {micMuted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      className="flex h-11 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20 disabled:opacity-60"
+                      onClick={() => {
+                        setSelectedVideoDeviceId("");
+                        setFrontCamera((current) => !current);
+                      }}
+                      disabled={!cameraReady || isBusy}
+                      aria-label="Switch camera"
+                    >
+                      <SwitchCamera className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex h-11 items-center justify-center rounded-xl transition ${flashOn ? "bg-yellow-400 text-slate-950" : "bg-white/10 text-white hover:bg-white/20"}`}
+                      onClick={toggleFlash}
+                      disabled={!cameraReady || !flashSupported}
+                      aria-label="Toggle flash"
+                    >
+                      <Zap className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex h-11 items-center justify-center rounded-xl transition ${form.beautyFilter === "natural" ? "bg-white/10 text-white hover:bg-white/20" : "bg-pink-500 text-white"}`}
+                      onClick={() => updateForm({ beautyFilter: form.beautyFilter === "natural" ? "soft" : "natural" })}
+                      disabled={isBusy}
+                      aria-label="Toggle beauty filter"
+                    >
+                      <Wand2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex h-11 items-center justify-center rounded-xl transition ${form.effectsPreset === "none" ? "bg-white/10 text-white hover:bg-white/20" : "bg-blue-500 text-white"}`}
+                      onClick={() => {
+                        const currentIndex = EFFECT_PRESETS.indexOf(form.effectsPreset);
+                        updateForm({ effectsPreset: EFFECT_PRESETS[(currentIndex + 1) % EFFECT_PRESETS.length] });
+                      }}
+                      disabled={isBusy}
+                      aria-label="Cycle filters"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                    </button>
+                  </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="block space-y-1.5">
                       <span className="text-xs font-black uppercase tracking-wide text-white/60">Quality</span>

@@ -98,7 +98,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
     return (
       <div className="flex gap-3 overflow-x-hidden px-4 pb-3 pt-14">
         {[...Array(5)].map((_, index) => (
-          <div key={index} className="h-36 w-[7.25rem] shrink-0 animate-pulse rounded-lg bg-white/10" />
+          <div key={index} className="h-32 w-[6.5rem] shrink-0 animate-pulse rounded-lg bg-white/10" />
         ))}
       </div>
     );
@@ -110,7 +110,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
   return (
     <motion.section
-      className="relative z-50 border-b border-white/10 bg-slate-950/96 pb-3 pt-14 shadow-[0_18px_36px_rgba(2,6,23,0.28)] backdrop-blur"
+      className="relative z-50 bg-slate-950/18 pb-2 pt-14 backdrop-blur-sm"
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
@@ -151,7 +151,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
       <div
         ref={containerRef}
-        className="scroll-smooth flex gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="scroll-smooth flex gap-2.5 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         onScroll={updateScrollState}
       >
         <AnimatePresence initial={false}>
@@ -160,7 +160,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
               key={stream.id}
               type="button"
               onClick={() => onStreamClick?.(stream)}
-              className="group relative h-36 w-[7.25rem] shrink-0 overflow-hidden rounded-lg text-left shadow-xl outline-none ring-1 ring-white/10 transition focus-visible:ring-2 focus-visible:ring-white"
+              className="group relative h-32 w-[6.5rem] shrink-0 overflow-hidden rounded-lg text-left shadow-xl outline-none ring-1 ring-white/10 transition focus-visible:ring-2 focus-visible:ring-white sm:h-36 sm:w-[7.25rem]"
               initial={{ opacity: 0, scale: 0.92 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.92 }}
@@ -171,7 +171,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
                 animate={{ opacity: [0.75, 1, 0.75] }}
                 transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
               />
-              <span className="absolute inset-[2px] overflow-hidden rounded-[0.42rem] bg-slate-950">
+              <span className="absolute inset-[2px] overflow-hidden rounded-[0.42rem] bg-white/10">
                 <SafeCoverImage
                   user={stream.creator}
                   src={thumbnailFor(stream)}

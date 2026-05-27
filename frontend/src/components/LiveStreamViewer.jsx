@@ -114,7 +114,16 @@ const giftGroups = [
   { id: "premium", label: "Legendary", gifts: liveGiftOptions.filter((gift) => gift.tier === "premium") },
 ];
 
-const activeVideoTrackFor = (stream) => stream?.getVideoTracks?.().find((track) => track.readyState === "live");
+const activeVideoTrackFor = (stream) => stream?.getVideoTracks?.().find((track) => track.readyState === "live" && track.enabled !== false);
+
+const ensureMediaTrackState = (stream, { audioEnabled = true, videoEnabled = true } = {}) => {
+  stream?.getAudioTracks?.().forEach((track) => {
+    track.enabled = Boolean(audioEnabled);
+  });
+  stream?.getVideoTracks?.().forEach((track) => {
+    track.enabled = Boolean(videoEnabled);
+  });
+};
 
 const makeGiftParticles = (tier = "small") => {
   const count = tier === "premium" ? 28 : tier === "medium" ? 16 : 9;
@@ -470,12 +479,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         return;
       }
 
-      stream.getAudioTracks?.().forEach((track) => {
-        track.enabled = !muted;
-      });
-      stream.getVideoTracks?.().forEach((track) => {
-        track.enabled = cameraEnabled;
-      });
+      ensureMediaTrackState(stream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
       previewStreamRef.current = stream;
       setPreviewStream(stream);
       setLivePreviewStream(streamId, stream);
@@ -499,6 +503,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     video.muted = true;
     video.defaultMuted = true;
     video.playsInline = true;
+    ensureMediaTrackState(previewStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
     video.play?.().catch(() => null);
 
     return () => {
@@ -516,6 +521,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     video.muted = muted;
     video.defaultMuted = muted;
     video.playsInline = true;
+    remoteStream.getVideoTracks?.().forEach((track) => {
+      track.enabled = true;
+    });
     video.play?.().catch(() => null);
 
     return () => {
@@ -527,12 +535,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   useEffect(() => {
     if (isCreator) {
-      previewStream?.getAudioTracks?.().forEach((track) => {
-        track.enabled = !muted;
-      });
-      previewStream?.getVideoTracks?.().forEach((track) => {
-        track.enabled = cameraEnabled;
-      });
+      ensureMediaTrackState(previewStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
     }
   }, [cameraEnabled, isCreator, muted, previewStream]);
 
@@ -1052,6 +1055,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
       const localStream = previewStreamRef.current;
       if (isCreatorRef.current && localStream) {
+        ensureMediaTrackState(localStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
         localStream.getTracks?.().forEach((track) => {
           const alreadyAdded = connection.getSenders().some((sender) => sender.track === track);
           if (!alreadyAdded) {
@@ -1633,15 +1637,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         cameraOnlyStream.getTracks().forEach((track) => track.stop());
         throw new Error("Camera track unavailable");
       }
-      nextVideoTrack.enabled = cameraEnabled;
+      nextVideoTrack.enabled = Boolean(cameraEnabled);
 
       const nextLocalStream = currentLocalStream || new MediaStream();
       const previousVideoTracks = nextLocalStream.getVideoTracks();
       previousVideoTracks.forEach((track) => nextLocalStream.removeTrack(track));
       nextLocalStream.addTrack(nextVideoTrack);
-      nextLocalStream.getAudioTracks().forEach((track) => {
-        track.enabled = !muted;
-      });
+      ensureMediaTrackState(nextLocalStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
 
       const replacements = [];
       peerConnectionsRef.current.forEach((connection) => {
@@ -1685,9 +1687,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     if (!isCreator) return;
     setCameraEnabled((current) => {
       const nextEnabled = !current;
-      previewStreamRef.current?.getVideoTracks?.().forEach((track) => {
-        track.enabled = nextEnabled;
-      });
+      ensureMediaTrackState(previewStreamRef.current, { audioEnabled: !muted, videoEnabled: nextEnabled });
       setStatusMessage(nextEnabled ? "Camera on" : "Camera off");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1500);
       return nextEnabled;
@@ -1896,13 +1896,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   return (
     <motion.div
-      className="fixed inset-0 z-50 overflow-hidden bg-black text-white"
+      className="fixed inset-0 z-50 overflow-hidden bg-slate-950 text-white"
       initial={{ opacity: 0 }}
       animate={hasPremiumGift ? { opacity: 1, x: [0, -4, 5, -3, 2, 0] } : { opacity: 1, x: 0 }}
       exit={{ opacity: 0 }}
       transition={{ duration: hasPremiumGift ? 0.55 : 0.2 }}
     >
-      <div className="absolute inset-0 bg-black">
+      <div className="absolute inset-0 bg-slate-950">
         <div className={`absolute inset-0 bg-cover bg-center transition-opacity duration-300 ${hasActiveVideo ? "opacity-0" : "opacity-100"}`} style={streamBackground} onClick={handleDoubleTap} onTouchEnd={handleDoubleTap} />
         {previewStream && (
           <video
@@ -1941,8 +1941,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-black/68 via-black/8 to-black/84" />
         {!hasActiveVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-800/80 via-slate-950 to-black" />
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 via-slate-950 to-emerald-950">
+            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-700/45 via-slate-950/35 to-emerald-950/55" />
             <div className="relative mx-6 w-full max-w-xs overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-4 text-center shadow-2xl backdrop-blur">
               <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white/12">
                 <Video className="h-9 w-9 text-white/70" />
@@ -1982,11 +1982,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           </div>
         </div>
 
-        {!isCreator && (
-          <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
-            <X className="h-5 w-5" />
-          </button>
-        )}
+        <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
+          <X className="h-5 w-5" />
+        </button>
       </header>
 
       <AnimatePresence>
@@ -2018,25 +2016,6 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           </motion.div>
         )}
       </AnimatePresence>
-
-      <div className="absolute right-2 top-[calc(6rem+env(safe-area-inset-top))] z-30 flex max-h-[calc(100dvh-14.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col items-center gap-2 overflow-visible sm:right-5 sm:top-1/2 sm:-translate-y-1/2">
-        {!isCreator && (
-          <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-55" onClick={handleFollowCreator} disabled={followBusy || isFollowingCreator} aria-label={isFollowingCreator ? "Following creator" : "Follow creator"}>
-            {followBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : isFollowingCreator ? <UserCheck className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
-          </button>
-        )}
-        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={handleShare} aria-label="Share livestream">
-          <Share2 className="h-5 w-5" />
-        </button>
-        <button type="button" className="flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={() => requestRoomState("viewers")} aria-label="Open viewer list">
-          <Users className="h-4.5 w-4.5" />
-          <span className="mt-0.5 text-[0.56rem] font-black leading-none">{compactNumber(liveStream.viewerCount || liveViewers.length || 0)}</span>
-        </button>
-        <button type="button" className="flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-50" onClick={() => sendReaction("heart")} disabled={!reactionsEnabled || ended} aria-label="Send heart reaction">
-          <Heart className="h-5 w-5 fill-current text-red-400" />
-          <span className="mt-0.5 text-[0.58rem] font-black leading-none">{compactNumber(heartCombo || liveMetrics.giftsReceived || 0)}</span>
-        </button>
-      </div>
 
       <AnimatePresence>
         {showGiftMenu && (
@@ -2110,7 +2089,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       <AnimatePresence>
         {showLiveSettings && (
           <motion.div
-            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-[4.6rem] z-40 max-h-[58dvh] overflow-y-auto rounded-2xl border border-white/10 bg-black/86 p-3 shadow-2xl backdrop-blur-xl [scrollbar-width:none] sm:left-auto sm:right-20 sm:w-[22rem] [&::-webkit-scrollbar]:hidden"
+            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[58dvh] overflow-y-auto rounded-2xl border border-white/10 bg-black/86 p-3 shadow-2xl backdrop-blur-xl [scrollbar-width:none] sm:left-auto sm:right-5 sm:w-[22rem] [&::-webkit-scrollbar]:hidden"
             initial={{ opacity: 0, scale: 0.94, y: 18 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.94, y: 18 }}
@@ -2139,9 +2118,27 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                 </span>
                 <span className="text-[0.65rem] uppercase text-white/50">{muted ? "Muted" : "On"}</span>
               </button>
+              {!isCreator && (
+                <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white disabled:opacity-55" onClick={handleFollowCreator} disabled={followBusy || isFollowingCreator}>
+                  <span className="inline-flex items-center gap-2">{isFollowingCreator ? <UserCheck className="h-4 w-4" /> : <UserPlus className="h-4 w-4" />} Follow host</span>
+                  <span className="text-[0.65rem] uppercase text-white/50">{followBusy ? "Saving" : isFollowingCreator ? "Done" : "Add"}</span>
+                </button>
+              )}
+              <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white" onClick={handleShare}>
+                <span className="inline-flex items-center gap-2"><Share2 className="h-4 w-4" /> Share live</span>
+                <span className="text-[0.65rem] uppercase text-white/50">Link</span>
+              </button>
+              <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white" onClick={() => requestRoomState("viewers")}>
+                <span className="inline-flex items-center gap-2"><Users className="h-4 w-4" /> Viewers</span>
+                <span className="text-[0.65rem] uppercase text-white/50">{compactNumber(liveStream.viewerCount || liveViewers.length || 0)}</span>
+              </button>
+              <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white disabled:opacity-50" onClick={() => sendReaction("heart")} disabled={!reactionsEnabled || ended}>
+                <span className="inline-flex items-center gap-2"><Heart className="h-4 w-4 fill-current text-red-300" /> Send heart</span>
+                <span className="text-[0.65rem] uppercase text-white/50">{compactNumber(heartCombo || liveMetrics.giftsReceived || 0)}</span>
+              </button>
               {isCreator && (
                 <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white" onClick={handleToggleCameraEnabled}>
-                  <span className="inline-flex items-center gap-2">{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Disable camera</span>
+                  <span className="inline-flex items-center gap-2">{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} {cameraEnabled ? "Disable camera" : "Enable camera"}</span>
                   <span className="text-[0.65rem] uppercase text-white/50">{cameraEnabled ? "On" : "Off"}</span>
                 </button>
               )}
@@ -2263,7 +2260,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       <AnimatePresence>
         {activeSheet && activeSheet !== "gifts" && (
           <motion.div
-            className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-2 right-[4.6rem] z-40 max-h-[46dvh] overflow-hidden rounded-2xl border border-white/10 bg-black/84 shadow-2xl backdrop-blur-xl sm:left-5 sm:right-24 sm:w-[26rem]"
+            className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[46dvh] overflow-hidden rounded-2xl border border-white/10 bg-black/84 shadow-2xl backdrop-blur-xl sm:left-5 sm:right-auto sm:w-[26rem]"
             initial={{ opacity: 0, y: 18, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 18, scale: 0.96 }}
@@ -2390,6 +2387,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             <AnimatePresence initial={false}>
               {comments.map((comment) => {
                 const giftComment = comment.type === "gift";
+                const commentBody = textFromLiveValue(comment.text, giftComment ? `sent ${comment.giftName || "a gift"}` : "");
                 return (
                   <motion.div
                     key={comment.id}
@@ -2402,7 +2400,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                     <span className="min-w-0 flex-1">
                       <span className="mr-1.5 font-black text-white">{comment.username || "Guest"}</span>
                       {giftComment && <Gift className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-amber-200" />}
-                      <span className="break-words font-semibold text-white/82">{giftComment ? `sent ${comment.giftName || "a gift"}` : comment.text}</span>
+                      <span className="break-words font-semibold text-white/82">{giftComment ? `sent ${comment.giftName || "a gift"}` : commentBody}</span>
                       {comment.failed && (
                         <button
                           type="button"
