@@ -184,6 +184,11 @@ const findLiveRoomMember = (streamId, value = "") => {
   return Array.from(state.viewers.values()).find((member) => member.socketId === id || member.userId === id);
 };
 
+const hostMembersFor = (streamId) => {
+  const state = stateFor(streamId);
+  return Array.from(state.viewers.values()).filter((member) => member.isHost && member.socketId);
+};
+
 const socketIsHost = async (streamId, socket) => {
   const state = stateFor(streamId);
   const member = state.viewers.get(socket.id);
@@ -992,7 +997,7 @@ const setupLiveStreamSockets = (io) => {
       callback?.({ ok: true });
     };
 
-    socket.on("live:creator-ready", (data = {}, callback) => {
+    socket.on("live:creator-ready", async (data = {}, callback) => {
       const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
       if (!streamId) {
         callback?.({ ok: false, error: "Stream ID required" });
@@ -1000,6 +1005,11 @@ const setupLiveStreamSockets = (io) => {
       }
 
       ensureSocketInLiveRoom(socket, streamId);
+      if (!(await socketIsHost(streamId, socket))) {
+        callback?.({ ok: false, error: "Only the host can publish live video" });
+        return;
+      }
+      upsertLiveRoomMember(streamId, socket, { isHost: true, role: "host" });
 
       socket.to(roomFor(streamId)).emit("live:creator-ready", {
         streamId,
@@ -1017,14 +1027,23 @@ const setupLiveStreamSockets = (io) => {
       }
 
       ensureSocketInLiveRoom(socket, streamId);
+      upsertLiveRoomMember(streamId, socket, { username: data.username });
 
-      socket.to(roomFor(streamId)).emit("live:viewer-ready", {
+      const payload = {
         streamId,
         viewerSocketId: socket.id,
         viewer: viewerPayloadFor(socket, data.username),
         timestamp: nowIso(),
-      });
-      callback?.({ ok: true });
+      };
+      const hosts = hostMembersFor(streamId).filter((member) => member.socketId !== socket.id);
+
+      if (hosts.length) {
+        hosts.forEach((host) => io.to(host.socketId).emit("live:viewer-ready", payload));
+      } else {
+        socket.to(roomFor(streamId)).emit("live:viewer-ready", payload);
+      }
+
+      callback?.({ ok: true, hosts: hosts.length });
     });
 
     socket.on("live:webrtc-offer", (data = {}, callback) => relayWebRtcPayload("live:webrtc-offer", data, callback));

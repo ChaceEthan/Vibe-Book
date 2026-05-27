@@ -363,15 +363,11 @@ const PostMedia = ({
         className={`relative overflow-hidden bg-slate-950 ${className}`}
         onClick={handleInteractiveTap}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.18),rgba(15,23,42,0.92)_58%,#020617_100%)]" />
-        {!minimal && (
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.16),rgba(15,23,42,0.82)_52%,#020617_100%)]" aria-hidden="true" />
-        )}
         <video
           key={`${post?._id || rawUrl}-${retryCount}`}
           ref={mediaRef}
           src={src}
-        className={`relative z-10 h-full w-full object-cover ${videoClassName}`}
+          className={`relative z-10 h-full w-full object-cover ${videoClassName}`}
           muted={isMuted}
           loop={loop}
           playsInline
@@ -452,7 +448,6 @@ const PostMedia = ({
 
   return (
     <div className={`relative overflow-hidden bg-slate-950 ${className}`}>
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.14),rgba(15,23,42,0.88)_58%,#020617_100%)]" aria-hidden="true" />
       <img
         key={`${post?._id || rawUrl}-${retryCount}`}
         ref={mediaRef}

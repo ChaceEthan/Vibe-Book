@@ -19,8 +19,8 @@ import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
 
 const navClass = ({ isActive }) =>
-  `flex min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-bold transition ${
-    isActive ? "text-brand" : "text-slate-500"
+  `flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-black transition sm:text-[11px] ${
+    isActive ? "text-white" : "text-white/60 hover:text-white"
   }`;
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -231,7 +231,7 @@ const Navbar = () => {
 
   return (
     <>
-      <header className={`sticky top-0 z-50 backdrop-blur ${isHome ? "border-b border-transparent bg-white/90" : "border-b border-slate-200 bg-white/95"}`}>
+      <header className={`sticky top-0 z-50 backdrop-blur ${isHome ? "border-b border-white/10 bg-slate-950 text-white" : "border-b border-slate-200 bg-white/95"}`}>
         <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
           <Link to="/" className={`flex shrink-0 items-center gap-1.5 overflow-hidden transition-all sm:gap-3 ${isHome ? "pointer-events-none w-0 opacity-0" : ""}`} onClick={refreshHomeIfActive}>
             <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
@@ -241,13 +241,13 @@ const Navbar = () => {
           <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2">
             {isAuthenticated ? (
               <>
-                <NotificationBell />
-                <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings & Privacy" title="Settings & Privacy">
+                <NotificationBell buttonClassName={isHome ? "!text-white hover:!bg-white/10 hover:!text-white" : ""} />
+                <Link to="/settings" className={`rounded-lg p-2 ${isHome ? "text-white/85 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100"}`} aria-label="Settings & Privacy" title="Settings & Privacy">
                   <Settings className="h-5 w-5" />
                 </Link>
               </>
             ) : (
-              <Link to="/login" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Login">
+              <Link to="/login" className={`rounded-lg p-2 ${isHome ? "text-white/85 hover:bg-white/10" : "text-slate-500 hover:bg-slate-100"}`} aria-label="Login">
                 <LogIn className="h-5 w-5" />
               </Link>
             )}
@@ -257,8 +257,8 @@ const Navbar = () => {
 
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
-      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-slate-200 bg-white/95 px-3 pb-[calc(0.6rem+env(safe-area-inset-bottom))] pt-2 shadow-[0_-12px_30px_rgba(15,23,42,0.08)] backdrop-blur">
-        <div className="mx-auto grid w-full max-w-xs grid-cols-5 items-end gap-1">
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black/95 px-2 pb-[calc(0.45rem+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-10px_26px_rgba(0,0,0,0.28)] backdrop-blur">
+        <div className="mx-auto grid w-full max-w-sm grid-cols-5 items-end gap-0.5">
           {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
@@ -271,10 +271,10 @@ const Navbar = () => {
 
           <button
             type="button"
-            className="flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-[11px] font-bold text-navy"
+            className="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-black text-white sm:text-[11px]"
             onClick={() => openUpload("image")}
           >
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand text-navy shadow-lg ring-4 ring-white">
+            <span className="flex h-9 w-11 items-center justify-center rounded-xl bg-white text-black shadow-[7px_0_0_rgba(239,68,68,0.85),-7px_0_0_rgba(34,211,238,0.85)]">
               <Plus className="h-5 w-5" />
             </span>
             <span>Upload</span>

@@ -19,7 +19,6 @@ import { Link, useNavigate } from "react-router-dom";
 import PostMedia from "../components/PostMedia.jsx";
 import SafeAvatar from "../components/SafeAvatar.jsx";
 import LiveAvatar from "../components/LiveAvatar.jsx";
-import LiveDiscoveryRow from "../components/LiveDiscoveryRow.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 import { feedApi, getApiErrorMessage, isRetryableApiError, mediaUrl, userApi } from "../services/api";
 import { useLiveStreamStore } from "../store/livestreamStore";
@@ -365,8 +364,7 @@ const FeedItem = memo(
           onInvalid={() => onInvalid(item._id)}
         />
 
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 bg-gradient-to-b from-slate-950/35 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[34%] bg-gradient-to-t from-slate-950/70 via-slate-950/18 to-transparent" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[24%] bg-gradient-to-t from-slate-950/30 via-transparent to-transparent" />
 
         {showVideoBranding && (
           <div className="pointer-events-none absolute bottom-[calc(13.8rem+env(safe-area-inset-bottom))] left-3 z-20 sm:bottom-[calc(14.8rem+env(safe-area-inset-bottom))] sm:left-5">
@@ -594,6 +592,7 @@ const CommentsSheet = ({
 const Home = () => {
   const { isAuthenticated, user: currentUser } = useAuth();
   const activeLiveStreams = useLiveStreamStore((state) => state.activeLiveStreams);
+  const getActiveLiveStreams = useLiveStreamStore((state) => state.getActiveLiveStreams);
   const posts = usePostStore((state) => state.posts);
   const setPosts = usePostStore((state) => state.setPosts);
   const mergePosts = usePostStore((state) => state.mergePosts);
@@ -641,6 +640,15 @@ const Home = () => {
     window.addEventListener("vibebook:live-started", handleLiveStarted);
     return () => window.removeEventListener("vibebook:live-started", handleLiveStarted);
   }, [navigate]);
+
+  useEffect(() => {
+    getActiveLiveStreams(20, 0, { silent: true });
+    const timer = window.setInterval(() => {
+      getActiveLiveStreams(20, 0, { silent: true });
+    }, 30000);
+
+    return () => window.clearInterval(timer);
+  }, [getActiveLiveStreams]);
 
   const replaceFeedItem = useCallback((nextItem, options = {}) => {
     replacePost(nextItem, options);
@@ -1349,20 +1357,22 @@ const Home = () => {
   return (
     <section className="home-feed-viewport relative overflow-hidden bg-slate-950 text-white">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex justify-center px-2 pt-3">
-        <div className="pointer-events-auto flex max-w-full gap-1 overflow-x-auto rounded-full bg-slate-950/42 p-1 text-xs font-black text-white shadow-xl backdrop-blur-xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="pointer-events-auto flex max-w-full gap-3 overflow-x-auto px-2 text-xs font-black uppercase text-white drop-shadow-[0_1px_12px_rgba(0,0,0,0.55)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {[
             { value: "live", label: "LIVE" },
             { value: "stem", label: "STEM" },
-            { value: "explore", label: "Explore" },
-            { value: "following", label: "Following" },
-            { value: "for-you", label: "For You" },
+            { value: "explore", label: "EXPLORE" },
+            { value: "following", label: "FOLLOWING" },
+            { value: "for-you", label: "FOR YOU" },
           ].map((option) => {
             const active = option.value === feedMode;
             return (
               <button
                 key={option.value}
                 type="button"
-                className={`shrink-0 rounded-full px-3.5 py-2 transition sm:px-4 ${active ? "bg-white text-navy" : "text-white/75 hover:text-white"}`}
+                className={`shrink-0 border-b-2 px-0.5 pb-1.5 pt-1 transition ${
+                  active ? "border-white text-white" : "border-transparent text-white/75 hover:text-white"
+                }`}
                 onClick={() => handleFeedTab(option.value)}
               >
                 {option.label}
@@ -1396,9 +1406,6 @@ const Home = () => {
       >
         {visibleFeed.length ? (
           <>
-            <div className="sticky top-0 z-40 bg-transparent">
-              <LiveDiscoveryRow onStreamClick={(stream) => stream?.id && navigate(`/live/${stream.id}`)} />
-            </div>
             {visibleFeed.map((item, index) => (
               <FeedItem
                 key={item._id || `${item.url}-${index}`}

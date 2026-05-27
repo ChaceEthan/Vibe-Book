@@ -29,7 +29,7 @@ const iconForType = (type) => {
   return Bell;
 };
 
-export function NotificationBell() {
+export function NotificationBell({ buttonClassName = "" }) {
   const { isAuthenticated, token, user } = useAuth();
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
@@ -359,7 +359,7 @@ export function NotificationBell() {
         type="button"
         onClick={toggleNotifications}
         onPointerDown={(event) => event.stopPropagation()}
-        className="relative z-[92] inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition duration-200 hover:bg-slate-100 hover:text-slate-900 active:scale-95"
+        className={`relative z-[92] inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition duration-200 hover:bg-slate-100 hover:text-slate-900 active:scale-95 ${buttonClassName}`}
         aria-label="Notifications"
         aria-expanded={open}
         aria-controls="notification-panel"

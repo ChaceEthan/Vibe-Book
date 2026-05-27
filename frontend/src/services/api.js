@@ -361,10 +361,15 @@ export const ratingApi = {
 };
 
 export const mediaUrl = (path) => {
-  const value = String(path || "").trim();
+  let value = String(path || "").trim();
+  value = value.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
 
   if (!value) {
     return `${APP_ROOT_URL}/logo.png`;
+  }
+
+  if (/^http:\/\/res\.cloudinary\.com\//i.test(value)) {
+    return value.replace(/^http:/i, "https:");
   }
 
   if (/^(https?:|blob:|data:)/.test(value)) {

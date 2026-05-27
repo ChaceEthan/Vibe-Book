@@ -6,6 +6,9 @@ dist
 *.log
 *.tmp
 /data/
+.smoke
+desktop.png
+mobile.png
 
 .env
 .env.*

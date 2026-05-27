@@ -11,8 +11,10 @@ import {
   Download,
   FileText,
   Globe2,
+  Gift,
   Heart,
   HelpCircle,
+  History,
   ImagePlus,
   Info,
   KeyRound,
@@ -30,6 +32,7 @@ import {
   UserRound,
   Users,
   Volume2,
+  Wallet,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1030,6 +1033,13 @@ const Settings = () => {
           <SettingRow icon={BarChart3} label="Video quality preference" selectValue={localPrefs.videoQuality} options={QUALITY_OPTIONS} onSelect={(value) => saveLocalPreference("videoQuality", value, "Video quality saved.")} />
           <SettingRow icon={Languages} label="Caption language" selectValue={localPrefs.captionLanguage} options={languageOptions} onSelect={(value) => saveLocalPreference("captionLanguage", value, "Caption language saved.")} />
           <SettingRow icon={CheckCircle2} label="Accessibility" selectValue={localPrefs.accessibility} options={ACCESSIBILITY_OPTIONS} onSelect={(value) => saveLocalPreference("accessibility", value, "Accessibility preference saved.")} />
+        </SettingsSection>
+
+        <SettingsSection title="Wallet & Rewards" icon={Wallet}>
+          <SettingRow icon={Wallet} label="Wallet" detail="Balance, receive, transfer, and wallet settings" actionLabel="Open" onClick={() => navigate("/wallet")} />
+          <SettingRow icon={Gift} label="Rewards" detail="Redeem NEX Points and manage creator perks" actionLabel="Open" onClick={() => navigate("/wallet/rewards")} />
+          <SettingRow icon={BarChart3} label="Earnings" detail="Top earners, spenders, and creator reward rank" actionLabel="Open" onClick={() => navigate("/wallet/leaderboard")} />
+          <SettingRow icon={History} label="History" detail="Gifts sent, gifts received, live rewards, transfers, and timestamps" actionLabel="Open" onClick={() => navigate("/wallet/transactions")} />
         </SettingsSection>
 
         <SettingsSection title="Creator Tools" icon={BarChart3}>

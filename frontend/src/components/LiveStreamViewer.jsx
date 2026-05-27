@@ -40,8 +40,26 @@ const MAX_COMMENTS = 120;
 const HEARTBEAT_MS = 25000;
 const COMMENT_SEND_COOLDOWN_MS = 850;
 const GIFT_SEND_COOLDOWN_MS = 1000;
+const TURN_URLS = String(import.meta.env.VITE_TURN_URL || import.meta.env.VITE_WEBRTC_TURN_URL || "")
+  .split(",")
+  .map((url) => url.trim())
+  .filter(Boolean);
+const TURN_USERNAME = import.meta.env.VITE_TURN_USERNAME || import.meta.env.VITE_WEBRTC_TURN_USERNAME || "";
+const TURN_CREDENTIAL = import.meta.env.VITE_TURN_CREDENTIAL || import.meta.env.VITE_WEBRTC_TURN_CREDENTIAL || "";
+const TURN_ICE_SERVER = TURN_URLS.length
+  ? {
+      urls: TURN_URLS,
+      ...(TURN_USERNAME ? { username: TURN_USERNAME } : {}),
+      ...(TURN_CREDENTIAL ? { credential: TURN_CREDENTIAL } : {}),
+    }
+  : null;
 const PEER_CONNECTION_CONFIG = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:global.stun.twilio.com:3478" },
+    ...(TURN_ICE_SERVER ? [TURN_ICE_SERVER] : []),
+  ],
+  iceCandidatePoolSize: 10,
 };
 
 const formatLiveDuration = (startedAt) => {
@@ -204,11 +222,14 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const peerConnectionsRef = useRef(new Map());
   const pendingIceCandidatesRef = useRef(new Map());
   const videoRetryTimerRef = useRef(null);
+  const videoRequestTimersRef = useRef(new Set());
   const hostEndCleanupTimerRef = useRef(null);
   const hostMediaCleanupTimerRef = useRef(null);
   const previewStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const isCreatorRef = useRef(false);
+  const webrtcReadyRef = useRef(false);
+  const mediaStateRef = useRef({ muted: false, cameraEnabled: true });
   const endedRef = useRef(false);
   const creatorCameraRequestRef = useRef(0);
   const seenCommentIdsRef = useRef(new Set());
@@ -368,6 +389,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    mediaStateRef.current = { muted, cameraEnabled };
+  }, [cameraEnabled, muted]);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -824,7 +849,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       );
       if (isCreatorRef.current && previewStreamRef.current) {
         activeSocket.emit("live:creator-ready", { streamId });
-      } else {
+      } else if (webrtcReadyRef.current) {
         activeSocket.emit("live:request-video", { streamId, username: viewerName });
       }
     }
@@ -983,6 +1008,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         connection.onicecandidate = null;
         connection.ontrack = null;
         connection.onconnectionstatechange = null;
+        connection.oniceconnectionstatechange = null;
         connection.close();
         peerConnectionsRef.current.delete(peerId);
       }
@@ -1012,6 +1038,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       videoRetryTimerRef.current = null;
     };
 
+    const clearVideoRequestTimers = () => {
+      videoRequestTimersRef.current.forEach((timer) => window.clearTimeout(timer));
+      videoRequestTimersRef.current.clear();
+    };
+
     const getPeerConnection = (peerSocketId) => {
       const peerId = String(peerSocketId || "");
       if (!peerId) return null;
@@ -1033,6 +1064,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       connection.ontrack = (event) => {
         const incomingStream = event.streams?.[0] || remoteStreamRef.current || new MediaStream();
         if (event.track && !incomingStream.getTracks().some((track) => track.id === event.track.id)) {
+          event.track.enabled = true;
           incomingStream.addTrack(event.track);
         }
         event.track?.addEventListener?.("unmute", () => {
@@ -1048,14 +1080,30 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       connection.onconnectionstatechange = () => {
         if (["failed", "closed"].includes(connection.connectionState)) {
           closePeerConnection(peerId);
+          if (!isCreatorRef.current) {
+            scheduleVideoRequests([650, 1800]);
+          }
         } else if (connection.connectionState === "disconnected" && !isCreatorRef.current) {
-          window.setTimeout(requestCreatorVideo, 1200);
+          scheduleVideoRequests([900, 2200]);
+        } else if (connection.connectionState === "connected") {
+          clearVideoRetry();
+          setStatusMessage("");
+        }
+      };
+      connection.oniceconnectionstatechange = () => {
+        if (isCreatorRef.current) return;
+        if (connection.iceConnectionState === "failed") {
+          connection.restartIce?.();
+          scheduleVideoRequests([700, 1800]);
+        } else if (connection.iceConnectionState === "disconnected") {
+          scheduleVideoRequests([1200, 3000]);
         }
       };
 
       const localStream = previewStreamRef.current;
       if (isCreatorRef.current && localStream) {
-        ensureMediaTrackState(localStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
+        const mediaState = mediaStateRef.current;
+        ensureMediaTrackState(localStream, { audioEnabled: !mediaState.muted, videoEnabled: mediaState.cameraEnabled });
         localStream.getTracks?.().forEach((track) => {
           const alreadyAdded = connection.getSenders().some((sender) => sender.track === track);
           if (!alreadyAdded) {
@@ -1073,6 +1121,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.emit("live:request-video", {
         streamId,
         username: currentUser?.username || currentUser?.name || "Guest",
+      });
+    };
+
+    const scheduleVideoRequests = (delays = [0, 700, 2200]) => {
+      if (isCreatorRef.current) return;
+
+      delays.forEach((delay) => {
+        const timer = window.setTimeout(() => {
+          videoRequestTimersRef.current.delete(timer);
+          if (!mountedRef.current || activeVideoTrackFor(remoteStreamRef.current)) {
+            return;
+          }
+          requestCreatorVideo();
+        }, Math.max(0, Number(delay) || 0));
+        videoRequestTimersRef.current.add(timer);
       });
     };
 
@@ -1100,6 +1163,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.emit("live:creator-ready", { streamId });
     };
 
+    const handleCreatorReady = (data = {}) => {
+      if (data.streamId && data.streamId !== streamId) return;
+      scheduleVideoRequests([0, 650]);
+    };
+
     const handleViewerReady = async (data = {}) => {
       if (data.streamId && data.streamId !== streamId) return;
       const viewerSocketId = data.viewerSocketId || data.fromSocketId;
@@ -1110,6 +1178,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         closePeerConnection(viewerSocketId);
         const connection = getPeerConnection(viewerSocketId);
         if (!connection) return;
+        const mediaState = mediaStateRef.current;
+        ensureMediaTrackState(localStream, { audioEnabled: !mediaState.muted, videoEnabled: mediaState.cameraEnabled });
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
         activeSocket.emit("live:webrtc-offer", {
@@ -1129,8 +1199,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (!creatorSocketId || !data.offer) return;
 
       try {
-        const connection = getPeerConnection(creatorSocketId);
+        let connection = getPeerConnection(creatorSocketId);
+        if (connection?.signalingState !== "stable") {
+          closePeerConnection(creatorSocketId);
+          connection = getPeerConnection(creatorSocketId);
+        }
         if (!connection) return;
+        setStatusMessage("Connecting live video...");
         await connection.setRemoteDescription(data.offer);
         await flushPendingIceCandidates(creatorSocketId, connection);
         const answer = await connection.createAnswer();
@@ -1190,13 +1265,14 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (isCreatorRef.current) {
         announceCreatorReady();
       } else {
-        requestCreatorVideo();
+        scheduleVideoRequests([0, 700, 2200]);
         startVideoRetry();
       }
     };
 
+    webrtcReadyRef.current = true;
     activeSocket.on("live:viewer-ready", handleViewerReady);
-    activeSocket.on("live:creator-ready", requestCreatorVideo);
+    activeSocket.on("live:creator-ready", handleCreatorReady);
     activeSocket.on("live:webrtc-offer", handleOffer);
     activeSocket.on("live:webrtc-answer", handleAnswer);
     activeSocket.on("live:webrtc-ice", handleIce);
@@ -1206,13 +1282,14 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     if (isCreator) {
       announceCreatorReady();
     } else {
-      requestCreatorVideo();
+      scheduleVideoRequests([0, 450, 1500, 3500]);
       startVideoRetry();
     }
 
     return () => {
+      webrtcReadyRef.current = false;
       activeSocket.off("live:viewer-ready", handleViewerReady);
-      activeSocket.off("live:creator-ready", requestCreatorVideo);
+      activeSocket.off("live:creator-ready", handleCreatorReady);
       activeSocket.off("live:webrtc-offer", handleOffer);
       activeSocket.off("live:webrtc-answer", handleAnswer);
       activeSocket.off("live:webrtc-ice", handleIce);
@@ -1222,6 +1299,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       peerConnectionsRef.current.clear();
       pendingIceCandidatesRef.current.clear();
       clearVideoRetry();
+      clearVideoRequestTimers();
       if (!isCreatorRef.current) {
         remoteStreamRef.current?.getTracks?.().forEach((track) => track.stop());
         remoteStreamRef.current = null;
@@ -1868,7 +1946,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   if (!liveStream && localLoading) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950">
         <div className="rounded-2xl bg-white/10 px-5 py-4 text-center text-white backdrop-blur">
           <Loader2 className="mx-auto h-8 w-8 animate-spin" />
           <p className="mt-3 text-sm font-black">Opening live...</p>
@@ -1879,7 +1957,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   if (!liveStream) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black text-white">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 text-white">
         <div className="rounded-2xl bg-white/10 px-5 py-4 text-center backdrop-blur">
           <VideoOff className="mx-auto h-8 w-8 text-white/70" />
           <p className="mt-3 text-sm font-black">{statusMessage || "Live is unavailable"}</p>
@@ -1939,10 +2017,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             onTouchEnd={handleDoubleTap}
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/68 via-black/8 to-black/84" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-950/30 via-transparent to-slate-950/40" />
         {!hasActiveVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 via-slate-950 to-emerald-950">
-            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-700/45 via-slate-950/35 to-emerald-950/55" />
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 via-slate-900 to-emerald-950">
+            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-700/30 via-transparent to-emerald-950/40" />
             <div className="relative mx-6 w-full max-w-xs overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-4 text-center shadow-2xl backdrop-blur">
               <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white/12">
                 <Video className="h-9 w-9 text-white/70" />
@@ -1973,8 +2051,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           <div className="min-w-0 pt-1">
             <p className="max-w-[48vw] truncate text-sm font-black">{creator.name || creator.username || "Creator"}</p>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
-              <span className="rounded-full bg-black/45 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">{liveDuration}</span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">
+              <span className="rounded-full bg-slate-950/50 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">{liveDuration}</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-950/50 px-2.5 py-1 text-[0.64rem] font-black backdrop-blur">
                 <Users className="h-3.5 w-3.5" />
                 {compactNumber(liveStream.viewerCount || liveViewers.length || 0)}
               </span>
@@ -1982,7 +2060,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           </div>
         </div>
 
-        <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
+        <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950/50 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
           <X className="h-5 w-5" />
         </button>
       </header>
@@ -1990,7 +2068,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       <AnimatePresence>
         {showCreatorCard && (
           <motion.div
-            className="absolute left-3 top-[calc(5.9rem+env(safe-area-inset-top))] z-40 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl border border-white/10 bg-black/84 p-3 text-white shadow-2xl backdrop-blur-xl sm:left-5"
+            className="absolute left-3 top-[calc(5.9rem+env(safe-area-inset-top))] z-40 w-[min(20rem,calc(100vw-1.5rem))] rounded-2xl border border-white/10 bg-slate-950/80 p-3 text-white shadow-2xl backdrop-blur-xl sm:left-5"
             initial={{ opacity: 0, y: -8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}
@@ -2020,7 +2098,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       <AnimatePresence>
         {showGiftMenu && (
           <motion.div
-            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[58dvh] overflow-hidden rounded-t-2xl border border-white/10 bg-black/86 shadow-2xl backdrop-blur-xl sm:left-auto sm:right-20 sm:w-[26rem] sm:rounded-2xl"
+            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[58dvh] overflow-hidden rounded-t-2xl border border-white/10 bg-slate-950/80 shadow-2xl backdrop-blur-xl sm:left-auto sm:right-20 sm:w-[26rem] sm:rounded-2xl"
             initial={{ opacity: 0, scale: 0.94, y: 18 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.94, y: 18 }}
@@ -2089,7 +2167,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       <AnimatePresence>
         {showLiveSettings && (
           <motion.div
-            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[58dvh] overflow-y-auto rounded-2xl border border-white/10 bg-black/86 p-3 shadow-2xl backdrop-blur-xl [scrollbar-width:none] sm:left-auto sm:right-5 sm:w-[22rem] [&::-webkit-scrollbar]:hidden"
+            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[58dvh] overflow-y-auto rounded-2xl border border-white/10 bg-slate-950/80 p-3 shadow-2xl backdrop-blur-xl [scrollbar-width:none] sm:left-auto sm:right-5 sm:w-[22rem] [&::-webkit-scrollbar]:hidden"
             initial={{ opacity: 0, scale: 0.94, y: 18 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.94, y: 18 }}
@@ -2175,7 +2253,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         {joinEvents.map((event, index) => (
           <motion.div
             key={event.id}
-            className="absolute left-3 flex items-center gap-2 rounded-full border border-white/15 bg-black/58 px-3 py-2 text-xs font-black text-white shadow-xl backdrop-blur sm:left-5"
+            className="absolute left-3 flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/60 px-3 py-2 text-xs font-black text-white shadow-xl backdrop-blur sm:left-5"
             initial={{ opacity: 0, y: 16, scale: 0.96 }}
             animate={{ opacity: [0, 1, 1, 0], y: [16, 0, 0, -12], scale: [0.96, 1, 1, 0.98] }}
             transition={{ duration: 2.4, ease: "easeOut" }}
@@ -2207,12 +2285,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               ))}
               {isPremium ? (
                 <motion.div
-                  className="absolute inset-0 flex items-center justify-center bg-black/18 px-4 backdrop-blur-[2px]"
+                  className="absolute inset-0 flex items-center justify-center bg-slate-950/20 px-4 backdrop-blur-[2px]"
                   initial={{ opacity: 0, scale: 0.72, y: 30 }}
                   animate={{ opacity: [0, 1, 1, 0], scale: [0.72, 1.06, 1, 0.96], y: [30, 0, 0, -28] }}
                   transition={{ duration: 4.6, ease: "easeOut" }}
                 >
-                  <div className="relative flex w-[min(22rem,86vw)] flex-col items-center rounded-2xl border border-white/20 bg-black/68 px-5 py-6 text-center shadow-[0_0_80px_rgba(250,204,21,0.38)] backdrop-blur" style={{ boxShadow: `0 0 92px ${giftGlow}66` }}>
+                  <div className="relative flex w-[min(22rem,86vw)] flex-col items-center rounded-2xl border border-white/20 bg-slate-950/70 px-5 py-6 text-center shadow-[0_0_80px_rgba(250,204,21,0.38)] backdrop-blur" style={{ boxShadow: `0 0 92px ${giftGlow}66` }}>
                     <span className="absolute inset-0 rounded-2xl opacity-35 blur-xl" style={{ background: gradientForGift(gift.colors?.length ? gift : giftMeta) }} />
                     <span className="relative flex h-24 w-24 items-center justify-center rounded-2xl text-6xl leading-none drop-shadow-[0_0_36px_rgba(255,255,255,0.8)]" style={{ background: gradientForGift(gift.colors?.length ? gift : giftMeta) }}>
                       {isVibeBookGift ? <img src="/logo.png" alt="" className="h-16 w-16 rounded-xl object-contain" /> : (gift.emoji || giftMeta.emoji)}
@@ -2225,7 +2303,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                 </motion.div>
               ) : (
                 <motion.div
-                  className="absolute flex items-center gap-2 rounded-full border border-white/15 bg-black/68 px-3 py-2 text-xs font-black text-white shadow-2xl backdrop-blur"
+                  className="absolute flex items-center gap-2 rounded-full border border-white/15 bg-slate-950/70 px-3 py-2 text-xs font-black text-white shadow-2xl backdrop-blur"
                   initial={{ y: 40, opacity: 0, scale: 0.9 }}
                   animate={{ y: -150, opacity: [0, 1, 1, 0], scale: [0.9, 1.05, 1, 0.96] }}
                   transition={{ duration: 3.2, ease: "easeOut" }}
@@ -2260,7 +2338,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       <AnimatePresence>
         {activeSheet && activeSheet !== "gifts" && (
           <motion.div
-            className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[46dvh] overflow-hidden rounded-2xl border border-white/10 bg-black/84 shadow-2xl backdrop-blur-xl sm:left-5 sm:right-auto sm:w-[26rem]"
+            className="absolute bottom-[calc(6rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[46dvh] overflow-hidden rounded-2xl border border-white/10 bg-slate-950/80 shadow-2xl backdrop-blur-xl sm:left-5 sm:right-auto sm:w-[26rem]"
             initial={{ opacity: 0, y: 18, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 18, scale: 0.96 }}
@@ -2369,13 +2447,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             </div>
           )}
 
-          <div className="mb-2 max-w-md rounded-lg border border-white/10 bg-black/38 px-3 py-2 backdrop-blur">
+          <div className="mb-2 max-w-md rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 backdrop-blur">
             <p className="truncate text-sm font-black">{liveTitle}</p>
             {!!liveStream.description && <p className="mt-0.5 line-clamp-2 text-[0.68rem] font-semibold leading-4 text-white/58">{liveStream.description}</p>}
           </div>
 
           {isCreator && (
-            <div className="mb-2 grid max-w-md grid-cols-4 gap-1.5 rounded-lg border border-white/10 bg-black/42 p-2 text-center text-[0.64rem] font-black backdrop-blur">
+            <div className="mb-2 grid max-w-md grid-cols-4 gap-1.5 rounded-lg border border-white/10 bg-slate-950/40 p-2 text-center text-[0.64rem] font-black backdrop-blur">
               <span><strong className="block text-sm">{compactNumber(liveMetrics.giftsReceived)}</strong> Gifts</span>
               <span><strong className="block text-sm">{compactNumber(liveMetrics.nexEarned)}</strong> NEX</span>
               <span><strong className="block truncate text-sm">{topSupporter?.username || "-"}</strong> Top</span>
@@ -2391,7 +2469,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                 return (
                   <motion.div
                     key={comment.id}
-                    className={`flex max-w-[94%] items-start gap-2 rounded-lg px-2.5 py-2 text-xs shadow-lg backdrop-blur ${giftComment ? "border border-amber-300/25 bg-amber-300/16" : "bg-black/42"} ${comment.optimistic ? "opacity-70" : ""}`}
+                    className={`flex max-w-[94%] items-start gap-2 rounded-lg px-2.5 py-2 text-xs shadow-lg backdrop-blur ${giftComment ? "border border-amber-300/25 bg-amber-300/20" : "bg-slate-950/40"} ${comment.optimistic ? "opacity-70" : ""}`}
                     initial={{ opacity: 0, y: 10, scale: 0.98 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -8 }}
@@ -2432,7 +2510,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         </div>
 
         <div className="mt-2 flex max-w-[calc(100%-4.9rem)] items-center gap-2 sm:max-w-xl">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-white/10 bg-black/52 px-3 py-2 backdrop-blur">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-white/10 bg-slate-950/50 px-3 py-2 backdrop-blur">
             <MessageCircle className="h-4 w-4 shrink-0 text-white/58" />
             <input
               ref={commentInputRef}
@@ -2460,7 +2538,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               setShowGiftMenu(false);
               setActiveSheet("");
             }}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/58 text-white shadow-lg backdrop-blur transition hover:scale-105"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-950/60 text-white shadow-lg backdrop-blur transition hover:scale-105"
             aria-label="Open live settings"
           >
             <Settings className="h-4 w-4" />
