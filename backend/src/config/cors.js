@@ -17,8 +17,9 @@ const normalizeOrigin = (value = "") => {
 };
 
 const requiredOrigins = [
-  "http://localhost:5173",
   "https://vibe-book-kappa.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
 ];
 
 const configuredOrigins = [

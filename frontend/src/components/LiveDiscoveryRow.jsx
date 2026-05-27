@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext.jsx";
 import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
+import SafeAvatar from "./SafeAvatar.jsx";
 import SafeCoverImage from "./SafeCoverImage.jsx";
 
 const thumbnailFor = (stream = {}) => stream.thumbnail || stream.coverImage || stream.creator?.coverImage || stream.creator?.avatar || stream.creator?.profilePicture || "";
@@ -95,9 +96,9 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
   if (loading && activeLiveStreams.length === 0) {
     return (
-      <div className="flex gap-3 overflow-x-hidden px-4 pb-3 pt-16">
+      <div className="flex gap-3 overflow-x-hidden px-4 pb-3 pt-14">
         {[...Array(5)].map((_, index) => (
-          <div key={index} className="h-40 w-28 shrink-0 animate-pulse rounded-lg bg-white/10" />
+          <div key={index} className="h-36 w-[7.25rem] shrink-0 animate-pulse rounded-lg bg-white/10" />
         ))}
       </div>
     );
@@ -109,7 +110,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
 
   return (
     <motion.section
-      className="relative z-50 border-b border-white/10 bg-slate-950/96 pb-3 pt-16 shadow-[0_18px_36px_rgba(2,6,23,0.28)] backdrop-blur"
+      className="relative z-50 border-b border-white/10 bg-slate-950/96 pb-3 pt-14 shadow-[0_18px_36px_rgba(2,6,23,0.28)] backdrop-blur"
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
@@ -159,7 +160,7 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
               key={stream.id}
               type="button"
               onClick={() => onStreamClick?.(stream)}
-              className="group relative h-40 w-28 shrink-0 overflow-hidden rounded-lg text-left shadow-xl outline-none ring-1 ring-white/10 transition focus-visible:ring-2 focus-visible:ring-white"
+              className="group relative h-36 w-[7.25rem] shrink-0 overflow-hidden rounded-lg text-left shadow-xl outline-none ring-1 ring-white/10 transition focus-visible:ring-2 focus-visible:ring-white"
               initial={{ opacity: 0, scale: 0.92 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.92 }}
@@ -187,12 +188,15 @@ const LiveDiscoveryRow = ({ onStreamClick }) => {
                 <Users className="h-3 w-3" />
                 {stream.viewerCount || 0}
               </span>
-              <span className="absolute inset-x-2 bottom-2 min-w-0">
-                <span className="block truncate text-xs font-black text-white">
-                  {stream.creator?.name || stream.creator?.username || "Live"}
-                </span>
-                <span className="mt-0.5 block truncate text-[0.66rem] font-semibold text-white/66">
-                  {stream.title || stream.category || "Live now"}
+              <span className="absolute inset-x-2 bottom-2 flex min-w-0 items-end gap-2">
+                <SafeAvatar user={stream.creator} src={stream.creator?.avatar || stream.creator?.profilePicture || stream.creator?.profileImage} className="h-8 w-8 shrink-0 rounded-full border-2 border-white object-cover shadow-lg" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-black text-white">
+                    {stream.creator?.name || stream.creator?.username || "Live"}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[0.64rem] font-semibold text-white/70">
+                    {stream.title || stream.category || "Live now"}
+                  </span>
                 </span>
               </span>
             </motion.button>

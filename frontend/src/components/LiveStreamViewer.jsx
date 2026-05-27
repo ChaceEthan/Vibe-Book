@@ -2,15 +2,15 @@
 import {
   BookOpen,
   Check,
-  Eye,
+  Flag,
   Gift,
   Heart,
   Loader2,
   MessageCircle,
   Mic,
   MicOff,
-  Radio,
   Send,
+  Settings,
   Share2,
   Smile,
   Sparkles,
@@ -18,6 +18,8 @@ import {
   UserCheck,
   UserPlus,
   Users,
+  Video,
+  VideoOff,
   Volume2,
   VolumeX,
   X,
@@ -138,6 +140,45 @@ const compactNumber = (value = 0) => {
   return String(number);
 };
 
+const textFromLiveValue = (value, fallback = "") => {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value || typeof value !== "object") return fallback;
+
+  const candidate = value.text ?? value.message ?? value.body ?? value.content ?? value.value ?? value.label ?? value.name ?? value.giftName;
+  if (candidate === value) return fallback;
+  return textFromLiveValue(candidate, fallback);
+};
+
+const liveUserFrom = (data = {}) => {
+  const user = data.user || data.sender || data.viewer || data.author || {};
+  return {
+    userId: data.userId || data.senderId || user._id || user.id || "",
+    username: textFromLiveValue(data.username || data.name || user.username || user.name, "Guest"),
+    avatar: data.avatar || data.profilePicture || data.profileImage || user.avatar || user.profilePicture || user.profileImage || "",
+  };
+};
+
+const sanitizeLiveComment = (data = {}, fallbackText = "") => {
+  const user = liveUserFrom(data);
+  const type = data.type === "gift" || data.giftId || data.giftName ? "gift" : "comment";
+  const giftName = textFromLiveValue(data.giftName || data.gift?.name || data.gift, "");
+  const text = type === "gift"
+    ? textFromLiveValue(data.text || data.message, giftName ? `sent ${giftName}` : "sent a gift")
+    : textFromLiveValue(data.text ?? data.message ?? data.body ?? data.comment, fallbackText);
+  const timestamp = data.timestamp || data.createdAt || new Date().toISOString();
+
+  return {
+    ...data,
+    ...user,
+    id: data.id || data.clientId || `${type}:${user.userId || user.username}:${timestamp}:${text || giftName}`,
+    type,
+    giftName,
+    text,
+    timestamp,
+  };
+};
+
 const LiveStreamViewer = ({ streamId, onClose }) => {
   const navigate = useNavigate();
   const { user: currentUser, token } = useAuth();
@@ -180,6 +221,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const [giftLeaderboard, setGiftLeaderboard] = useState({});
   const [sendingGiftId, setSendingGiftId] = useState("");
   const [showGiftMenu, setShowGiftMenu] = useState(false);
+  const [showLiveSettings, setShowLiveSettings] = useState(false);
   const [selectedGiftId, setSelectedGiftId] = useState("heart");
   const [giftCombo, setGiftCombo] = useState({});
   const [liveViewers, setLiveViewers] = useState([]);
@@ -195,6 +237,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const [localLoading, setLocalLoading] = useState(true);
   const [switchingCamera, setSwitchingCamera] = useState(false);
   const [liveFacingMode, setLiveFacingMode] = useState("user");
+  const [cameraEnabled, setCameraEnabled] = useState(true);
+  const [selectedQuality, setSelectedQuality] = useState("720p");
+  const [reportedLive, setReportedLive] = useState(false);
   const [cameraFlipNonce, setCameraFlipNonce] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const [ended, setEnded] = useState(false);
@@ -212,6 +257,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     joinLiveStream,
     leaveLiveStream,
     removeLiveStream,
+    updateStreamMetadata,
     updateViewerCount,
     upsertLiveStream,
   } = useLiveStreamStore();
@@ -289,6 +335,24 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     reactionTimersRef.current.add(timer);
   };
 
+  const appendLiveComment = (entry = {}, options = {}) => {
+    const comment = sanitizeLiveComment(entry);
+    const id = comment.id || `${comment.type || "comment"}:${Date.now()}:${Math.random()}`;
+    const text = textFromLiveValue(comment.text, comment.type === "gift" ? "sent a gift" : "");
+
+    if (!text && comment.type !== "gift") return null;
+    if (!options.allowDuplicate && seenCommentIdsRef.current.has(id)) return null;
+
+    seenCommentIdsRef.current.add(id);
+    if (seenCommentIdsRef.current.size > 240) {
+      seenCommentIdsRef.current = new Set(Array.from(seenCommentIdsRef.current).slice(-160));
+    }
+
+    const nextComment = { ...comment, id, text };
+    setComments((current) => [...current.slice(-(MAX_COMMENTS - 1)), nextComment]);
+    return nextComment;
+  };
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -360,6 +424,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   }, [liveStream?.id, liveStream?.maxViewers, liveStream?.stats?.giftValue, liveStream?.stats?.giftsReceived, liveStream?.stats?.topSupporters, liveStream?.viewerCount]);
 
   useEffect(() => {
+    const streamQuality = liveStream?.settings?.selectedQuality || liveStream?.settings?.quality;
+    if (streamQuality) {
+      setSelectedQuality(streamQuality);
+    }
+  }, [liveStream?.settings?.quality, liveStream?.settings?.selectedQuality]);
+
+  useEffect(() => {
     const interval = window.setInterval(() => setClockTick(Date.now()), 1000);
     return () => window.clearInterval(interval);
   }, []);
@@ -402,6 +473,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       stream.getAudioTracks?.().forEach((track) => {
         track.enabled = !muted;
       });
+      stream.getVideoTracks?.().forEach((track) => {
+        track.enabled = cameraEnabled;
+      });
       previewStreamRef.current = stream;
       setPreviewStream(stream);
       setLivePreviewStream(streamId, stream);
@@ -415,7 +489,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     return () => {
       canceled = true;
     };
-  }, [ended, isCreator, liveFacingMode, localLoading, muted, previewStream, streamId]);
+  }, [cameraEnabled, ended, isCreator, liveFacingMode, localLoading, muted, previewStream, streamId]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -456,8 +530,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       previewStream?.getAudioTracks?.().forEach((track) => {
         track.enabled = !muted;
       });
+      previewStream?.getVideoTracks?.().forEach((track) => {
+        track.enabled = cameraEnabled;
+      });
     }
-  }, [isCreator, muted, previewStream]);
+  }, [cameraEnabled, isCreator, muted, previewStream]);
 
   useEffect(() => {
     if (!localLoading && !isCreator) {
@@ -524,13 +601,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     function handleComment(data) {
       if (data.streamId && data.streamId !== streamId) return;
-      const id = data.id || `${data.userId || data.username || "guest"}:${data.timestamp || Date.now()}:${data.text || ""}`;
-      if (seenCommentIdsRef.current.has(id)) return;
-      seenCommentIdsRef.current.add(id);
-      if (seenCommentIdsRef.current.size > 240) {
-        seenCommentIdsRef.current = new Set(Array.from(seenCommentIdsRef.current).slice(-160));
-      }
-      setComments((current) => [...current.slice(-(MAX_COMMENTS - 1)), { ...data, id: data.id || `${Date.now()}:${Math.random()}` }]);
+      appendLiveComment(data);
     }
 
     function handleReaction(data) {
@@ -569,6 +640,15 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       const senderId = data.userId || data.username || data.id || "viewer";
       const id = eventId;
       const tier = data.tier || giftMeta.tier || "small";
+      appendLiveComment({
+        ...data,
+        id: data.chatId || `gift-chat:${eventId}`,
+        type: "gift",
+        giftId: giftMeta.id,
+        giftName,
+        text: `${data.username || "Someone"} sent ${giftName}`,
+        value: amount,
+      });
 
       setGiftEvents((current) => [
         ...current,
@@ -948,10 +1028,17 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         });
       };
       connection.ontrack = (event) => {
-        const [stream] = event.streams || [];
-        if (!stream) return;
-        remoteStreamRef.current = stream;
-        setRemoteStream(stream);
+        const incomingStream = event.streams?.[0] || remoteStreamRef.current || new MediaStream();
+        if (event.track && !incomingStream.getTracks().some((track) => track.id === event.track.id)) {
+          incomingStream.addTrack(event.track);
+        }
+        event.track?.addEventListener?.("unmute", () => {
+          remoteStreamRef.current = incomingStream;
+          setRemoteStream(incomingStream);
+          remoteVideoRef.current?.play?.().catch(() => null);
+        }, { once: true });
+        remoteStreamRef.current = incomingStream;
+        setRemoteStream(incomingStream);
         setStatusMessage("");
         clearVideoRetry();
       };
@@ -1340,6 +1427,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }
 
     const clientId = `gift:${streamId}:${giftId}:${Date.now()}`;
+    const giftChatId = `gift-chat:${clientId}`;
     const senderKey = userIdFor(currentUser) || activeSocket.id || "viewer";
     const senderName = currentUser?.username || currentUser?.name || "You";
     const tier = giftMeta.tier || "small";
@@ -1376,6 +1464,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         giftTimersRef.current.delete(giftRemovalTimer);
       }
       setGiftEvents((current) => current.filter((gift) => gift.id !== clientId));
+      seenCommentIdsRef.current.delete(giftChatId);
+      setComments((current) => current.filter((comment) => comment.id !== giftChatId));
       setLiveMetrics((current) => ({
         ...current,
         giftsReceived: Math.max(0, Number(current.giftsReceived || 0) - 1),
@@ -1413,6 +1503,20 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     seenGiftIdsRef.current.add(clientId);
     setGiftEvents((current) => [...current, optimisticGift].slice(-12));
+    appendLiveComment({
+      id: giftChatId,
+      streamId,
+      type: "gift",
+      userId: userIdFor(currentUser),
+      username: senderName,
+      avatar: currentUser?.avatar || currentUser?.profilePicture || currentUser?.profileImage || "",
+      giftId: giftMeta.id,
+      giftName: giftMeta.name,
+      text: `sent ${giftMeta.name}`,
+      value: pointCost,
+      timestamp: optimisticGift.timestamp,
+      optimistic: true,
+    });
     setLiveMetrics((current) => ({
       ...current,
       giftsReceived: Number(current.giftsReceived || 0) + 1,
@@ -1492,6 +1596,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         } else {
           loadWallet?.();
         }
+        setComments((current) => current.map((comment) => (
+          comment.id === giftChatId ? { ...comment, optimistic: false } : comment
+        )));
         setStatusMessage(`${giftMeta.name} sent`);
         window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
       }
@@ -1526,6 +1633,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         cameraOnlyStream.getTracks().forEach((track) => track.stop());
         throw new Error("Camera track unavailable");
       }
+      nextVideoTrack.enabled = cameraEnabled;
 
       const nextLocalStream = currentLocalStream || new MediaStream();
       const previousVideoTracks = nextLocalStream.getVideoTracks();
@@ -1564,6 +1672,51 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }
   };
 
+  const handleToggleMuted = () => {
+    setMuted((current) => {
+      const nextMuted = !current;
+      setStatusMessage(isCreator ? (nextMuted ? "Microphone muted" : "Microphone on") : (nextMuted ? "Live audio muted" : "Live audio on"));
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1500);
+      return nextMuted;
+    });
+  };
+
+  const handleToggleCameraEnabled = () => {
+    if (!isCreator) return;
+    setCameraEnabled((current) => {
+      const nextEnabled = !current;
+      previewStreamRef.current?.getVideoTracks?.().forEach((track) => {
+        track.enabled = nextEnabled;
+      });
+      setStatusMessage(nextEnabled ? "Camera on" : "Camera off");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1500);
+      return nextEnabled;
+    });
+  };
+
+  const handleQualityChange = (quality) => {
+    setSelectedQuality(quality);
+    setStatusMessage(`${quality} quality selected`);
+    window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1500);
+    if (isCreator && streamId && updateStreamMetadata) {
+      updateStreamMetadata(streamId, {
+        settings: {
+          ...(liveStream?.settings || {}),
+          selectedQuality: quality,
+          quality,
+        },
+      });
+    }
+  };
+
+  const handleReportLive = () => {
+    if (reportedLive) return;
+    setReportedLive(true);
+    socketRef.current?.emit("live:report", { streamId, creatorId });
+    setStatusMessage("Report submitted");
+    window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+  };
+
   const handleShare = async () => {
     const shareUrl = `${window.location.origin}/live/${streamId}`;
     try {
@@ -1582,6 +1735,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const toggleGiftTray = () => {
     setShowGiftMenu((current) => {
       const next = !current;
+      setShowLiveSettings(false);
       setActiveSheet(next ? "gifts" : "");
       return next;
     });
@@ -1599,6 +1753,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     if (sheet) {
       setActiveSheet(sheet);
       setShowGiftMenu(false);
+      setShowLiveSettings(false);
     }
     if (!activeSocket || !streamId) return;
     activeSocket.emit("live:viewers:list", { streamId }, (ack = {}) => {
@@ -1636,6 +1791,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         applyRoomState(ack.roomState || ack);
         setActiveSheet("panel");
         setShowGiftMenu(false);
+        setShowLiveSettings(false);
         setStatusMessage("Panel request sent");
       } else {
         setStatusMessage(ack.error || "Unable to request panel");
@@ -1725,7 +1881,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black text-white">
         <div className="rounded-2xl bg-white/10 px-5 py-4 text-center backdrop-blur">
-          <Radio className="mx-auto h-8 w-8 text-red-500" />
+          <VideoOff className="mx-auto h-8 w-8 text-white/70" />
           <p className="mt-3 text-sm font-black">{statusMessage || "Live is unavailable"}</p>
           <button type="button" className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-black text-slate-950" onClick={onClose}>
             Close
@@ -1785,10 +1941,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-black/68 via-black/8 to-black/84" />
         {!hasActiveVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black">
-            <div className="relative flex h-28 w-28 items-center justify-center rounded-full border border-white/20 bg-white/10 backdrop-blur">
-              <Radio className="h-14 w-14 text-red-500 drop-shadow-[0_0_26px_rgba(239,68,68,0.9)]" />
-              <span className="absolute inset-0 animate-ping rounded-full border border-red-400/40" />
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-800/80 via-slate-950 to-black" />
+            <div className="relative mx-6 w-full max-w-xs overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-4 text-center shadow-2xl backdrop-blur">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white/12">
+                <Video className="h-9 w-9 text-white/70" />
+              </div>
+              <p className="mt-3 text-sm font-black">{isCreator ? "Restoring camera..." : "Connecting live video..."}</p>
+              <p className="mt-1 text-xs font-semibold text-white/55">Video will appear as soon as the stream is ready.</p>
+              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
+                <motion.span
+                  className="block h-full w-1/2 rounded-full bg-white/70"
+                  animate={{ x: ["-80%", "220%"] }}
+                  transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -1815,18 +1982,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
-          {isCreator && (
-            <button type="button" className="rounded-full bg-red-600 px-3 py-2 text-xs font-black text-white shadow-lg" onClick={handleEndLive}>
-              End
-            </button>
-          )}
-          {!isCreator && (
-            <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
-              <X className="h-5 w-5" />
-            </button>
-          )}
-        </div>
+        {!isCreator && (
+          <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-black/45 text-white backdrop-blur" onClick={onClose} aria-label="Close livestream">
+            <X className="h-5 w-5" />
+          </button>
+        )}
       </header>
 
       <AnimatePresence>
@@ -1860,26 +2020,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       </AnimatePresence>
 
       <div className="absolute right-2 top-[calc(6rem+env(safe-area-inset-top))] z-30 flex max-h-[calc(100dvh-14.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] flex-col items-center gap-2 overflow-visible sm:right-5 sm:top-1/2 sm:-translate-y-1/2">
-        <button type="button" className="flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-50" onClick={() => sendReaction("heart")} disabled={!reactionsEnabled || ended} aria-label="Send heart reaction">
-          <Heart className="h-5 w-5 fill-current text-red-400" />
-          <span className="mt-0.5 text-[0.58rem] font-black leading-none">{compactNumber(heartCombo || liveMetrics.giftsReceived || 0)}</span>
-        </button>
-        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={() => setMuted((current) => !current)} aria-label={muted ? (isCreator ? "Unmute microphone" : "Unmute live audio") : (isCreator ? "Mute microphone" : "Mute live audio")}>
-          {isCreator ? (muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />) : (muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />)}
-        </button>
-        {isCreator && (
-          <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-55" onClick={handleSwitchLiveCamera} disabled={switchingCamera || ended || !previewStream} aria-label="Switch camera">
-            {switchingCamera ? <Loader2 className="h-5 w-5 animate-spin" /> : <SwitchCamera className="h-5 w-5" />}
+        {!isCreator && (
+          <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-55" onClick={handleFollowCreator} disabled={followBusy || isFollowingCreator} aria-label={isFollowingCreator ? "Following creator" : "Follow creator"}>
+            {followBusy ? <Loader2 className="h-5 w-5 animate-spin" /> : isFollowingCreator ? <UserCheck className="h-5 w-5" /> : <UserPlus className="h-5 w-5" />}
           </button>
         )}
         <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={handleShare} aria-label="Share livestream">
           <Share2 className="h-5 w-5" />
         </button>
-        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={() => requestRoomState("viewers")} aria-label="Open viewer list">
-          <Eye className="h-5 w-5" />
+        <button type="button" className="flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58" onClick={() => requestRoomState("viewers")} aria-label="Open viewer list">
+          <Users className="h-4.5 w-4.5" />
+          <span className="mt-0.5 text-[0.56rem] font-black leading-none">{compactNumber(liveStream.viewerCount || liveViewers.length || 0)}</span>
         </button>
-        <button type="button" className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-55" onClick={handlePanelRequest} disabled={panelBusyId === "request"} aria-label={isCreator ? "Open panel controls" : "Request panel spot"}>
-          {panelBusyId === "request" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Users className="h-5 w-5" />}
+        <button type="button" className="flex h-12 w-12 flex-col items-center justify-center rounded-full bg-black/42 text-white shadow-lg backdrop-blur transition hover:bg-black/58 disabled:opacity-50" onClick={() => sendReaction("heart")} disabled={!reactionsEnabled || ended} aria-label="Send heart reaction">
+          <Heart className="h-5 w-5 fill-current text-red-400" />
+          <span className="mt-0.5 text-[0.58rem] font-black leading-none">{compactNumber(heartCombo || liveMetrics.giftsReceived || 0)}</span>
         </button>
       </div>
 
@@ -1947,6 +2102,73 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                   Send
                 </button>
               </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showLiveSettings && (
+          <motion.div
+            className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-[4.6rem] z-40 max-h-[58dvh] overflow-y-auto rounded-2xl border border-white/10 bg-black/86 p-3 shadow-2xl backdrop-blur-xl [scrollbar-width:none] sm:left-auto sm:right-20 sm:w-[22rem] [&::-webkit-scrollbar]:hidden"
+            initial={{ opacity: 0, scale: 0.94, y: 18 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.94, y: 18 }}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-black">Live settings</p>
+                <p className="text-[0.68rem] font-bold text-white/55">{isCreator ? "Stream controls" : "Viewer controls"}</p>
+              </div>
+              <button type="button" className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-white" onClick={() => setShowLiveSettings(false)} aria-label="Close live settings">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid gap-2">
+              {isCreator && (
+                <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white disabled:opacity-55" onClick={handleSwitchLiveCamera} disabled={switchingCamera || ended || !previewStream}>
+                  <span className="inline-flex items-center gap-2"><SwitchCamera className="h-4 w-4" /> Switch camera</span>
+                  <span className="text-[0.65rem] uppercase text-white/50">{switchingCamera ? "Switching" : liveFacingMode === "user" ? "Front" : "Back"}</span>
+                </button>
+              )}
+              <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white" onClick={handleToggleMuted}>
+                <span className="inline-flex items-center gap-2">
+                  {isCreator ? (muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />) : (muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />)}
+                  {isCreator ? "Mute mic" : "Mute live audio"}
+                </span>
+                <span className="text-[0.65rem] uppercase text-white/50">{muted ? "Muted" : "On"}</span>
+              </button>
+              {isCreator && (
+                <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white" onClick={handleToggleCameraEnabled}>
+                  <span className="inline-flex items-center gap-2">{cameraEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />} Disable camera</span>
+                  <span className="text-[0.65rem] uppercase text-white/50">{cameraEnabled ? "On" : "Off"}</span>
+                </button>
+              )}
+              <label className="grid gap-1 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white">
+                <span>Quality</span>
+                <select className="h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white outline-none" value={selectedQuality} onChange={(event) => handleQualityChange(event.target.value)}>
+                  <option value="480p">480p Data saver</option>
+                  <option value="720p">720p Balanced</option>
+                  <option value="1080p">1080p High</option>
+                </select>
+              </label>
+              <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white disabled:opacity-55" onClick={handlePanelRequest} disabled={panelBusyId === "request"}>
+                <span className="inline-flex items-center gap-2"><Users className="h-4 w-4" /> {isCreator ? "Panel controls" : isPanelGuest ? "On panel" : "Request panel"}</span>
+                <span className="text-[0.65rem] uppercase text-white/50">{panelUsers.length}/{panelLimit}</span>
+              </button>
+              {!isCreator && (
+                <button type="button" className="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white/10 px-3 py-2 text-left text-xs font-black text-white disabled:opacity-55" onClick={handleReportLive} disabled={reportedLive}>
+                  <span className="inline-flex items-center gap-2"><Flag className="h-4 w-4" /> Report stream</span>
+                  <span className="text-[0.65rem] uppercase text-white/50">{reportedLive ? "Sent" : "Safety"}</span>
+                </button>
+              )}
+              {isCreator && (
+                <button type="button" className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-red-600 px-3 py-2 text-xs font-black text-white" onClick={handleEndLive}>
+                  <X className="h-4 w-4" />
+                  End live
+                </button>
+              )}
             </div>
           </motion.div>
         )}
@@ -2166,27 +2388,34 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
           <div ref={chatListRef} className="flex max-h-[24dvh] flex-col gap-1.5 overflow-y-auto pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <AnimatePresence initial={false}>
-              {comments.map((comment) => (
-                <motion.div
-                  key={comment.id}
-                  className={`max-w-[94%] rounded-lg bg-black/42 px-3 py-2 text-xs shadow-lg backdrop-blur ${comment.optimistic ? "opacity-70" : ""}`}
-                  initial={{ opacity: 0, y: 10, scale: 0.98 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8 }}
-                >
-                  <span className="mr-2 font-black text-white">{comment.username || "Guest"}</span>
-                  <span className="break-words font-semibold text-white/82">{comment.text}</span>
-                  {comment.failed && (
-                    <button
-                      type="button"
-                      className="ml-2 rounded-full bg-white/15 px-2 py-0.5 text-[0.62rem] font-black text-white"
-                      onClick={() => sendComment(comment.text, comment.id)}
-                    >
-                      Retry
-                    </button>
-                  )}
-                </motion.div>
-              ))}
+              {comments.map((comment) => {
+                const giftComment = comment.type === "gift";
+                return (
+                  <motion.div
+                    key={comment.id}
+                    className={`flex max-w-[94%] items-start gap-2 rounded-lg px-2.5 py-2 text-xs shadow-lg backdrop-blur ${giftComment ? "border border-amber-300/25 bg-amber-300/16" : "bg-black/42"} ${comment.optimistic ? "opacity-70" : ""}`}
+                    initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -8 }}
+                  >
+                    <SafeAvatar user={comment} src={comment.avatar} className="mt-0.5 h-6 w-6 shrink-0 rounded-full border border-white/20 object-cover" />
+                    <span className="min-w-0 flex-1">
+                      <span className="mr-1.5 font-black text-white">{comment.username || "Guest"}</span>
+                      {giftComment && <Gift className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-amber-200" />}
+                      <span className="break-words font-semibold text-white/82">{giftComment ? `sent ${comment.giftName || "a gift"}` : comment.text}</span>
+                      {comment.failed && (
+                        <button
+                          type="button"
+                          className="ml-2 rounded-full bg-white/15 px-2 py-0.5 text-[0.62rem] font-black text-white"
+                          onClick={() => sendComment(comment.text, comment.id)}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </span>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
           </div>
 
@@ -2225,6 +2454,18 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           </button>
           <button type="button" onClick={toggleGiftTray} disabled={!giftsEnabled || ended || isCreator} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-300 text-slate-950 shadow-lg transition hover:scale-105 disabled:opacity-50" aria-label="Open gifts">
             <Gift className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setShowLiveSettings((current) => !current);
+              setShowGiftMenu(false);
+              setActiveSheet("");
+            }}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/58 text-white shadow-lg backdrop-blur transition hover:scale-105"
+            aria-label="Open live settings"
+          >
+            <Settings className="h-4 w-4" />
           </button>
         </div>
       </section>

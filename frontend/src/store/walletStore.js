@@ -799,7 +799,19 @@ export const useWalletStore = create((set, get) => ({
     };
     const handleGift = (payload = {}) => {
       if (!payload || typeof payload !== "object") return;
-      get().pushNotification({ type: "gift", title: payload.giftName || "Gift received", amount: payload.amount, message: payload.fromUserName ? `From ${payload.fromUserName}` : payload.message });
+      const transaction = payload.transaction ? normalizeTransaction(payload.transaction) : null;
+      set((state) => ({
+        wallet: payload.wallet ? normalizeWallet(payload.wallet) : state.wallet,
+        walletLoaded: true,
+        transactions: prependTransaction(state.transactions, transaction),
+      }));
+      get().pushNotification({
+        type: "gift",
+        direction: String(payload.type || "").includes("sent") ? "debit" : "credit",
+        title: payload.giftName || "Gift received",
+        amount: payload.amount,
+        message: payload.fromUserName ? `From ${payload.fromUserName}` : payload.message,
+      });
     };
     const handleBalance = (payload = {}) => {
       if (!payload || typeof payload !== "object") return;

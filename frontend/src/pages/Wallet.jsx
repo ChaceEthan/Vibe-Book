@@ -154,10 +154,23 @@ const transactionIcon = (transaction = {}) => {
   return Coins;
 };
 
+const transactionKey = (transaction = {}) => `${transaction.type || ""}:${transaction.source || ""}:${transaction.description || ""}`.toLowerCase();
+const isDebitTransaction = (transaction = {}) => {
+  const key = transactionKey(transaction);
+  const balanceBefore = Number(transaction.balanceBefore || 0);
+  const balanceAfter = Number(transaction.balanceAfter || 0);
+  return balanceAfter < balanceBefore || key.includes("gift_sent") || key.includes("sent gift") || key.includes("spend") || key.includes("transfer_sent");
+};
+const isLiveGiftTransaction = (transaction = {}) => {
+  const key = transactionKey(transaction);
+  const metadata = safeObject(transaction.metadata);
+  return key.includes("gift") || key.includes("live_stream") || key.includes("stream earnings") || Boolean(metadata.liveGift || metadata.streamId);
+};
+
 const TransactionRow = ({ transaction }) => {
   const item = safeObject(transaction);
   const Icon = transactionIcon(item);
-  const isDebit = ["spend", "transfer"].includes(item.type) && Number(item.balanceAfter || 0) < Number(item.balanceBefore || 0);
+  const isDebit = isDebitTransaction(item);
   const tone = isDebit ? "text-rose-600 bg-rose-50" : item.source === "referral" ? "text-sky-600 bg-sky-50" : "text-emerald-700 bg-emerald-50";
 
   return (
@@ -193,7 +206,7 @@ const WalletToast = ({ notification }) => (
       <div className="min-w-0">
         <p className="truncate text-sm font-black">{notification.title || "Wallet update"}</p>
         <p className="truncate text-xs font-bold text-white/65">
-          {notification.amount ? `+${formatNumber(notification.amount)} NEX earned` : notification.message || "Synced in real time"}
+          {notification.amount ? `${notification.direction === "debit" ? "-" : "+"}${formatNumber(notification.amount)} NEX ${notification.direction === "debit" ? "spent" : "earned"}` : notification.message || "Synced in real time"}
         </p>
       </div>
     </div>
@@ -227,6 +240,61 @@ const StatCard = ({ icon: Icon, label, value, detail }) => (
     {detail && <p className="mt-1 text-xs font-semibold text-slate-500">{detail}</p>}
   </motion.article>
 );
+
+const LiveEarningsCard = ({ transactions }) => {
+  const liveTransactions = asArray(transactions).filter(isLiveGiftTransaction);
+  const received = liveTransactions.filter((item) => !isDebitTransaction(item));
+  const sent = liveTransactions.filter(isDebitTransaction);
+  const totalReceived = received.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+  const totalSent = sent.reduce((sum, item) => sum + Number(item?.amount || 0), 0);
+  const recent = liveTransactions.slice(0, 4);
+
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-base font-black text-navy">Livestream earnings</p>
+          <p className="mt-1 text-xs font-bold text-slate-500">Gift income and stream wallet movement sync in real time.</p>
+        </div>
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-brand">
+          <Radio className="h-5 w-5" />
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <div className="rounded-lg bg-emerald-50 p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Received</p>
+          <p className="mt-1 text-lg font-black text-emerald-700">+{formatNumber(totalReceived)}</p>
+        </div>
+        <div className="rounded-lg bg-rose-50 p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-rose-600">Sent gifts</p>
+          <p className="mt-1 text-lg font-black text-rose-600">-{formatNumber(totalSent)}</p>
+        </div>
+        <div className="rounded-lg bg-slate-50 p-3">
+          <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Entries</p>
+          <p className="mt-1 text-lg font-black text-navy">{formatNumber(liveTransactions.length)}</p>
+        </div>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {recent.map((item) => {
+          const debit = isDebitTransaction(item);
+          return (
+            <div key={item?._id || `${item?.createdAt}-${item?.amount}`} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2">
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${debit ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-700"}`}>
+                <Gift className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-black text-navy">{item?.description || item?.source || "Live gift"}</p>
+                <p className="truncate text-[11px] font-bold text-slate-500">{new Date(item?.createdAt || Date.now()).toLocaleDateString()}</p>
+              </div>
+              <p className={`text-xs font-black ${debit ? "text-rose-600" : "text-emerald-700"}`}>{debit ? "-" : "+"}{formatNumber(item?.amount || 0)}</p>
+            </div>
+          );
+        })}
+        {!recent.length && <p className="rounded-lg bg-slate-50 p-3 text-center text-xs font-bold text-slate-500">Live gifts will appear here after your first stream transaction.</p>}
+      </div>
+    </section>
+  );
+};
 
 const WalletTopNav = ({ section }) => (
   <div className="sticky top-16 z-30 -mx-3 mb-3 border-y border-slate-200 bg-slate-100/95 px-3 py-2 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0">
@@ -455,6 +523,7 @@ const QuickAction = ({ icon: Icon, label, to, onClick, disabled }) => {
 const TransactionList = ({ transactions, pagination, loading, onLoadMore, filter = "all" }) => {
   const visible = asArray(transactions).filter((item) => {
     if (filter === "all") return true;
+    if (filter === "gift") return isLiveGiftTransaction(item);
     const key = `${item?.type || ""}:${item?.source || ""}`.toLowerCase();
     return key.includes(filter);
   });
@@ -1371,6 +1440,7 @@ const Dashboard = ({ user, wallet, walletIdentity, stats, claimDailyReward, requ
         <QuickAction icon={Sparkles} label="Claim Daily Reward" onClick={claimDailyReward} disabled={requestLocks.daily} />
         <QuickAction icon={ShieldCheck} label="Wallet Settings" to="/wallet/settings" />
       </section>
+      <LiveEarningsCard transactions={transactions} />
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <div>
