@@ -491,14 +491,32 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     creatorCameraRequestRef.current = requestId;
     setStatusMessage("Restoring camera...");
 
-    navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: liveFacingMode },
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      },
-      audio: true,
-    }).then((stream) => {
+    const videoConstraints = {
+      facingMode: { ideal: liveFacingMode },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    };
+
+    const requestCreatorMedia = async () => {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: true,
+        });
+      } catch (mediaError) {
+        if (mediaError?.name === "NotAllowedError") {
+          throw mediaError;
+        }
+
+        setMuted(true);
+        return navigator.mediaDevices.getUserMedia({
+          video: videoConstraints,
+          audio: false,
+        });
+      }
+    };
+
+    requestCreatorMedia().then((stream) => {
       if (canceled || creatorCameraRequestRef.current !== requestId) {
         stream.getTracks?.().forEach((track) => track.stop());
         return;
@@ -1030,7 +1048,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (!peerId || !connection || !pending.length || !connection.remoteDescription) return;
 
       pendingIceCandidatesRef.current.delete(peerId);
-      await Promise.allSettled(pending.map((candidate) => connection.addIceCandidate(candidate)));
+      await Promise.allSettled(pending.map((candidate) => connection.addIceCandidate(new RTCIceCandidate(candidate))));
     };
 
     const clearVideoRetry = () => {
@@ -1118,10 +1136,26 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     const requestCreatorVideo = () => {
       if (!activeSocket.connected || isCreatorRef.current) return;
-      activeSocket.emit("live:request-video", {
+      const payload = {
         streamId,
         username: currentUser?.username || currentUser?.name || "Guest",
-      });
+      };
+      const handleAck = (error, ack = {}) => {
+        if (error || ack?.ok === false) {
+          setStatusMessage("Reconnecting live video...");
+          return;
+        }
+
+        if (!Number(ack.hosts || 0) && !activeVideoTrackFor(remoteStreamRef.current)) {
+          setStatusMessage("Waiting for host video...");
+        }
+      };
+
+      if (typeof activeSocket.timeout === "function") {
+        activeSocket.timeout(5000).emit("live:request-video", payload, handleAck);
+      } else {
+        activeSocket.emit("live:request-video", payload, (ack = {}) => handleAck(null, ack));
+      }
     };
 
     const scheduleVideoRequests = (delays = [0, 700, 2200]) => {
@@ -1180,7 +1214,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         if (!connection) return;
         const mediaState = mediaStateRef.current;
         ensureMediaTrackState(localStream, { audioEnabled: !mediaState.muted, videoEnabled: mediaState.cameraEnabled });
-        const offer = await connection.createOffer();
+        const offer = await connection.createOffer({ iceRestart: true });
         await connection.setLocalDescription(offer);
         activeSocket.emit("live:webrtc-offer", {
           streamId,
@@ -1206,7 +1240,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         }
         if (!connection) return;
         setStatusMessage("Connecting live video...");
-        await connection.setRemoteDescription(data.offer);
+        await connection.setRemoteDescription(new RTCSessionDescription(data.offer));
         await flushPendingIceCandidates(creatorSocketId, connection);
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
@@ -1227,7 +1261,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (!connection || !data.answer) return;
 
       try {
-        await connection.setRemoteDescription(data.answer);
+        await connection.setRemoteDescription(new RTCSessionDescription(data.answer));
         await flushPendingIceCandidates(viewerSocketId, connection);
       } catch {
         closePeerConnection(viewerSocketId);
@@ -1246,7 +1280,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           queueIceCandidate(peerSocketId, data.candidate);
           return;
         }
-        await connection.addIceCandidate(data.candidate);
+        await connection.addIceCandidate(new RTCIceCandidate(data.candidate));
       } catch {
         // ICE can arrive during renegotiation; the next candidate or offer recovers.
       }
@@ -1989,7 +2023,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             autoPlay
             muted
             playsInline
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate"
             onCanPlay={(event) => event.currentTarget.play?.().catch(() => null)}
+            onPlaying={() => setStatusMessage("")}
             onClick={handleDoubleTap}
             onTouchEnd={handleDoubleTap}
           />
@@ -2012,17 +2049,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             className="absolute inset-0 h-full w-full object-cover"
             autoPlay
             playsInline
+            muted={muted}
+            disablePictureInPicture
+            controlsList="nodownload noplaybackrate"
             onCanPlay={(event) => event.currentTarget.play?.().catch(() => null)}
+            onPlaying={() => setStatusMessage("")}
             onClick={handleDoubleTap}
             onTouchEnd={handleDoubleTap}
           />
         )}
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-950/30 via-transparent to-slate-950/40" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/34 via-transparent to-black/52" />
         {!hasActiveVideo && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-800 via-slate-900 to-emerald-950">
-            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-slate-700/30 via-transparent to-emerald-950/40" />
-            <div className="relative mx-6 w-full max-w-xs overflow-hidden rounded-2xl border border-white/10 bg-white/10 p-4 text-center shadow-2xl backdrop-blur">
-              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white/12">
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-black via-slate-950 to-emerald-950">
+            <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-white/6 via-transparent to-brand/10" />
+            <div className="relative mx-6 w-full max-w-xs overflow-hidden rounded-2xl border border-white/10 bg-black/42 p-4 text-center shadow-2xl backdrop-blur-xl">
+              <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white/10">
                 <Video className="h-9 w-9 text-white/70" />
               </div>
               <p className="mt-3 text-sm font-black">{isCreator ? "Restoring camera..." : "Connecting live video..."}</p>

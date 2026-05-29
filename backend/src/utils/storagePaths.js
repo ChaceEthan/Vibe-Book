@@ -1,4 +1,31 @@
-const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
+const cloudinaryMediaRegex = /^https?:\/\/res\.cloudinary\.com\//i;
+const cloudinarySecureMediaRegex = /^https:\/\/res\.cloudinary\.com\//i;
+
+const normalizeMediaUrl = (value) => {
+  let mediaPath = typeof value === "string" ? value.trim() : "";
+
+  if (!mediaPath) {
+    return "";
+  }
+
+  mediaPath = mediaPath.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
+
+  if (mediaPath.startsWith("//")) {
+    mediaPath = `https:${mediaPath}`;
+  }
+
+  if (/^res\.cloudinary\.com\//i.test(mediaPath)) {
+    mediaPath = `https://${mediaPath}`;
+  }
+
+  if (/^http:\/\/res\.cloudinary\.com\//i.test(mediaPath)) {
+    mediaPath = mediaPath.replace(/^http:/i, "https:");
+  }
+
+  return mediaPath;
+};
+
+const isCloudinarySecureUrl = (value) => cloudinarySecureMediaRegex.test(normalizeMediaUrl(value));
 
 const toPublicUploadUrl = (_req, uploadPath) => normalizeStoredUploadPath(uploadPath);
 
@@ -15,7 +42,7 @@ const fromMediaId = (mediaId) => {
 };
 
 const normalizeStoredUploadPath = (value) => {
-  const mediaPath = typeof value === "string" ? value.trim() : "";
+  const mediaPath = normalizeMediaUrl(value);
 
   if (!mediaPath) {
     return "";
@@ -35,8 +62,10 @@ const normalizeStoredUploadPaths = (values = []) => {
 };
 
 module.exports = {
+  cloudinaryMediaRegex,
   fromMediaId,
   isCloudinarySecureUrl,
+  normalizeMediaUrl,
   toMediaId,
   toPublicUploadUrl,
   normalizeStoredUploadPath,

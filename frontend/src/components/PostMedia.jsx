@@ -41,6 +41,7 @@ const PostMedia = ({
   const [failed, setFailed] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [processing, setProcessing] = useState(false);
+  const [buffering, setBuffering] = useState(false);
   const [isMuted, setIsMuted] = useState(Boolean(muted));
   const [progress, setProgress] = useState(0);
   const [likePulse, setLikePulse] = useState(null);
@@ -51,6 +52,9 @@ const PostMedia = ({
     : baseSrc;
   const looksLikeVideoUrl = /\.(mp4|mov|m4v|webm|avi|3gp|3g2|mpeg|mpg)(?:$|[?#])/i.test(rawUrl) || src.includes("/video/upload/");
   const isVideo = post?.type === "video" || looksLikeVideoUrl;
+  const poster = isVideo && /\/video\/upload\//i.test(src)
+    ? src.replace(/\/video\/upload\//i, "/video/upload/f_jpg,q_auto:good,so_0/")
+    : "";
 
   const metricsFor = (video, extra = {}) => {
     const duration = Number.isFinite(video?.duration) ? video.duration : Number(post?.duration || 0);
@@ -84,6 +88,7 @@ const PostMedia = ({
     setFailed(false);
     setRetryCount(0);
     setProcessing(false);
+    setBuffering(false);
     setIsMuted(Boolean(muted));
     setProgress(0);
   }, [autoPlay, muted, post?._id, rawUrl]);
@@ -206,6 +211,7 @@ const PostMedia = ({
     }
     setFailed(false);
     setProcessing(false);
+    setBuffering(false);
   };
 
   const handleMuteToggle = (event) => {
@@ -374,6 +380,9 @@ const PostMedia = ({
           controls={controls}
           autoPlay={autoPlay}
           preload={minimal ? "metadata" : preload}
+          poster={poster || undefined}
+          disablePictureInPicture
+          controlsList="nodownload noplaybackrate"
           onError={handleMediaError}
           onLoadedMetadata={(event) => {
             handleMediaReady();
@@ -381,6 +390,9 @@ const PostMedia = ({
             setIsMuted(event.currentTarget.muted);
           }}
           onLoadedData={handleMediaReady}
+          onCanPlay={handleMediaReady}
+          onWaiting={() => setBuffering(true)}
+          onPlaying={handleMediaReady}
           onPlay={(event) => {
             prepareVideo(event.currentTarget);
           }}
@@ -407,11 +419,11 @@ const PostMedia = ({
           onEnded={(event) => markViewed(metricsFor(event.currentTarget, { completionRate: 1 }))}
         />
 
-        {processing && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/45 text-center text-sm font-black text-white">
-            <span className="inline-flex items-center gap-2 rounded-full bg-slate-950/70 px-4 py-2 backdrop-blur">
+        {(processing || buffering) && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center text-center text-sm font-black text-white">
+            <span className="inline-flex items-center gap-2 rounded-full bg-black/42 px-4 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Processing video...
+              {processing ? "Processing video..." : "Loading video..."}
             </span>
           </div>
         )}

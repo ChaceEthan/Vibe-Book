@@ -9,6 +9,7 @@ const { addMonetizationScore } = require("../utils/monetization");
 const { createNotification } = require("../utils/notifications");
 const { rewardEngagement } = require("../services/rewardEngine");
 const {
+  cloudinaryMediaRegex,
   isCloudinarySecureUrl,
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
@@ -49,7 +50,7 @@ const normalizeDescriptionFor = (items = [], mediaUrl = "") => {
 
 const inferOrientation = (value) => (value === "landscape" ? "landscape" : "portrait");
 const hasMediaUrl = (value) => isCloudinarySecureUrl(normalizeStoredUploadPath(value));
-const cloudinaryMediaQuery = { $regex: /^https:\/\/res\.cloudinary\.com\//i };
+const cloudinaryMediaQuery = { $regex: cloudinaryMediaRegex };
 const cloudinaryPublicIdFromUrl = (url = "") => {
   const value = String(url || "");
   const match = value.match(/\/(?:image|video)\/upload\/(?:v\d+\/)?(.+?)(?:\.[a-z0-9]+)?(?:[?#].*)?$/i);

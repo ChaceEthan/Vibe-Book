@@ -3,7 +3,6 @@ import {
   Home,
   LogIn,
   MessageCircle,
-  Plus,
   Settings,
   User,
   Users,
@@ -19,8 +18,8 @@ import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
 
 const navClass = ({ isActive }) =>
-  `flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-black transition sm:text-[11px] ${
-    isActive ? "text-white" : "text-white/60 hover:text-white"
+  `group flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-black transition duration-200 sm:text-[11px] ${
+    isActive ? "active scale-[1.03] text-white" : "text-white/52 hover:text-white"
   }`;
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -47,7 +46,7 @@ const Navbar = () => {
     () => [
       { to: "/", label: "Home", icon: Home },
       { to: "/search", label: "Friends", icon: Users },
-      { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
+      { to: isAuthenticated ? "/inbox" : "/login", label: "Inbox", icon: MessageCircle, badge: unreadCount },
       { to: isAuthenticated && user?._id ? `/profile/${user._id}` : "/login", label: "Profile", icon: User },
     ],
     [isAuthenticated, unreadCount, user?._id]
@@ -231,39 +230,41 @@ const Navbar = () => {
 
   return (
     <>
-      <header className={`sticky top-0 z-50 backdrop-blur ${isHome ? "border-b border-white/10 bg-slate-950 text-white" : "border-b border-slate-200 bg-white/95"}`}>
-        <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
-          <Link to="/" className={`flex shrink-0 items-center gap-1.5 overflow-hidden transition-all sm:gap-3 ${isHome ? "pointer-events-none w-0 opacity-0" : ""}`} onClick={refreshHomeIfActive}>
-            <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
-            <span className="whitespace-nowrap text-base font-black text-navy sm:text-lg">VibeBook</span>
-          </Link>
+      {!isHome && (
+        <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
+          <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
+            <Link to="/" className="flex shrink-0 items-center gap-1.5 overflow-hidden transition-all sm:gap-3" onClick={refreshHomeIfActive}>
+              <img src="/logo.png" alt="VibeBook logo" className="h-8 w-8 rounded-lg object-cover sm:h-10 sm:w-10" />
+              <span className="whitespace-nowrap text-base font-black text-navy sm:text-lg">VibeBook</span>
+            </Link>
 
-          <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2">
-            {isAuthenticated ? (
-              <>
-                <NotificationBell buttonClassName={isHome ? "!text-white hover:!bg-white/10 hover:!text-white" : ""} />
-                <Link to="/settings" className={`rounded-lg p-2 ${isHome ? "text-white/85 hover:bg-white/10 hover:text-white" : "text-slate-500 hover:bg-slate-100"}`} aria-label="Settings & Privacy" title="Settings & Privacy">
-                  <Settings className="h-5 w-5" />
+            <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2">
+              {isAuthenticated ? (
+                <>
+                  <NotificationBell />
+                  <Link to="/settings" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Settings & Privacy" title="Settings & Privacy">
+                    <Settings className="h-5 w-5" />
+                  </Link>
+                </>
+              ) : (
+                <Link to="/login" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Login">
+                  <LogIn className="h-5 w-5" />
                 </Link>
-              </>
-            ) : (
-              <Link to="/login" className={`rounded-lg p-2 ${isHome ? "text-white/85 hover:bg-white/10" : "text-slate-500 hover:bg-slate-100"}`} aria-label="Login">
-                <LogIn className="h-5 w-5" />
-              </Link>
-            )}
-          </div>
-        </nav>
-      </header>
+              )}
+            </div>
+          </nav>
+        </header>
+      )}
 
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
-      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black/95 px-2 pb-[calc(0.45rem+env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-10px_26px_rgba(0,0,0,0.28)] backdrop-blur">
-        <div className="mx-auto grid w-full max-w-sm grid-cols-5 items-end gap-0.5">
+      <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-2 pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2">
+        <div className="pointer-events-auto mx-auto grid w-full max-w-md grid-cols-5 items-end gap-0.5 rounded-[1.35rem] border border-white/10 bg-black/78 px-1.5 py-1.5 shadow-[0_-8px_34px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
           {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
               <NavLink key={item.label} to={item.to} className={navClass} onClick={item.to === "/" ? refreshHomeIfActive : undefined}>
-                <Icon className="h-5 w-5" />
+                <Icon className="h-5 w-5 transition group-[.active]:drop-shadow-[0_0_12px_rgba(34,197,94,0.55)]" />
                 <span>{item.label}</span>
               </NavLink>
             );
@@ -271,13 +272,18 @@ const Navbar = () => {
 
           <button
             type="button"
-            className="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-black text-white sm:text-[11px]"
+            className="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-black text-white transition hover:scale-[1.04] active:scale-95 sm:text-[11px]"
             onClick={() => openUpload("image")}
+            aria-label="Upload new content"
+            title="Upload new content"
           >
-            <span className="flex h-9 w-11 items-center justify-center rounded-xl bg-white text-black shadow-[7px_0_0_rgba(239,68,68,0.85),-7px_0_0_rgba(34,211,238,0.85)]">
-              <Plus className="h-5 w-5" />
+            <span className="vibebook-upload-button relative flex h-12 w-[3.35rem] items-center justify-center">
+              <span className="absolute inset-0 rounded-[1.05rem] bg-brand blur-lg opacity-55" />
+              <span className="relative flex h-10 w-12 items-center justify-center rounded-[1rem] border border-white/25 bg-gradient-to-br from-brand via-emerald-400 to-teal-300 shadow-[0_0_26px_rgba(34,197,94,0.48)]">
+                <span className="vibebook-v-mark">V</span>
+              </span>
             </span>
-            <span>Upload</span>
+            <span className="font-black">Upload</span>
           </button>
 
           {bottomNavItems.slice(2).map((item) => {
@@ -285,7 +291,7 @@ const Navbar = () => {
             return (
               <NavLink key={item.label} to={item.to} className={navClass}>
                 <span className="relative">
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-5 w-5 transition group-[.active]:drop-shadow-[0_0_12px_rgba(34,197,94,0.55)]" />
                   {item.badge ? (
                     <span className="absolute -right-2 -top-2 min-w-4 rounded-full bg-red-500 px-1 text-[10px] leading-4 text-white">
                       {item.badge > 9 ? "9+" : item.badge}

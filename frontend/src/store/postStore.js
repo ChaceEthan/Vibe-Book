@@ -1,12 +1,14 @@
 import { create } from "zustand";
 
-const isCloudinaryUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(String(value || "").trim());
+import { normalizeMediaUrl } from "../services/api";
+
+const isCloudinaryUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(normalizeMediaUrl(value, { fallback: "" }));
 const isRenderableMediaUrl = (value) => {
-  const url = String(value || "").trim();
+  const url = normalizeMediaUrl(value, { fallback: "" });
 
   return Boolean(url && (/^https?:/i.test(url) || url.startsWith("/uploads") || url.startsWith("uploads/") || url.startsWith("/")));
 };
-const stablePostUrl = (post = {}) => String(post?.url || post?.mediaUrl || post?.videoUrl || post?.imageUrl || "").trim();
+const stablePostUrl = (post = {}) => normalizeMediaUrl(post?.url || post?.mediaUrl || post?.videoUrl || post?.imageUrl || "", { fallback: "" });
 const normalizePost = (post = {}) => {
   const url = stablePostUrl(post);
   return url ? { ...post, url, mediaUrl: post.mediaUrl || url } : post;

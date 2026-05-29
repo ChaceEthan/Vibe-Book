@@ -8,6 +8,7 @@ let connectRequested = false;
 let disconnectTimer = null;
 let socketAuth = {};
 let lastSocketWarningAt = 0;
+let networkListenersAttached = false;
 
 const warnSocketIssue = (message, payload = {}) => {
   if (typeof console === "undefined") return;
@@ -66,11 +67,17 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
   socket = io(SOCKET_URL, {
     auth,
     autoConnect: false,
+    closeOnBeforeunload: false,
     withCredentials: true,
     path: SOCKET_PATH,
     transports: ["websocket", "polling"],
+    transportOptions: {
+      polling: {
+        withCredentials: true,
+      },
+    },
     reconnection: true,
-    reconnectionAttempts: 10,
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1500,
     reconnectionDelayMax: 12000,
     randomizationFactor: 0.6,
@@ -105,17 +112,36 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     });
   });
 
-  socket.on("disconnect", () => {
+  socket.on("disconnect", (reason) => {
     connectRequested = false;
+    if (typeof window !== "undefined" && reason === "io server disconnect" && getStoredToken()) {
+      window.setTimeout(() => connectSocket(getStoredToken()), 1200);
+    }
   });
 
-  socket.io.on("reconnect_attempt", () => {
+  const refreshSocketAuth = () => {
     const nextToken = getStoredToken();
 
     if (nextToken) {
       socket.auth = buildAuth(nextToken);
     }
+  };
+
+  socket.io.on("reconnect_attempt", refreshSocketAuth);
+
+  socket.io.on("reconnect", () => {
+    connectRequested = false;
   });
+
+  if (typeof window !== "undefined" && !networkListenersAttached) {
+    networkListenersAttached = true;
+    window.addEventListener("online", () => {
+      if (socket && !socket.connected && getStoredToken()) {
+        refreshSocketAuth();
+        connectSocket(getStoredToken());
+      }
+    });
+  }
 
   return socket;
 };

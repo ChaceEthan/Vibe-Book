@@ -1,5 +1,6 @@
 // @ts-nocheck
 const User = require("../models/User");
+const { normalizeStoredUploadPath } = require("./storagePaths");
 
 const publicRoles = User.allowedRoles.filter((role) => role !== "admin");
 const allowedGenders = ["male", "female", "mixed", "other"];
@@ -13,7 +14,6 @@ const defaultCategoryByRole = {
 };
 
 const hasOwn = (source, field) => Object.prototype.hasOwnProperty.call(source, field);
-const isCloudinarySecureUrl = (value) => /^https:\/\/res\.cloudinary\.com\//i.test(value || "");
 
 const normalizeText = (value) => {
   return typeof value === "string" ? value.trim() : "";
@@ -37,13 +37,7 @@ const normalizeStringArray = (value) => {
 };
 
 const normalizeMediaPath = (value) => {
-  const mediaPath = normalizeText(value);
-
-  if (!mediaPath) {
-    return "";
-  }
-
-  return isCloudinarySecureUrl(mediaPath) ? mediaPath : "";
+  return normalizeStoredUploadPath(normalizeText(value));
 };
 
 const normalizeMediaArray = (value, field) => {

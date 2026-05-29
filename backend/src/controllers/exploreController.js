@@ -2,11 +2,11 @@ const Feed = require("../models/Feed");
 const User = require("../models/User");
 const { serializeFeedItem, userSelect } = require("./feedController");
 const { DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
-const { isCloudinarySecureUrl, normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
+const { cloudinaryMediaRegex, isCloudinarySecureUrl, normalizeStoredUploadPath, normalizeStoredUploadPaths } = require("../utils/storagePaths");
 const { scorePostForViewer, viralScoreFor } = require("../utils/feedRanking");
 
 const mediaQuery = {
-  mediaUrl: { $regex: /^https:\/\/res\.cloudinary\.com\//i },
+  mediaUrl: { $regex: cloudinaryMediaRegex },
 };
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";

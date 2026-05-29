@@ -17,6 +17,7 @@ const { createNotification } = require("../utils/notifications");
 const { rewardEngagement } = require("../services/rewardEngine");
 const { DEFAULT_COVER_IMAGE_PATH, DEFAULT_PROFILE_IMAGE_PATH } = require("../utils/profileDefaults");
 const {
+  cloudinaryMediaRegex,
   isCloudinarySecureUrl,
   normalizeStoredUploadPath,
   normalizeStoredUploadPaths,
@@ -37,12 +38,13 @@ const CONTACT_UNLOCK_CURRENCY = PLATFORM_ACCESS_CURRENCY;
 const MAX_IMAGES_PER_USER = 3;
 const FREE_VIDEO_LIMIT = 1;
 const MAX_VIDEO_SECONDS = 120;
-const cloudinaryMediaQuery = { $regex: /^https:\/\/res\.cloudinary\.com\//i };
+const cloudinaryMediaQuery = { $regex: cloudinaryMediaRegex };
 const getCloudinaryUploadUrl = (file) => {
   const url = file?.cloudinary?.secure_url || file?.secure_url || file?.path || "";
+  const normalizedUrl = normalizeStoredUploadPath(url);
 
-  if (isCloudinarySecureUrl(url)) {
-    return url;
+  if (isCloudinarySecureUrl(normalizedUrl)) {
+    return normalizedUrl;
   }
 
   const error = new Error("Upload did not return a Cloudinary URL");

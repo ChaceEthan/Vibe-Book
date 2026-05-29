@@ -35,12 +35,20 @@ const configuredOrigins = [
 
 const allowedOrigins = Array.from(new Set(configuredOrigins.map(normalizeOrigin).filter((origin) => origin && origin !== "*")));
 
+const allowedOriginPatterns = [
+  /^http:\/\/localhost:\d+$/i,
+  /^http:\/\/127\.0\.0\.1:\d+$/i,
+  /^https:\/\/(?:[a-z0-9-]+-)*vibe-?book(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+  /^https:\/\/(?:[a-z0-9-]+-)*vibebook(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+];
+
 const isOriginAllowed = (origin) => {
   if (!origin) {
     return true;
   }
 
-  return allowedOrigins.includes(normalizeOrigin(origin));
+  const normalizedOrigin = normalizeOrigin(origin);
+  return allowedOrigins.includes(normalizedOrigin) || allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
 };
 
 const logRejectedOrigin = (origin, context = "request") => {
@@ -54,8 +62,18 @@ const logRejectedOrigin = (origin, context = "request") => {
   console.warn(`[cors] rejected ${context} origin: ${normalizedOrigin}`);
 };
 
+const resolveCorsOrigin = (origin, callback) => {
+  if (isOriginAllowed(origin)) {
+    callback(null, origin || true);
+    return;
+  }
+
+  logRejectedOrigin(origin, "cors");
+  callback(null, false);
+};
+
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: resolveCorsOrigin,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma", "Expires", "X-Requested-With", "Accept", "Origin"],
@@ -65,13 +83,14 @@ const corsOptions = {
 };
 
 const socketCorsOptions = {
-  origin: allowedOrigins,
+  origin: resolveCorsOrigin,
   credentials: true,
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
 };
 
 module.exports = {
+  allowedOriginPatterns,
   allowedOrigins,
   corsOptions,
   isOriginAllowed,

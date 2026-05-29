@@ -169,10 +169,25 @@ const LiveStreamSetup = ({ onStart, onClose }) => {
     const audioConstraint = selectedAudioDeviceId ? { deviceId: { exact: selectedAudioDeviceId } } : true;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraint,
-        audio: audioConstraint,
-      });
+      let stream;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraint,
+          audio: audioConstraint,
+        });
+      } catch (mediaError) {
+        if (mediaError?.name === "NotAllowedError") {
+          throw mediaError;
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: videoConstraint,
+          audio: false,
+        });
+        setMicMuted(true);
+        micMutedRef.current = true;
+      }
 
       if (cameraRequestRef.current !== requestId) {
         stream.getTracks().forEach((track) => track.stop());

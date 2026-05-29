@@ -360,20 +360,43 @@ export const ratingApi = {
   get: (userId) => API.get(`/ratings/${userId}`),
 };
 
-export const mediaUrl = (path) => {
+const isLocalMediaHost = (hostname = "") => /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(hostname);
+
+export const normalizeMediaUrl = (path, options = {}) => {
+  const fallback = options.fallback || `${APP_ROOT_URL}/logo.png`;
   let value = String(path || "").trim();
-  value = value.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2");
+  value = value.replace(/^(https?:\/\/)(https?:\/\/)/i, "$2").replace(/^\/{2}(res\.cloudinary\.com\/)/i, "https://$1");
+  if (value.startsWith("//")) {
+    value = `https:${value}`;
+  }
 
   if (!value) {
-    return `${APP_ROOT_URL}/logo.png`;
+    return fallback;
+  }
+
+  if (/^(blob:|data:)/i.test(value)) {
+    return value;
+  }
+
+  if (/^res\.cloudinary\.com\//i.test(value)) {
+    return `https://${value}`;
   }
 
   if (/^http:\/\/res\.cloudinary\.com\//i.test(value)) {
     return value.replace(/^http:/i, "https:");
   }
 
-  if (/^(https?:|blob:|data:)/.test(value)) {
-    return value;
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const parsed = new URL(value);
+      if (parsed.protocol === "http:" && !isLocalMediaHost(parsed.hostname)) {
+        parsed.protocol = "https:";
+        return parsed.toString();
+      }
+      return parsed.toString();
+    } catch {
+      return value.replace(/^http:/i, "https:");
+    }
   }
 
   if (value.startsWith("/uploads")) {
@@ -388,7 +411,9 @@ export const mediaUrl = (path) => {
     return `${APP_ROOT_URL}${value}`;
   }
 
-  return `${APP_ROOT_URL}/logo.png`;
+  return fallback;
 };
+
+export const mediaUrl = (path) => normalizeMediaUrl(path);
 
 export default API;
