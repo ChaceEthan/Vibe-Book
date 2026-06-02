@@ -44,6 +44,18 @@ const configuredOrigins = [
 
 const allowedOrigins = Array.from(new Set(configuredOrigins.map(normalizeOrigin).filter((origin) => origin && origin !== "*")));
 
+// Ensure production URLs are always included
+const productionOrigins = [
+  "https://vibe-book-kappa.vercel.app",
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:3000",
+];
+
+// Merge and deduplicate
+const finalAllowedOrigins = Array.from(new Set([...allowedOrigins, ...productionOrigins]));
+
 const allowedOriginPatterns = [
   /^http:\/\/localhost:\d+$/i,
   /^http:\/\/127\.0\.0\.1:\d+$/i,
@@ -57,7 +69,7 @@ const isOriginAllowed = (origin) => {
   }
 
   const normalizedOrigin = normalizeOrigin(origin);
-  return allowedOrigins.includes(normalizedOrigin) || allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
+  return finalAllowedOrigins.includes(normalizedOrigin) || allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
 };
 
 const logRejectedOrigin = (origin, context = "request") => {
@@ -100,7 +112,7 @@ const socketCorsOptions = {
 
 module.exports = {
   allowedOriginPatterns,
-  allowedOrigins,
+  allowedOrigins: finalAllowedOrigins,
   corsOptions,
   isOriginAllowed,
   logRejectedOrigin,

@@ -1295,7 +1295,7 @@ const Home = () => {
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 top-[calc(3.35rem+env(safe-area-inset-top))] z-50 flex justify-center px-3">
-        <div className="pointer-events-auto grid w-[18rem] grid-cols-3 items-end gap-1 rounded-full border border-white/18 bg-black/72 px-2 py-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.5)] backdrop-blur-xl">
+        <div className="pointer-events-auto grid w-[18rem] grid-cols-3 items-end gap-1.5 rounded-full border border-white/25 bg-black/85 px-2.5 py-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.6)] backdrop-blur-xl">
           {[
             { value: "live", label: "LIVE" },
             { value: "following", label: "Following" },
@@ -1306,8 +1306,8 @@ const Home = () => {
               <button
                 key={option.value}
                 type="button"
-                className={`relative z-10 flex shrink-0 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-black drop-shadow-[0_1px_8px_rgba(0,0,0,0.85)] transition ${
-                  active ? "text-white" : "text-white/82 hover:text-white"
+                className={`relative z-10 flex shrink-0 items-center justify-center gap-1 rounded-full px-3 py-1.5 text-xs font-black drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)] transition ${
+                  active ? "text-white bg-gradient-to-r from-green-500/25 to-emerald-500/25 ring-1 ring-white/40" : "text-white/92 hover:text-white hover:bg-white/8"
                 }`}
                 onClick={() => handleFeedTab(option.value)}
               >
@@ -1315,7 +1315,7 @@ const Home = () => {
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500 shadow-[0_0_14px_rgba(239,68,68,0.9)]" />
                 ) : null}
                 {option.label}
-                {active ? <span className="absolute -bottom-1 h-0.5 w-7 rounded-full bg-brand shadow-[0_0_12px_rgba(34,197,94,0.9)]" /> : null}
+                {active ? <span className="absolute -bottom-1.5 h-0.5 w-8 rounded-full bg-gradient-to-r from-green-400 to-emerald-400 shadow-[0_0_12px_rgba(34,197,94,0.95)]" /> : null}
               </button>
             );
           })}
