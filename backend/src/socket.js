@@ -345,7 +345,7 @@ const initSocket = (server, corsOptions = {}) => {
 
   if (Array.isArray(corsOptions.origin)) {
     socketCorsConfig.origin = corsOptions.origin;
-  } else if (corsOptions.origin) {
+  } else if (corsOptions.origin && corsOptions.origin !== "*") {
     socketCorsConfig.origin = corsOptions.origin;
   }
 

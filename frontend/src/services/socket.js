@@ -9,6 +9,16 @@ let disconnectTimer = null;
 let socketAuth = {};
 let lastSocketWarningAt = 0;
 let networkListenersAttached = false;
+const MAX_RECONNECT_ATTEMPTS = 12;
+
+const emitSocketStatus = (status, detail = {}) => {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent("vibebook:socket-status", {
+      detail: { status, ...detail },
+    })
+  );
+};
 
 const warnSocketIssue = (message, payload = {}) => {
   if (typeof console === "undefined") return;
@@ -77,7 +87,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
       },
     },
     reconnection: true,
-    reconnectionAttempts: Infinity,
+    reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectionDelay: 1500,
     reconnectionDelayMax: 12000,
     randomizationFactor: 0.6,
@@ -87,6 +97,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 
   socket.on("connect", () => {
     connectRequested = false;
+    emitSocketStatus("connected", { socketId: socket.id });
   });
 
   socket.on("connect_error", (error) => {
@@ -105,6 +116,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
       disconnectSocket({ immediate: true });
       return;
     }
+    emitSocketStatus("reconnecting", { message: error?.message || "Socket connection failed" });
     warnSocketIssue("[socket] connection failed", {
       message: error?.message || "Socket connection failed",
       url: SOCKET_URL,
@@ -114,6 +126,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 
   socket.on("disconnect", (reason) => {
     connectRequested = false;
+    emitSocketStatus(reason === "io server disconnect" ? "reconnecting" : "disconnected", { reason });
     if (typeof window !== "undefined" && reason === "io server disconnect" && getStoredToken()) {
       window.setTimeout(() => connectSocket(getStoredToken()), 1200);
     }
@@ -127,10 +140,21 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     }
   };
 
-  socket.io.on("reconnect_attempt", refreshSocketAuth);
+  socket.io.on("reconnect_attempt", (attempt) => {
+    refreshSocketAuth();
+    emitSocketStatus("reconnecting", { attempt, maxAttempts: MAX_RECONNECT_ATTEMPTS });
+  });
 
   socket.io.on("reconnect", () => {
     connectRequested = false;
+    emitSocketStatus("connected", { socketId: socket.id, recovered: true });
+  });
+
+  socket.io.on("reconnect_failed", () => {
+    connectRequested = false;
+    emitSocketStatus("offline", {
+      message: "Realtime connection paused. It will retry when the network changes.",
+    });
   });
 
   if (typeof window !== "undefined" && !networkListenersAttached) {
@@ -138,9 +162,11 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     window.addEventListener("online", () => {
       if (socket && !socket.connected && getStoredToken()) {
         refreshSocketAuth();
+        emitSocketStatus("reconnecting", { reason: "online" });
         connectSocket(getStoredToken());
       }
     });
+    window.addEventListener("offline", () => emitSocketStatus("offline", { reason: "browser-offline" }));
   }
 
   return socket;
@@ -149,6 +175,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 export const connectSocket = (token = getStoredToken(), extraAuth = {}) => {
   if (typeof navigator !== "undefined" && navigator.onLine === false) {
     warnSocketIssue("[socket] offline; connection deferred");
+    emitSocketStatus("offline", { reason: "browser-offline" });
     return socket;
   }
 
@@ -166,6 +193,7 @@ export const connectSocket = (token = getStoredToken(), extraAuth = {}) => {
   }
 
   connectRequested = true;
+  emitSocketStatus("reconnecting", { reason: "connect-requested" });
   activeSocket.connect();
   return activeSocket;
 };

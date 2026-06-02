@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { AlertCircle, Check, CheckCheck, Clock3, Copy, FileText, MoreVertical, Paperclip, Plus, Reply, Search, Send, ShieldCheck, Trash2, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock3, Copy, FileText, MessageCircle, MoreVertical, Paperclip, Plus, Reply, Search, Send, ShieldCheck, Trash2, UserCheck, UserMinus, UserPlus, Users, X } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -1427,7 +1427,11 @@ const Chat = () => {
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-brand">Chat</p>
           <h1 className="mt-2 truncate text-3xl font-black text-navy">
-            {activeTab === "groups" ? selectedGroupInfo?.groupName || "Groups" : otherUser?.name || "Messages"}
+            {activeTab === "requests"
+              ? "Message Requests"
+              : activeTab === "groups"
+                ? selectedGroupInfo?.groupName || "Group Chats"
+                : otherUser?.name || "Direct Messages"}
           </h1>
           {activeTab === "direct" && otherUser && (
             <p className="mt-2 flex items-center gap-2 text-sm text-slate-600">
@@ -1440,24 +1444,31 @@ const Chat = () => {
           )}
         </div>
         <Link to="/inbox" className="btn-secondary">
-          Inbox
+          Direct Messages
         </Link>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-2 rounded-lg bg-white p-1 shadow-soft">
+      <div className="mb-5 grid grid-cols-3 gap-2 rounded-lg bg-white p-1 shadow-soft">
         <button
           type="button"
           className={`rounded-lg px-4 py-3 text-sm font-black ${activeTab === "direct" ? "bg-brand text-navy" : "text-slate-500"}`}
           onClick={() => setActiveTab("direct")}
         >
-          Direct
+          Direct Messages
         </button>
         <button
           type="button"
           className={`rounded-lg px-4 py-3 text-sm font-black ${activeTab === "groups" ? "bg-brand text-navy" : "text-slate-500"}`}
           onClick={() => setActiveTab("groups")}
         >
-          Groups
+          Group Chats
+        </button>
+        <button
+          type="button"
+          className={`rounded-lg px-4 py-3 text-sm font-black ${activeTab === "requests" ? "bg-brand text-navy" : "text-slate-500"}`}
+          onClick={() => setActiveTab("requests")}
+        >
+          Message Requests
         </button>
       </div>
 
@@ -1605,10 +1616,26 @@ const Chat = () => {
             <div className="p-8 text-center">
               <h2 className="text-lg font-black text-navy">Choose a direct chat</h2>
               <Link className="btn-primary mt-4" to="/inbox">
-                Open Inbox
+                Open Direct Messages
               </Link>
             </div>
           )}
+        </div>
+      ) : activeTab === "requests" ? (
+        <div className="flex min-h-[420px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-white p-8 text-center shadow-soft">
+          <MessageCircle className="h-10 w-10 text-brand" />
+          <h2 className="mt-4 text-xl font-black text-navy">No message requests</h2>
+          <p className="mt-2 max-w-sm text-sm font-semibold text-slate-500">
+            New direct messages from people outside your current chats will appear here for review.
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <Link to="/inbox" className="btn-primary">
+              Direct Messages
+            </Link>
+            <button type="button" className="btn-secondary" onClick={() => setActiveTab("groups")}>
+              Group Chats
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">

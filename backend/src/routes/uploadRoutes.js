@@ -22,6 +22,7 @@ const router = express.Router();
 const MAX_VIDEO_SECONDS = 120;
 
 const cleanDescription = (value) => (typeof value === "string" ? value.trim().slice(0, 500) : "");
+const isSecureCloudinaryUrl = (value = "") => /^https:\/\/res\.cloudinary\.com\/.+\/(?:image|video)\/upload\//i.test(String(value || ""));
 const hasCustomProfileImage = (user = {}) => {
   const image = String(user.profilePicture || user.profileImage || "").trim();
   return Boolean(image && image !== DEFAULT_PROFILE_IMAGE_PATH);
@@ -111,6 +112,11 @@ const createFeedUpload = async (req, res, next, expectedType = null) => {
     const uploadResult = await uploadBufferToCloudinary(file);
     const url = uploadResult.secure_url;
     const publicId = uploadResult.public_id;
+
+    if (!isSecureCloudinaryUrl(url)) {
+      await removeFiles([file]);
+      return res.status(502).json({ success: false, error: "Uploaded media URL is not secure", message: "Uploaded media URL is not secure" });
+    }
 
     if (type === "video") {
       const duration = await getUploadedVideoDurationSeconds(file);

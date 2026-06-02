@@ -74,6 +74,8 @@
   }
 
   .home-feed-viewport {
+    content-visibility: auto;
+    contain-intrinsic-size: 100vh;
     height: 100vh;
     min-height: 0;
   }
@@ -162,6 +164,52 @@
 
   .vibebook-upload-button {
     animation: vibebookUploadPulse 2300ms ease-in-out infinite;
+  }
+
+  .vibebook-premium-spinner {
+    position: relative;
+    display: inline-flex;
+    height: 4.5rem;
+    width: 4.5rem;
+    border-radius: 9999px;
+    overflow: hidden;
+    background: #020617;
+    box-shadow: 0 0 38px rgba(34, 197, 94, 0.42), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  }
+
+  .vibebook-premium-spinner::before {
+    content: "";
+    position: absolute;
+    inset: -0.35rem;
+    border-radius: inherit;
+    background: conic-gradient(from 0deg, transparent 0 18%, #22c55e 36%, #a7f3d0 50%, #22c55e 64%, transparent 82% 100%);
+    animation: vibebookPremiumSpin 1100ms linear infinite;
+  }
+
+  .vibebook-premium-spinner::after {
+    content: "V";
+    position: absolute;
+    inset: 0.8rem;
+    display: grid;
+    place-items: center;
+    border-radius: inherit;
+    background: rgba(0, 0, 0, 0.72);
+    color: white;
+    font-family: "Brush Script MT", "Segoe Script", Georgia, serif;
+    font-size: 1.8rem;
+    font-style: italic;
+    font-weight: 900;
+    transform: rotate(-8deg);
+  }
+
+  .vibebook-premium-spinner-small {
+    height: 3.5rem;
+    width: 3.5rem;
+  }
+
+  .vibebook-premium-spinner-small::after {
+    inset: 0.65rem;
+    font-size: 1.45rem;
   }
 
   .vibebook-v-mark {
@@ -366,6 +414,12 @@
   50% {
     filter: drop-shadow(0 0 24px rgba(34, 197, 94, 0.72));
     transform: translateY(-2px);
+  }
+}
+
+@keyframes vibebookPremiumSpin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

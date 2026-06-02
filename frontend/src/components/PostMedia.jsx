@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Heart, Loader2, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import { Heart, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 
 import { mediaUrl } from "../services/api";
@@ -33,6 +33,8 @@ const PostMedia = ({
   const viewedRef = useRef(false);
   const maxWatchedRef = useRef(0);
   const lastTimeRef = useRef(0);
+  const lastProgressUpdateRef = useRef(0);
+  const lastProgressValueRef = useRef(0);
   const replaysRef = useRef(0);
   const lastTapRef = useRef(0);
   const tapTimerRef = useRef(null);
@@ -84,6 +86,8 @@ const PostMedia = ({
     viewedRef.current = false;
     maxWatchedRef.current = 0;
     lastTimeRef.current = 0;
+    lastProgressUpdateRef.current = 0;
+    lastProgressValueRef.current = 0;
     replaysRef.current = 0;
     setFailed(false);
     setRetryCount(0);
@@ -408,7 +412,13 @@ const PostMedia = ({
 
             lastTimeRef.current = currentTime;
             maxWatchedRef.current = Math.max(maxWatchedRef.current, currentTime);
-            setProgress(duration ? Math.min(100, (currentTime / duration) * 100) : 0);
+            const nextProgress = duration ? Math.min(100, (currentTime / duration) * 100) : 0;
+            const now = Date.now();
+            if (now - lastProgressUpdateRef.current > 240 || Math.abs(nextProgress - lastProgressValueRef.current) >= 1.5) {
+              lastProgressUpdateRef.current = now;
+              lastProgressValueRef.current = nextProgress;
+              setProgress(nextProgress);
+            }
 
             const threshold = duration && duration <= 8 ? duration * 0.85 : 3;
 
@@ -420,11 +430,15 @@ const PostMedia = ({
         />
 
         {(processing || buffering) && (
-          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center text-center text-sm font-black text-white">
-            <span className="inline-flex items-center gap-2 rounded-full bg-black/42 px-4 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              {processing ? "Processing video..." : "Loading video..."}
-            </span>
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center overflow-hidden text-center text-sm font-black text-white">
+            {poster ? <img src={poster} alt="" className="absolute inset-0 h-full w-full scale-105 object-cover opacity-45 blur-xl" /> : null}
+            <div className="absolute inset-0 bg-black/42" />
+            <div className="relative flex flex-col items-center gap-3">
+              <span className="vibebook-premium-spinner vibebook-premium-spinner-small" />
+              <span className="rounded-full bg-black/44 px-3 py-1 text-[0.68rem] uppercase tracking-[0.16em] text-white/70 backdrop-blur">
+                {processing ? "Preparing video" : "Loading"}
+              </span>
+            </div>
           </div>
         )}
 

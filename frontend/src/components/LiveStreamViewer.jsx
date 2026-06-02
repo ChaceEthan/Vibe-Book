@@ -227,6 +227,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const hostMediaCleanupTimerRef = useRef(null);
   const previewStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
+  const audioContextRef = useRef(null);
   const isCreatorRef = useRef(false);
   const webrtcReadyRef = useRef(false);
   const mediaStateRef = useRef({ muted: false, cameraEnabled: true });
@@ -383,6 +384,32 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     return nextComment;
   };
 
+  const playGiftSound = (tier = "small") => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+
+      audioContextRef.current = audioContextRef.current || new AudioContext();
+      const context = audioContextRef.current;
+      context.resume?.();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const premium = tier === "premium";
+
+      oscillator.type = "sine";
+      oscillator.frequency.value = premium ? 880 : 660;
+      gain.gain.setValueAtTime(0.0001, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(premium ? 0.09 : 0.055, context.currentTime + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + (premium ? 0.34 : 0.2));
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + (premium ? 0.36 : 0.22));
+    } catch {
+      // Gift sound is best-effort and depends on browser audio permissions.
+    }
+  };
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -393,6 +420,22 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   useEffect(() => {
     mediaStateRef.current = { muted, cameraEnabled };
   }, [cameraEnabled, muted]);
+
+  useEffect(() => {
+    const handleSocketStatus = (event) => {
+      const status = event.detail?.status || "";
+      if (status === "reconnecting") {
+        setStatusMessage("Reconnecting...");
+      } else if (status === "offline") {
+        setStatusMessage("Reconnecting...");
+      } else if (status === "connected") {
+        setStatusMessage((current) => (current === "Reconnecting..." ? "" : current));
+      }
+    };
+
+    window.addEventListener("vibebook:socket-status", handleSocketStatus);
+    return () => window.removeEventListener("vibebook:socket-status", handleSocketStatus);
+  }, []);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -508,11 +551,22 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           throw mediaError;
         }
 
-        setMuted(true);
-        return navigator.mediaDevices.getUserMedia({
-          video: videoConstraints,
-          audio: false,
-        });
+        try {
+          setMuted(true);
+          return await navigator.mediaDevices.getUserMedia({
+            video: videoConstraints,
+            audio: false,
+          });
+        } catch (videoError) {
+          if (videoError?.name === "NotAllowedError") {
+            throw videoError;
+          }
+
+          return navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false,
+          });
+        }
       }
     };
 
@@ -711,6 +765,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           particles: makeGiftParticles(tier),
         },
       ].slice(-12));
+      playGiftSound(tier);
       setLiveMetrics((current) => ({
         giftsReceived: Number(current.giftsReceived || 0) + 1,
         nexEarned: Number(current.nexEarned || 0) + amount,
@@ -1619,6 +1674,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     seenGiftIdsRef.current.add(clientId);
     setGiftEvents((current) => [...current, optimisticGift].slice(-12));
+    playGiftSound(tier);
     appendLiveComment({
       id: giftChatId,
       streamId,
@@ -1735,14 +1791,26 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     setStatusMessage("Switching camera...");
 
     try {
-      const cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: nextFacingMode },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+      let cameraOnlyStream;
+      try {
+        cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: nextFacingMode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch (cameraError) {
+        if (cameraError?.name === "NotAllowedError") {
+          throw cameraError;
+        }
+
+        cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
       const [nextVideoTrack] = cameraOnlyStream.getVideoTracks();
 
       if (!nextVideoTrack) {
@@ -1776,6 +1844,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       setLivePreviewStream(streamId, nextLocalStream);
       setLiveFacingMode(nextFacingMode);
       setCameraFlipNonce((current) => current + 1);
+      socketRef.current?.emit("live:creator-ready", { streamId });
       setStatusMessage(nextFacingMode === "user" ? "Front camera active" : "Back camera active");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1600);
     } catch (error) {
@@ -2517,7 +2586,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                   >
                     <SafeAvatar user={comment} src={comment.avatar} className="mt-0.5 h-6 w-6 shrink-0 rounded-full border border-white/20 object-cover" />
                     <span className="min-w-0 flex-1">
-                      <span className="mr-1.5 font-black text-white">{comment.username || "Guest"}</span>
+                      <span className="mr-1.5 font-black text-white">{comment.username || "Guest"}:</span>
                       {giftComment && <Gift className="mb-0.5 mr-1 inline h-3.5 w-3.5 text-amber-200" />}
                       <span className="break-words font-semibold text-white/82">{giftComment ? `sent ${comment.giftName || "a gift"}` : commentBody}</span>
                       {comment.failed && (

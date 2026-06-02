@@ -9,7 +9,9 @@ const normalizeOrigin = (value = "") => {
   }
 
   try {
-    const parsed = new URL(trimmed.replace(/^https?:\/\/https?:\/\//i, "https://"));
+    const cleaned = trimmed.replace(/^https?:\/\/https?:\/\//i, "https://");
+    const withProtocol = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned.replace(/^\/+/, "")}`;
+    const parsed = new URL(withProtocol);
     return `${parsed.protocol}//${parsed.host}`;
   } catch {
     return trimmed;
@@ -29,8 +31,15 @@ const configuredOrigins = [
   process.env.FRONTEND_ORIGIN,
   process.env.PUBLIC_FRONTEND_URL,
   process.env.PRODUCTION_FRONTEND_URL,
+  process.env.VERCEL_URL,
+  process.env.VERCEL_BRANCH_URL,
+  process.env.VERCEL_PROJECT_PRODUCTION_URL,
   process.env.APP_URL,
   process.env.CORS_ORIGIN,
+  process.env.CORS_ORIGINS,
+  process.env.CLIENT_ORIGINS,
+  process.env.SOCKET_ORIGIN,
+  process.env.SOCKET_ORIGINS,
 ].flatMap((origin) => String(origin || "").split(","));
 
 const allowedOrigins = Array.from(new Set(configuredOrigins.map(normalizeOrigin).filter((origin) => origin && origin !== "*")));

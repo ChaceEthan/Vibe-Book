@@ -18,8 +18,8 @@ import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
 
 const navClass = ({ isActive }) =>
-  `group flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1.5 text-[10px] font-black transition duration-200 sm:text-[11px] ${
-    isActive ? "active scale-[1.03] text-white" : "text-white/52 hover:text-white"
+  `group flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] font-black transition duration-200 sm:text-[11px] ${
+    isActive ? "active text-white" : "text-white/56 hover:text-white"
   }`;
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -46,7 +46,7 @@ const Navbar = () => {
     () => [
       { to: "/", label: "Home", icon: Home },
       { to: "/search", label: "Friends", icon: Users },
-      { to: isAuthenticated ? "/inbox" : "/login", label: "Inbox", icon: MessageCircle, badge: unreadCount },
+      { to: isAuthenticated ? "/chat" : "/login", label: "Chat", icon: MessageCircle, badge: unreadCount },
       { to: isAuthenticated && user?._id ? `/profile/${user._id}` : "/login", label: "Profile", icon: User },
     ],
     [isAuthenticated, unreadCount, user?._id]
@@ -258,8 +258,8 @@ const Navbar = () => {
 
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
-      <nav className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-2 pb-[calc(0.55rem+env(safe-area-inset-bottom))] pt-2">
-        <div className="pointer-events-auto mx-auto grid w-full max-w-md grid-cols-5 items-end gap-0.5 rounded-[1.35rem] border border-white/10 bg-black/78 px-1.5 py-1.5 shadow-[0_-8px_34px_rgba(0,0,0,0.42)] backdrop-blur-2xl">
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black pb-[env(safe-area-inset-bottom)]">
+        <div className="mx-auto grid h-16 w-full max-w-md grid-cols-5 items-center gap-0 bg-black px-1 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
           {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
@@ -272,14 +272,14 @@ const Navbar = () => {
 
           <button
             type="button"
-            className="flex flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1 text-[10px] font-black text-white transition hover:scale-[1.04] active:scale-95 sm:text-[11px]"
+            className="flex h-full flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] font-black text-white transition active:scale-95 sm:text-[11px]"
             onClick={() => openUpload("image")}
             aria-label="Upload new content"
             title="Upload new content"
           >
-            <span className="vibebook-upload-button relative flex h-12 w-[3.35rem] items-center justify-center">
-              <span className="absolute inset-0 rounded-[1.05rem] bg-brand blur-lg opacity-55" />
-              <span className="relative flex h-10 w-12 items-center justify-center rounded-[1rem] border border-white/25 bg-gradient-to-br from-brand via-emerald-400 to-teal-300 shadow-[0_0_26px_rgba(34,197,94,0.48)]">
+            <span className="vibebook-upload-button relative flex h-11 w-12 items-center justify-center">
+              <span className="absolute inset-0 rounded-2xl bg-brand blur-lg opacity-45" />
+              <span className="relative flex h-9 w-11 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-emerald-300 via-brand to-teal-400 shadow-[0_0_24px_rgba(34,197,94,0.45)] backdrop-blur">
                 <span className="vibebook-v-mark">V</span>
               </span>
             </span>

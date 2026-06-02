@@ -32,6 +32,15 @@ const liveRoomState = new Map();
 const roomFor = (streamId) => `stream:${streamId}`;
 const idOf = (value) => value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
 const nowIso = () => new Date().toISOString();
+const textFromLiveValue = (value, fallback = "") => {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value || typeof value !== "object") return fallback;
+
+  const candidate = value.text ?? value.message ?? value.body ?? value.content ?? value.value ?? value.label ?? value.name ?? value.giftName;
+  if (candidate === value) return fallback;
+  return textFromLiveValue(candidate, fallback);
+};
 
 const emitLiveRoomEvent = (io, streamId, eventName, payload) => {
   const room = roomFor(streamId);
@@ -69,7 +78,7 @@ const isRateLimited = (socket, scope, windowMs) => {
 
 const viewerPayloadFor = (socket, fallbackName = "Guest") => ({
   userId: idOf(socket.user?._id),
-  username: socket.user?.username || socket.user?.name || fallbackName || "Guest",
+  username: textFromLiveValue(socket.user?.username || socket.user?.name || fallbackName, "Guest"),
   avatar: socket.user?.avatar || socket.user?.profilePicture || socket.user?.profileImage || "",
 });
 
@@ -361,7 +370,7 @@ const setupLiveStreamSockets = (io) => {
     const handleLiveComment = async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
-        const text = String(data.text || "").trim().slice(0, 500);
+        const text = textFromLiveValue(data.text ?? data.message ?? data.body ?? data.comment, "").slice(0, 500);
         const clientId = String(data.clientId || data.id || "").slice(0, 120);
 
         if (!streamId) {

@@ -1,13 +1,16 @@
 // @ts-nocheck
 import {
   Bookmark,
+  Download,
   Heart,
   MessageCircle,
   Music2,
+  Radio,
   RefreshCw,
   Search,
   Send,
   Share2,
+  Users,
   X,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -124,20 +127,22 @@ const relativeTimeFor = (value) => {
 const commentKeyFor = (comment, index) => comment?._id || `${comment?.userId || comment?.name || "comment"}-${comment?.createdAt || index}`;
 
 const ActionButton = memo(({ active = false, count, label, onClick, children }) => (
-  <div className="flex flex-col items-center gap-1">
+  <div className="flex flex-col items-center gap-1.5">
     <button
       type="button"
-      className={`flex h-11 w-11 items-center justify-center rounded-full text-white shadow-xl backdrop-blur transition duration-150 active:scale-95 sm:h-11 sm:w-11 lg:h-12 lg:w-12 border border-white/20 ${
+      className={`flex h-12 w-12 items-center justify-center rounded-full border border-white/10 text-white shadow-[0_12px_30px_rgba(0,0,0,0.38)] backdrop-blur-md transition duration-150 hover:scale-105 active:scale-95 sm:h-[3.25rem] sm:w-[3.25rem] ${
         active
-          ? "scale-105 bg-white/25 shadow-2xl"
-          : "bg-slate-950/30 hover:bg-slate-950/50 hover:border-white/40"
+          ? "scale-105 bg-white text-slate-950 shadow-2xl"
+          : "bg-black/58 hover:bg-black/78 hover:border-white/22"
       }`}
       onClick={onClick}
       aria-label={label}
     >
       {children}
     </button>
-    <span className="max-w-14 truncate text-[10px] font-black leading-none text-white drop-shadow-md">{count}</span>
+    {count !== undefined && count !== "" ? (
+      <span className="max-w-14 truncate text-[10px] font-black leading-none text-white drop-shadow-md">{count}</span>
+    ) : null}
   </div>
 ));
 
@@ -168,6 +173,7 @@ const FeedItem = memo(
     onLike,
     onDoubleTapLike,
     onOpenComments,
+    onDownload,
     onSave,
     onShare,
     onViewed,
@@ -310,11 +316,11 @@ const FeedItem = memo(
           ))}
         </div>
 
-        <div className="home-feed-actions absolute bottom-[calc(5rem+env(safe-area-inset-bottom))] right-2 z-20 flex max-h-[calc(100%-8.5rem)] w-14 flex-col items-center justify-end overflow-visible sm:bottom-[calc(5.45rem+env(safe-area-inset-bottom))] sm:right-4 lg:right-6 lg:w-16">
-          <div className="flex flex-col items-center gap-3 rounded-[1.35rem] border border-white/12 bg-black/24 px-1.5 py-2.5 shadow-[0_18px_48px_rgba(0,0,0,0.34)] backdrop-blur-xl">
-            <Link to={liveStreamId ? `/live/${liveStreamId}` : profilePath} className="relative mb-1 shrink-0 transition active:scale-95" aria-label={liveStreamId ? "Join creator live" : "Creator profile"}>
+        <div className="home-feed-actions absolute right-2 top-1/2 z-20 flex w-16 -translate-y-1/2 flex-col items-center justify-center overflow-visible sm:right-4 lg:right-5">
+          <div className="flex flex-col items-center gap-3.5">
+            <Link to={liveStreamId ? `/live/${liveStreamId}` : profilePath} className="relative mb-0.5 shrink-0 transition hover:scale-105 active:scale-95" aria-label={liveStreamId ? "Join creator live" : "Creator profile"}>
               <span className={`relative inline-flex rounded-full p-[2px] ${liveStreamId ? "live-avatar-ring" : "bg-white/35"}`}>
-                <LiveAvatar user={profile} src={profileImage} className="h-12 w-12 rounded-full border border-black/35 object-cover shadow-[0_10px_28px_rgba(0,0,0,0.45)]" />
+                <LiveAvatar user={profile} src={profileImage} className="h-[3.25rem] w-[3.25rem] rounded-full border border-black/35 object-cover shadow-[0_10px_28px_rgba(0,0,0,0.45)]" />
               </span>
               {liveStreamId && (
                 <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[0.52rem] font-black leading-none text-white shadow-[0_0_18px_rgba(220,38,38,0.75)]">
@@ -335,6 +341,10 @@ const FeedItem = memo(
               <Bookmark className={`h-6 w-6 ${item.savedByViewer ? "fill-brand text-brand" : ""}`} />
             </ActionButton>
 
+            <ActionButton label="Download post" onClick={() => onDownload(item)}>
+              <Download className="h-6 w-6" />
+            </ActionButton>
+
             <ActionButton count={formatCount(item.shareCount)} label="Share post" onClick={() => onShare(item)}>
               <Share2 className="h-6 w-6" />
             </ActionButton>
@@ -344,6 +354,67 @@ const FeedItem = memo(
     );
   }
 );
+
+const liveThumbnailFor = (stream = {}) =>
+  stream.thumbnail || stream.coverImage || stream.creator?.coverImage || stream.creator?.profilePicture || stream.creator?.profileImage || "";
+
+const LiveFeedCard = memo(({ streams = [], onOpenStream }) => {
+  const featured = streams[0] || {};
+  const visibleStreams = streams.slice(0, 5);
+  const backgroundUrl = liveThumbnailFor(featured);
+
+  return (
+    <article
+      data-feed-post-id={`live:${featured.id || "global"}`}
+      className="home-feed-viewport relative flex snap-start snap-always items-center justify-center overflow-hidden bg-black px-4 text-white"
+    >
+      {backgroundUrl ? (
+        <img src={mediaUrl(backgroundUrl)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-30 blur-xl scale-110" />
+      ) : null}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(34,197,94,0.22),transparent_34%),linear-gradient(to_bottom,rgba(0,0,0,0.3),#000_78%)]" />
+
+      <div className="relative z-10 w-full max-w-md">
+        <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-red-400/25 bg-red-600/18 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-red-100">
+          <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.9)]" />
+          Live now
+        </div>
+
+        <div className="space-y-3">
+          {visibleStreams.map((stream, index) => {
+            const creator = stream.creator || {};
+            const avatar = creator.profilePicture || creator.profileImage || creator.avatar || "";
+
+            return (
+              <button
+                key={stream.id}
+                type="button"
+                className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition active:scale-[0.99] ${
+                  index === 0 ? "border-brand/45 bg-white/14 shadow-[0_0_42px_rgba(34,197,94,0.18)]" : "border-white/10 bg-white/8 hover:bg-white/12"
+                }`}
+                onClick={() => onOpenStream(stream)}
+              >
+                <span className="relative shrink-0">
+                  <SafeAvatar user={creator} src={avatar} className="h-14 w-14 rounded-full border-2 border-white object-cover" />
+                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[0.55rem] font-black leading-none text-white">
+                    LIVE
+                  </span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-base font-black">{creator.username || creator.name || "VibeBook creator"}</span>
+                  <span className="mt-1 flex items-center gap-1.5 text-xs font-bold text-white/68">
+                    <Users className="h-3.5 w-3.5" />
+                    {formatCount(stream.viewerCount || 0)} watching
+                  </span>
+                </span>
+                <Radio className="h-5 w-5 shrink-0 text-red-300" />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </article>
+  );
+});
 
 const CommentsSheet = ({
   commentText,
@@ -485,6 +556,7 @@ const Home = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [error, setError] = useState("");
+  const [networkStatus, setNetworkStatus] = useState("");
   const [activePostId, setActivePostId] = useState("");
   const [soundEnabled, setSoundEnabled] = useState(readFeedAudioPreference);
   const [audioUnlockToken, setAudioUnlockToken] = useState(0);
@@ -729,13 +801,36 @@ const Home = () => {
 
   useEffect(() => {
     const handleOnline = () => {
+      setNetworkStatus("");
       retryAttemptRef.current = 0;
       loadFeed(1, { reconnect: true, preserveScroll: true });
     };
 
+    const handleOffline = () => {
+      setNetworkStatus("Reconnecting...");
+    };
+
     window.addEventListener("online", handleOnline);
-    return () => window.removeEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, [loadFeed]);
+
+  useEffect(() => {
+    const handleSocketStatus = (event) => {
+      const status = event.detail?.status || "";
+      if (status === "reconnecting" || status === "offline") {
+        setNetworkStatus("Reconnecting...");
+      } else if (status === "connected") {
+        setNetworkStatus("");
+      }
+    };
+
+    window.addEventListener("vibebook:socket-status", handleSocketStatus);
+    return () => window.removeEventListener("vibebook:socket-status", handleSocketStatus);
+  }, []);
 
   useEffect(() => {
     const handleHomeRefresh = () => {
@@ -753,6 +848,10 @@ const Home = () => {
       validPosts.filter((item) => {
         if (feedMode === "following") {
           return Boolean(item?.userId?.isFollowing);
+        }
+
+        if (feedMode === "live") {
+          return false;
         }
 
         if (feedMode === "stem") {
@@ -778,11 +877,7 @@ const Home = () => {
     }
 
     if (value === "live") {
-      if (activeLiveStreams[0]?.id) {
-        navigate(`/live/${activeLiveStreams[0].id}`);
-        return;
-      }
-
+      setFeedMode("live");
       scrollerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
       return;
     }
@@ -793,7 +888,33 @@ const Home = () => {
     }
 
     setFeedMode(value);
-  }, [activeLiveStreams, isAuthenticated, navigate]);
+  }, [isAuthenticated, navigate]);
+
+  const feedEntries = useMemo(() => {
+    const postEntries = visibleFeed.map((item, index) => ({
+      id: item._id || item.url || `post:${index}`,
+      kind: "post",
+      item,
+    }));
+    const liveEntries = activeLiveStreams.length
+      ? [{ id: `live:${activeLiveStreams[0].id || "global"}`, kind: "live", streams: activeLiveStreams }]
+      : [];
+
+    if (feedMode === "live") {
+      return liveEntries;
+    }
+
+    if (!liveEntries.length) {
+      return postEntries;
+    }
+
+    const insertAt = Math.min(1, postEntries.length);
+    return [
+      ...postEntries.slice(0, insertAt),
+      ...liveEntries,
+      ...postEntries.slice(insertAt),
+    ];
+  }, [activeLiveStreams, feedMode, visibleFeed]);
 
   const activeCommentPost = useMemo(() => visibleFeed.find((item) => item._id === commentOpen), [commentOpen, visibleFeed]);
   const nextVideoPreloadUrl = useMemo(() => {
@@ -802,16 +923,16 @@ const Home = () => {
   }, [activePostId, visibleFeed]);
 
   useEffect(() => {
-    const firstId = visibleFeed[0]?._id || visibleFeed[0]?.url || "";
+    const firstId = feedEntries[0]?.id || "";
 
     setActivePostId((current) => {
-      if (current && visibleFeed.some((item) => (item._id || item.url) === current)) {
+      if (current && feedEntries.some((item) => item.id === current)) {
         return current;
       }
 
       return firstId;
     });
-  }, [visibleFeed]);
+  }, [feedEntries]);
 
   useEffect(() => {
     const scroller = scrollerRef.current;
@@ -858,7 +979,7 @@ const Home = () => {
       observer.disconnect();
       activeRatiosRef.current = new Map();
     };
-  }, [visibleFeed]);
+  }, [feedEntries]);
 
   const updateAudioPreference = useCallback((enabled) => {
     setSoundEnabled(Boolean(enabled));
@@ -1066,6 +1187,47 @@ const Home = () => {
     }
   }, [replaceFeedItem]);
 
+  const handleDownload = useCallback(async (item) => {
+    if (!item?.url) {
+      return;
+    }
+
+    const fallbackUrl = mediaUrl(item.url);
+    const extension = item.type === "video" ? "mp4" : "jpg";
+    const fileName = `vibebook-${item._id || Date.now()}.${extension}`;
+
+    const downloadFromUrl = (url, name) => {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = name;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    };
+
+    try {
+      if (item._id && item.type === "video") {
+        const { data } = await feedApi.downloadVideo(item._id);
+        const blobUrl = URL.createObjectURL(data);
+        downloadFromUrl(blobUrl, fileName);
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1200);
+        return;
+      }
+
+      const response = await fetch(fallbackUrl, { mode: "cors" });
+      if (!response.ok) {
+        throw new Error("Download failed");
+      }
+
+      const blobUrl = URL.createObjectURL(await response.blob());
+      downloadFromUrl(blobUrl, fileName);
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1200);
+    } catch {
+      window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
   const handleComment = useCallback(async (event, item) => {
     event.preventDefault();
 
@@ -1163,15 +1325,21 @@ const Home = () => {
   if (loading) {
     return (
       <section className="home-feed-viewport flex items-center justify-center bg-slate-950 text-white">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-24 w-24 animate-pulse rounded-full bg-slate-800" />
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-white/55">Loading fresh videos</p>
+        <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_35%,rgba(34,197,94,0.2),transparent_34%)]" />
+          <div className="relative flex flex-col items-center gap-4">
+            <span className="vibebook-premium-spinner" />
+            <div className="h-3 w-44 overflow-hidden rounded-full bg-white/10">
+              <span className="block h-full w-1/2 animate-pulse rounded-full bg-brand/80 blur-[1px]" />
+            </div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-white/55">Loading fresh videos</p>
+          </div>
         </div>
       </section>
     );
   }
 
-  if (error && !visibleFeed.length) {
+  if (error && !feedEntries.length) {
     return (
       <section className="container-page flex min-h-[60vh] items-center justify-center py-10">
         <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center text-red-700">
@@ -1210,13 +1378,10 @@ const Home = () => {
         </button>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 top-[calc(3.4rem+env(safe-area-inset-top))] z-50 flex justify-center px-3">
-        <div className="pointer-events-auto relative grid w-[12.5rem] grid-cols-2 rounded-full border border-white/12 bg-black/28 p-1 shadow-[0_14px_36px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-          <span
-            className="feed-tab-indicator absolute bottom-1 top-1 w-[calc(50%-0.25rem)] rounded-full bg-white shadow-[0_8px_24px_rgba(255,255,255,0.2)]"
-            style={{ transform: feedMode === "following" ? "translateX(0.25rem)" : "translateX(calc(100% + 0.25rem))" }}
-          />
+      <div className="pointer-events-none absolute inset-x-0 top-[calc(3.35rem+env(safe-area-inset-top))] z-50 flex justify-center px-3">
+        <div className="pointer-events-auto grid w-[17.5rem] grid-cols-3 items-end gap-1 rounded-full border border-white/10 bg-black/42 px-2 py-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.32)] backdrop-blur-xl">
           {[
+            { value: "live", label: "LIVE" },
             { value: "following", label: "Following" },
             { value: "for-you", label: "For You" },
           ].map((option) => {
@@ -1225,12 +1390,16 @@ const Home = () => {
               <button
                 key={option.value}
                 type="button"
-                className={`relative z-10 shrink-0 rounded-full px-3 py-1.5 text-xs font-black transition ${
-                  active ? "text-black" : "text-white/68 hover:text-white"
+                className={`relative z-10 flex shrink-0 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-black transition ${
+                  active ? "text-white" : "text-white/62 hover:text-white"
                 }`}
                 onClick={() => handleFeedTab(option.value)}
               >
+                {option.value === "live" && activeLiveStreams.length ? (
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 shadow-[0_0_14px_rgba(239,68,68,0.9)]" />
+                ) : null}
                 {option.label}
+                {active ? <span className="absolute -bottom-1 h-0.5 w-7 rounded-full bg-white" /> : null}
               </button>
             );
           })}
@@ -1259,33 +1428,42 @@ const Home = () => {
         onPointerCancel={handlePointerEnd}
         onPointerLeave={handlePointerEnd}
       >
-        {visibleFeed.length ? (
+        {feedEntries.length ? (
           <>
-            {visibleFeed.map((item, index) => (
-              <FeedItem
-                key={item._id || `${item.url}-${index}`}
-                audioUnlockToken={audioUnlockToken}
-                currentUser={currentUser}
-                isAuthenticated={isAuthenticated}
-                isActive={(activePostId || visibleFeed[0]?._id || visibleFeed[0]?.url) === (item._id || item.url)}
-                item={item}
-                soundEnabled={soundEnabled}
-                onAudioPreferenceChange={updateAudioPreference}
-                onAutoplayBlocked={handleAutoplayBlocked}
-                onInvalid={removePost}
-                onLike={handleLike}
-                onDoubleTapLike={(post) => handleLike(post, { forceLike: true })}
-                onOpenComments={(postId) => {
-                  setCommentOpen(postId);
-                  setCommentText("");
-                }}
-                onSave={handleSave}
-                onShare={handleShare}
-                onViewed={handleViewed}
-              />
+            {feedEntries.map((entry, index) => (
+              entry.kind === "live" ? (
+                <LiveFeedCard
+                  key={entry.id}
+                  streams={entry.streams}
+                  onOpenStream={(stream) => stream?.id && navigate(`/live/${stream.id}`)}
+                />
+              ) : (
+                <FeedItem
+                  key={entry.item._id || `${entry.item.url}-${index}`}
+                  audioUnlockToken={audioUnlockToken}
+                  currentUser={currentUser}
+                  isAuthenticated={isAuthenticated}
+                  isActive={(activePostId || feedEntries[0]?.id) === entry.id}
+                  item={entry.item}
+                  soundEnabled={soundEnabled}
+                  onAudioPreferenceChange={updateAudioPreference}
+                  onAutoplayBlocked={handleAutoplayBlocked}
+                  onInvalid={removePost}
+                  onLike={handleLike}
+                  onDoubleTapLike={(post) => handleLike(post, { forceLike: true })}
+                  onOpenComments={(postId) => {
+                    setCommentOpen(postId);
+                    setCommentText("");
+                  }}
+                  onDownload={handleDownload}
+                  onSave={handleSave}
+                  onShare={handleShare}
+                  onViewed={handleViewed}
+                />
+              )
             ))}
-            <div ref={loadMoreRef} className="h-1 bg-slate-950" />
-            {loadingMore && (
+            {feedMode !== "live" ? <div ref={loadMoreRef} className="h-1 bg-slate-950" /> : null}
+            {feedMode !== "live" && loadingMore && (
               <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center">
                 <span className="rounded-full bg-slate-950/65 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white/75 backdrop-blur">
                   Loading more
@@ -1295,9 +1473,11 @@ const Home = () => {
           </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-white">
-            <Search className="h-10 w-10 text-brand" />
-            <h1 className="mt-4 text-2xl font-black">No fresh uploads yet</h1>
-            <p className="mt-2 max-w-xs text-sm font-semibold text-white/60">Refresh for new videos or explore creators while the feed warms up.</p>
+            {feedMode === "live" ? <Radio className="h-10 w-10 text-red-400" /> : <Search className="h-10 w-10 text-brand" />}
+            <h1 className="mt-4 text-2xl font-black">{feedMode === "live" ? "No one is live right now" : "No fresh uploads yet"}</h1>
+            <p className="mt-2 max-w-xs text-sm font-semibold text-white/60">
+              {feedMode === "live" ? "Live streams will appear here the moment creators go live." : "Refresh for new videos or explore creators while the feed warms up."}
+            </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               <button type="button" className="btn-primary" onClick={() => refreshFeed("empty-state")} disabled={refreshing}>
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -1311,9 +1491,17 @@ const Home = () => {
         )}
       </div>
 
-      {error && visibleFeed.length ? (
+      {error && feedEntries.length ? (
         <div className="pointer-events-none fixed inset-x-0 top-20 z-40 flex justify-center px-4">
           <div className="rounded-full border border-red-200 bg-red-50 px-4 py-2 text-sm font-bold text-red-700 shadow-xl">{error}</div>
+        </div>
+      ) : null}
+
+      {networkStatus ? (
+        <div className="pointer-events-none fixed inset-x-0 top-24 z-40 flex justify-center px-4">
+          <div className="rounded-full border border-white/10 bg-black/72 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white shadow-xl backdrop-blur">
+            {networkStatus}
+          </div>
         </div>
       ) : null}
 
