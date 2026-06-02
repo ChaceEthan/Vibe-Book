@@ -1901,6 +1901,9 @@ const Profile = () => {
 
         <div className="px-4 pb-6 text-center sm:px-6">
           <div className={`relative mx-auto -mt-16 h-32 w-32 rounded-full ${frameGradient ? `bg-gradient-to-br ${frameGradient} p-1 shadow-[0_0_32px_rgba(34,197,94,0.45)]` : "border-4 border-white bg-slate-100 shadow-xl"}`}>
+            {activeLiveStreamId && (
+              <span className="pointer-events-none absolute inset-[-8px] z-0 rounded-full bg-gradient-to-br from-red-500 via-brand to-red-600 opacity-90 shadow-[0_0_34px_rgba(239,68,68,0.55)] animate-pulse" />
+            )}
             {frameGradient && <motion.span className="absolute inset-[-7px] rounded-full bg-inherit opacity-40 blur-md" animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} />}
             <LiveAvatar user={{ ...user, profilePicture: profilePicture || activeImageUrl }} alt={user.name} wrapperClassName="h-full w-full" className="relative h-full w-full rounded-full border-4 border-white object-cover" loading="eager" />
             {activeLiveStreamId && (
@@ -1911,6 +1914,17 @@ const Profile = () => {
                 aria-label="Join live stream"
                 title="Join live stream"
               />
+            )}
+            {activeLiveStreamId && (
+              <button
+                type="button"
+                className="absolute -bottom-3 left-1/2 z-30 inline-flex -translate-x-1/2 items-center gap-1 rounded-full bg-red-600 px-3 py-1 text-[0.68rem] font-black uppercase tracking-wide text-white shadow-[0_0_22px_rgba(220,38,38,0.7)] ring-2 ring-white"
+                onClick={() => navigate(`/live/${activeLiveStreamId}`)}
+                aria-label="Join live stream"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                LIVE
+              </button>
             )}
             {isOwnProfile && (
               <>

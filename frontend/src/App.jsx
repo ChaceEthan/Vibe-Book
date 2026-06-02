@@ -16,6 +16,7 @@ import Home from "./pages/Home.jsx";
 import Inbox from "./pages/Inbox.jsx";
 import LegalPage from "./pages/LegalPage.jsx";
 import Login from "./pages/Login.jsx";
+import LiveDiscovery from "./pages/LiveDiscovery.jsx";
 import LiveRoom from "./pages/LiveRoom.jsx";
 import NotificationCenter from "./pages/NotificationCenter.jsx";
 import Profile from "./pages/Profile.jsx";
@@ -49,7 +50,8 @@ const App = () => {
   const location = useLocation();
   const isHome = location.pathname === "/";
   const isLiveRoute = location.pathname.startsWith("/live/");
-  const isImmersive = isHome || isLiveRoute;
+  const isLiveDiscovery = location.pathname === "/live";
+  const isImmersive = isHome || isLiveRoute || isLiveDiscovery;
 
   return (
     <div className="flex min-h-screen flex-col bg-surface">
@@ -57,6 +59,7 @@ const App = () => {
       <main className={`flex-1 ${isImmersive ? "bg-slate-950 pb-0" : "pb-28"}`}>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/live" element={<LiveDiscovery />} />
           <Route
             path="/live/:streamId"
             element={

@@ -18,8 +18,8 @@ import { connectSocket } from "../services/socket";
 import { useLiveStreamStore } from "../store/livestreamStore";
 
 const navClass = ({ isActive }) =>
-  `group flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] font-black transition duration-200 sm:text-[11px] ${
-    isActive ? "active text-white" : "text-white/56 hover:text-white"
+  `group flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-0.5 text-[10px] font-black transition duration-200 sm:text-[11px] ${
+    isActive ? "active text-brand" : "text-white/88 hover:text-white"
   }`;
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -53,6 +53,7 @@ const Navbar = () => {
   );
 
   const isHome = location.pathname === "/";
+  const isImmersiveRoute = isHome || location.pathname === "/live" || location.pathname.startsWith("/live/");
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -230,7 +231,7 @@ const Navbar = () => {
 
   return (
     <>
-      {!isHome && (
+      {!isImmersiveRoute && (
         <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur">
           <nav className="mx-auto flex min-h-14 w-full max-w-full items-center justify-between gap-1.5 overflow-hidden px-2 sm:min-h-16 sm:gap-3 sm:px-6 lg:max-w-7xl lg:px-8">
             <Link to="/" className="flex shrink-0 items-center gap-1.5 overflow-hidden transition-all sm:gap-3" onClick={refreshHomeIfActive}>
@@ -259,12 +260,12 @@ const Navbar = () => {
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
       <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid h-16 w-full max-w-md grid-cols-5 items-center gap-0 bg-black px-1 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+        <div className="mx-auto grid h-[3.7rem] w-full max-w-md grid-cols-5 items-center gap-0 bg-black px-1 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
           {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
               <NavLink key={item.label} to={item.to} className={navClass} onClick={item.to === "/" ? refreshHomeIfActive : undefined}>
-                <Icon className="h-5 w-5 transition group-[.active]:drop-shadow-[0_0_12px_rgba(34,197,94,0.55)]" />
+                <Icon className="h-5 w-5 stroke-[2.4] transition group-[.active]:drop-shadow-[0_0_12px_rgba(34,197,94,0.75)]" />
                 <span>{item.label}</span>
               </NavLink>
             );
@@ -272,14 +273,14 @@ const Navbar = () => {
 
           <button
             type="button"
-            className="flex h-full flex-col items-center justify-center gap-0.5 px-1 py-1 text-[10px] font-black text-white transition active:scale-95 sm:text-[11px]"
+            className="flex h-full flex-col items-center justify-center gap-0.5 px-1 py-0.5 text-[10px] font-black text-white transition active:scale-95 sm:text-[11px]"
             onClick={() => openUpload("image")}
             aria-label="Upload new content"
             title="Upload new content"
           >
-            <span className="vibebook-upload-button relative flex h-11 w-12 items-center justify-center">
+            <span className="vibebook-upload-button relative flex h-10 w-11 items-center justify-center">
               <span className="absolute inset-0 rounded-2xl bg-brand blur-lg opacity-45" />
-              <span className="relative flex h-9 w-11 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-emerald-300 via-brand to-teal-400 shadow-[0_0_24px_rgba(34,197,94,0.45)] backdrop-blur">
+              <span className="relative flex h-8 w-10 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-emerald-300 via-brand to-teal-400 shadow-[0_0_24px_rgba(34,197,94,0.45)] backdrop-blur">
                 <span className="vibebook-v-mark">V</span>
               </span>
             </span>
@@ -291,7 +292,7 @@ const Navbar = () => {
             return (
               <NavLink key={item.label} to={item.to} className={navClass}>
                 <span className="relative">
-                  <Icon className="h-5 w-5 transition group-[.active]:drop-shadow-[0_0_12px_rgba(34,197,94,0.55)]" />
+                  <Icon className="h-5 w-5 stroke-[2.4] transition group-[.active]:drop-shadow-[0_0_12px_rgba(34,197,94,0.75)]" />
                   {item.badge ? (
                     <span className="absolute -right-2 -top-2 min-w-4 rounded-full bg-red-500 px-1 text-[10px] leading-4 text-white">
                       {item.badge > 9 ? "9+" : item.badge}

@@ -143,6 +143,21 @@ const ensureMediaTrackState = (stream, { audioEnabled = true, videoEnabled = tru
   });
 };
 
+const cameraDeviceForFacingMode = async (facingMode = "user") => {
+  if (!navigator.mediaDevices?.enumerateDevices) return "";
+
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter((device) => device.kind === "videoinput");
+    const rearPattern = /(back|rear|environment|world|wide|0)/i;
+    const frontPattern = /(front|user|face|selfie|1)/i;
+    const pattern = facingMode === "environment" ? rearPattern : frontPattern;
+    return videoDevices.find((device) => pattern.test(device.label || ""))?.deviceId || videoDevices[facingMode === "environment" && videoDevices.length > 1 ? videoDevices.length - 1 : 0]?.deviceId || "";
+  } catch {
+    return "";
+  }
+};
+
 const makeGiftParticles = (tier = "small") => {
   const count = tier === "premium" ? 28 : tier === "medium" ? 16 : 9;
   return Array.from({ length: count }, (_, index) => ({
@@ -176,6 +191,9 @@ const textFromLiveValue = (value, fallback = "") => {
   if (candidate === value) return fallback;
   return textFromLiveValue(candidate, fallback);
 };
+
+const isFormEventLike = (value) =>
+  Boolean(value && typeof value === "object" && (value.nativeEvent || value.target || value.currentTarget || value.preventDefault));
 
 const liveUserFrom = (data = {}) => {
   const user = data.user || data.sender || data.viewer || data.author || {};
@@ -370,6 +388,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     const comment = sanitizeLiveComment(entry);
     const id = comment.id || `${comment.type || "comment"}:${Date.now()}:${Math.random()}`;
     const text = textFromLiveValue(comment.text, comment.type === "gift" ? "sent a gift" : "");
+    const username = textFromLiveValue(comment.username, "Guest");
 
     if (!text && comment.type !== "gift") return null;
     if (!options.allowDuplicate && seenCommentIdsRef.current.has(id)) return null;
@@ -379,7 +398,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       seenCommentIdsRef.current = new Set(Array.from(seenCommentIdsRef.current).slice(-160));
     }
 
-    const nextComment = { ...comment, id, text };
+    const nextComment = { ...comment, id, username, text };
     setComments((current) => [...current.slice(-(MAX_COMMENTS - 1)), nextComment]);
     return nextComment;
   };
@@ -429,7 +448,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       } else if (status === "offline") {
         setStatusMessage("Reconnecting...");
       } else if (status === "connected") {
-        setStatusMessage((current) => (current === "Reconnecting..." ? "" : current));
+        setStatusMessage((current) => (current === "Reconnecting..." || current === "Reconnecting live video..." ? "" : current));
       }
     };
 
@@ -1197,7 +1216,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       };
       const handleAck = (error, ack = {}) => {
         if (error || ack?.ok === false) {
-          setStatusMessage("Reconnecting live video...");
+          setStatusMessage("Waiting for host video...");
           return;
         }
 
@@ -1294,7 +1313,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           connection = getPeerConnection(creatorSocketId);
         }
         if (!connection) return;
-        setStatusMessage("Connecting live video...");
+        setStatusMessage("Waiting for live video...");
         await connection.setRemoteDescription(new RTCSessionDescription(data.offer));
         await flushPendingIceCandidates(creatorSocketId, connection);
         const answer = await connection.createAnswer();
@@ -1305,7 +1324,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           answer: connection.localDescription,
         });
       } catch {
-        setStatusMessage("Connecting live video...");
+        setStatusMessage("Waiting for live video...");
       }
     };
 
@@ -1398,7 +1417,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   }, [currentUser?.name, currentUser?.username, isCreator, localLoading, previewStream, streamId]);
 
   const sendComment = (retryText = "", retryId = "") => {
-    const text = String(retryText || commentText).trim();
+    const retrying = !isFormEventLike(retryText) && Boolean(textFromLiveValue(retryText, ""));
+    const textSource = retrying ? retryText : commentText;
+    const text = textFromLiveValue(textSource, "").trim();
     const activeSocket = socketRef.current;
 
     if (!text || !activeSocket || !streamId || !commentsEnabled) return;
@@ -1410,7 +1431,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     lastCommentAtRef.current = Date.now();
     setSending(true);
-    if (!retryText) {
+    if (!retrying) {
       setCommentText("");
     }
     if (retryId) {
@@ -1795,7 +1816,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       try {
         cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: nextFacingMode },
+            facingMode: { exact: nextFacingMode },
             width: { ideal: 1280 },
             height: { ideal: 720 },
           },
@@ -1806,8 +1827,19 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           throw cameraError;
         }
 
+        const deviceId = await cameraDeviceForFacingMode(nextFacingMode);
         cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: deviceId
+            ? {
+                deviceId: { exact: deviceId },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              }
+            : {
+                facingMode: { ideal: nextFacingMode },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+              },
           audio: false,
         });
       }
@@ -1845,6 +1877,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       setLiveFacingMode(nextFacingMode);
       setCameraFlipNonce((current) => current + 1);
       socketRef.current?.emit("live:creator-ready", { streamId });
+      socketRef.current?.emit("live:media-state", { streamId, facingMode: nextFacingMode, cameraEnabled, muted });
       setStatusMessage(nextFacingMode === "user" ? "Front camera active" : "Back camera active");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1600);
     } catch (error) {
@@ -2135,7 +2168,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-white/10">
                 <Video className="h-9 w-9 text-white/70" />
               </div>
-              <p className="mt-3 text-sm font-black">{isCreator ? "Restoring camera..." : "Connecting live video..."}</p>
+              <p className="mt-3 text-sm font-black">{isCreator ? "Restoring camera..." : "Waiting for live video..."}</p>
               <p className="mt-1 text-xs font-semibold text-white/55">Video will appear as soon as the stream is ready.</p>
               <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/10">
                 <motion.span
@@ -2635,7 +2668,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
               maxLength={500}
             />
           </div>
-          <button type="button" onClick={sendComment} disabled={!commentText.trim() || sending || !commentsEnabled || ended} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-slate-950 shadow-lg transition hover:scale-105 disabled:opacity-50" aria-label="Send live comment">
+          <button type="button" onClick={() => sendComment()} disabled={!commentText.trim() || sending || !commentsEnabled || ended} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white text-slate-950 shadow-lg transition hover:scale-105 disabled:opacity-50" aria-label="Send live comment">
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           </button>
           <button type="button" onClick={toggleGiftTray} disabled={!giftsEnabled || ended || isCreator} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-300 text-slate-950 shadow-lg transition hover:scale-105 disabled:opacity-50" aria-label="Open gifts">

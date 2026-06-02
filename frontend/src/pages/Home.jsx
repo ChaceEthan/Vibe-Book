@@ -5,12 +5,10 @@ import {
   Heart,
   MessageCircle,
   Music2,
-  Radio,
   RefreshCw,
   Search,
   Send,
   Share2,
-  Users,
   X,
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -354,67 +352,6 @@ const FeedItem = memo(
     );
   }
 );
-
-const liveThumbnailFor = (stream = {}) =>
-  stream.thumbnail || stream.coverImage || stream.creator?.coverImage || stream.creator?.profilePicture || stream.creator?.profileImage || "";
-
-const LiveFeedCard = memo(({ streams = [], onOpenStream }) => {
-  const featured = streams[0] || {};
-  const visibleStreams = streams.slice(0, 5);
-  const backgroundUrl = liveThumbnailFor(featured);
-
-  return (
-    <article
-      data-feed-post-id={`live:${featured.id || "global"}`}
-      className="home-feed-viewport relative flex snap-start snap-always items-center justify-center overflow-hidden bg-black px-4 text-white"
-    >
-      {backgroundUrl ? (
-        <img src={mediaUrl(backgroundUrl)} alt="" className="absolute inset-0 h-full w-full object-cover opacity-30 blur-xl scale-110" />
-      ) : null}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(34,197,94,0.22),transparent_34%),linear-gradient(to_bottom,rgba(0,0,0,0.3),#000_78%)]" />
-
-      <div className="relative z-10 w-full max-w-md">
-        <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-red-400/25 bg-red-600/18 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-red-100">
-          <span className="h-2 w-2 rounded-full bg-red-500 shadow-[0_0_18px_rgba(239,68,68,0.9)]" />
-          Live now
-        </div>
-
-        <div className="space-y-3">
-          {visibleStreams.map((stream, index) => {
-            const creator = stream.creator || {};
-            const avatar = creator.profilePicture || creator.profileImage || creator.avatar || "";
-
-            return (
-              <button
-                key={stream.id}
-                type="button"
-                className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition active:scale-[0.99] ${
-                  index === 0 ? "border-brand/45 bg-white/14 shadow-[0_0_42px_rgba(34,197,94,0.18)]" : "border-white/10 bg-white/8 hover:bg-white/12"
-                }`}
-                onClick={() => onOpenStream(stream)}
-              >
-                <span className="relative shrink-0">
-                  <SafeAvatar user={creator} src={avatar} className="h-14 w-14 rounded-full border-2 border-white object-cover" />
-                  <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded-full bg-red-600 px-1.5 py-0.5 text-[0.55rem] font-black leading-none text-white">
-                    LIVE
-                  </span>
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-base font-black">{creator.username || creator.name || "VibeBook creator"}</span>
-                  <span className="mt-1 flex items-center gap-1.5 text-xs font-bold text-white/68">
-                    <Users className="h-3.5 w-3.5" />
-                    {formatCount(stream.viewerCount || 0)} watching
-                  </span>
-                </span>
-                <Radio className="h-5 w-5 shrink-0 text-red-300" />
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    </article>
-  );
-});
 
 const CommentsSheet = ({
   commentText,
@@ -850,10 +787,6 @@ const Home = () => {
           return Boolean(item?.userId?.isFollowing);
         }
 
-        if (feedMode === "live") {
-          return false;
-        }
-
         if (feedMode === "stem") {
           const haystack = [
             item.caption,
@@ -877,8 +810,7 @@ const Home = () => {
     }
 
     if (value === "live") {
-      setFeedMode("live");
-      scrollerRef.current?.scrollTo?.({ top: 0, behavior: "smooth" });
+      navigate("/live");
       return;
     }
 
@@ -890,31 +822,15 @@ const Home = () => {
     setFeedMode(value);
   }, [isAuthenticated, navigate]);
 
-  const feedEntries = useMemo(() => {
-    const postEntries = visibleFeed.map((item, index) => ({
-      id: item._id || item.url || `post:${index}`,
-      kind: "post",
-      item,
-    }));
-    const liveEntries = activeLiveStreams.length
-      ? [{ id: `live:${activeLiveStreams[0].id || "global"}`, kind: "live", streams: activeLiveStreams }]
-      : [];
-
-    if (feedMode === "live") {
-      return liveEntries;
-    }
-
-    if (!liveEntries.length) {
-      return postEntries;
-    }
-
-    const insertAt = Math.min(1, postEntries.length);
-    return [
-      ...postEntries.slice(0, insertAt),
-      ...liveEntries,
-      ...postEntries.slice(insertAt),
-    ];
-  }, [activeLiveStreams, feedMode, visibleFeed]);
+  const feedEntries = useMemo(
+    () =>
+      visibleFeed.map((item, index) => ({
+        id: item._id || item.url || `post:${index}`,
+        kind: "post",
+        item,
+      })),
+    [visibleFeed]
+  );
 
   const activeCommentPost = useMemo(() => visibleFeed.find((item) => item._id === commentOpen), [commentOpen, visibleFeed]);
   const nextVideoPreloadUrl = useMemo(() => {
@@ -1379,19 +1295,19 @@ const Home = () => {
       </div>
 
       <div className="pointer-events-none absolute inset-x-0 top-[calc(3.35rem+env(safe-area-inset-top))] z-50 flex justify-center px-3">
-        <div className="pointer-events-auto grid w-[17.5rem] grid-cols-3 items-end gap-1 rounded-full border border-white/10 bg-black/42 px-2 py-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.32)] backdrop-blur-xl">
+        <div className="pointer-events-auto grid w-[18rem] grid-cols-3 items-end gap-1 rounded-full border border-white/18 bg-black/72 px-2 py-1.5 shadow-[0_14px_36px_rgba(0,0,0,0.5)] backdrop-blur-xl">
           {[
             { value: "live", label: "LIVE" },
             { value: "following", label: "Following" },
             { value: "for-you", label: "For You" },
           ].map((option) => {
-            const active = option.value === feedMode;
+            const active = option.value !== "live" && option.value === feedMode;
             return (
               <button
                 key={option.value}
                 type="button"
-                className={`relative z-10 flex shrink-0 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-black transition ${
-                  active ? "text-white" : "text-white/62 hover:text-white"
+                className={`relative z-10 flex shrink-0 items-center justify-center gap-1 rounded-full px-2 py-1.5 text-xs font-black drop-shadow-[0_1px_8px_rgba(0,0,0,0.85)] transition ${
+                  active ? "text-white" : "text-white/82 hover:text-white"
                 }`}
                 onClick={() => handleFeedTab(option.value)}
               >
@@ -1399,7 +1315,7 @@ const Home = () => {
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500 shadow-[0_0_14px_rgba(239,68,68,0.9)]" />
                 ) : null}
                 {option.label}
-                {active ? <span className="absolute -bottom-1 h-0.5 w-7 rounded-full bg-white" /> : null}
+                {active ? <span className="absolute -bottom-1 h-0.5 w-7 rounded-full bg-brand shadow-[0_0_12px_rgba(34,197,94,0.9)]" /> : null}
               </button>
             );
           })}
@@ -1431,39 +1347,31 @@ const Home = () => {
         {feedEntries.length ? (
           <>
             {feedEntries.map((entry, index) => (
-              entry.kind === "live" ? (
-                <LiveFeedCard
-                  key={entry.id}
-                  streams={entry.streams}
-                  onOpenStream={(stream) => stream?.id && navigate(`/live/${stream.id}`)}
-                />
-              ) : (
-                <FeedItem
-                  key={entry.item._id || `${entry.item.url}-${index}`}
-                  audioUnlockToken={audioUnlockToken}
-                  currentUser={currentUser}
-                  isAuthenticated={isAuthenticated}
-                  isActive={(activePostId || feedEntries[0]?.id) === entry.id}
-                  item={entry.item}
-                  soundEnabled={soundEnabled}
-                  onAudioPreferenceChange={updateAudioPreference}
-                  onAutoplayBlocked={handleAutoplayBlocked}
-                  onInvalid={removePost}
-                  onLike={handleLike}
-                  onDoubleTapLike={(post) => handleLike(post, { forceLike: true })}
-                  onOpenComments={(postId) => {
-                    setCommentOpen(postId);
-                    setCommentText("");
-                  }}
-                  onDownload={handleDownload}
-                  onSave={handleSave}
-                  onShare={handleShare}
-                  onViewed={handleViewed}
-                />
-              )
+              <FeedItem
+                key={entry.item._id || `${entry.item.url}-${index}`}
+                audioUnlockToken={audioUnlockToken}
+                currentUser={currentUser}
+                isAuthenticated={isAuthenticated}
+                isActive={(activePostId || feedEntries[0]?.id) === entry.id}
+                item={entry.item}
+                soundEnabled={soundEnabled}
+                onAudioPreferenceChange={updateAudioPreference}
+                onAutoplayBlocked={handleAutoplayBlocked}
+                onInvalid={removePost}
+                onLike={handleLike}
+                onDoubleTapLike={(post) => handleLike(post, { forceLike: true })}
+                onOpenComments={(postId) => {
+                  setCommentOpen(postId);
+                  setCommentText("");
+                }}
+                onDownload={handleDownload}
+                onSave={handleSave}
+                onShare={handleShare}
+                onViewed={handleViewed}
+              />
             ))}
-            {feedMode !== "live" ? <div ref={loadMoreRef} className="h-1 bg-slate-950" /> : null}
-            {feedMode !== "live" && loadingMore && (
+            <div ref={loadMoreRef} className="h-1 bg-slate-950" />
+            {loadingMore && (
               <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center">
                 <span className="rounded-full bg-slate-950/65 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white/75 backdrop-blur">
                   Loading more
@@ -1473,10 +1381,10 @@ const Home = () => {
           </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center text-white">
-            {feedMode === "live" ? <Radio className="h-10 w-10 text-red-400" /> : <Search className="h-10 w-10 text-brand" />}
-            <h1 className="mt-4 text-2xl font-black">{feedMode === "live" ? "No one is live right now" : "No fresh uploads yet"}</h1>
+            <Search className="h-10 w-10 text-brand" />
+            <h1 className="mt-4 text-2xl font-black">No fresh uploads yet</h1>
             <p className="mt-2 max-w-xs text-sm font-semibold text-white/60">
-              {feedMode === "live" ? "Live streams will appear here the moment creators go live." : "Refresh for new videos or explore creators while the feed warms up."}
+              Refresh for new videos or explore creators while the feed warms up.
             </p>
             <div className="mt-5 flex flex-wrap justify-center gap-2">
               <button type="button" className="btn-primary" onClick={() => refreshFeed("empty-state")} disabled={refreshing}>
