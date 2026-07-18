@@ -1,5 +1,5 @@
 // @ts-nocheck
-const DEFAULT_BACKEND_URL = "https://vibe-book-api.onrender.com";
+const DEFAULT_BACKEND_URL = "https://vibe-book-fri1.onrender.com";
 const DEFAULT_FRONTEND_URL = "https://vibe-book-kappa.vercel.app";
 
 const trimSlashes = (value = "") => String(value || "").trim().replace(/\s+/g, "").replace(/\/+$/, "");

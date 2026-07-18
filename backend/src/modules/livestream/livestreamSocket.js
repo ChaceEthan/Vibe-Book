@@ -96,6 +96,18 @@ const serializeMember = (member = {}) => ({
   requestedAt: member.requestedAt || undefined,
 });
 
+const uniqueViewersForSnapshot = (state) => {
+  const viewersByIdentity = new Map();
+  Array.from(state.viewers.values()).forEach((member) => {
+    if (member.isHost) return;
+    const identity = member.userId ? `user:${member.userId}` : `socket:${member.socketId}`;
+    const existing = viewersByIdentity.get(identity);
+    if (!existing || String(existing.lastSeenAt || "") <= String(member.lastSeenAt || "")) {
+      viewersByIdentity.set(identity, member);
+    }
+  });
+  return Array.from(viewersByIdentity.values());
+};
 const roomSnapshotFor = (streamId) => {
   const state = stateFor(streamId);
   const byHostThenJoin = (left, right) => {
@@ -105,7 +117,7 @@ const roomSnapshotFor = (streamId) => {
 
   return {
     streamId: idOf(streamId),
-    viewers: Array.from(state.viewers.values()).map(serializeMember).sort(byHostThenJoin),
+    viewers: uniqueViewersForSnapshot(state).map(serializeMember).sort(byHostThenJoin),
     panelUsers: Array.from(state.panel.values()).map(serializeMember).sort(byHostThenJoin).slice(0, LIVE_PANEL_LIMIT),
     requests: Array.from(state.requests.values()).map(serializeMember).sort((left, right) => String(left.requestedAt || "").localeCompare(String(right.requestedAt || ""))),
     panelLimit: LIVE_PANEL_LIMIT,
@@ -980,7 +992,15 @@ const setupLiveStreamSockets = (io) => {
 
       ensureSocketInLiveRoom(socket, streamId);
 
-      traceWebRtc(eventName === "live:webrtc-ice" ? "ice-candidate" : eventName.replace("live:webrtc-", ""), { streamId, fromSocketId: socket.id, targetSocketId });
+      const targetSocket = io.sockets.sockets.get(targetSocketId);
+      const liveRoom = roomFor(streamId);
+      if (!targetSocket?.rooms?.has(liveRoom)) {
+        traceWebRtc("signal-rejected", { eventName, streamId, fromSocketId: socket.id, targetSocketId, reason: "target-not-in-room" });
+        callback?.({ ok: false, error: "Realtime video peer is not in this livestream room" });
+        return;
+      }
+
+      traceWebRtc(eventName === "live:webrtc-ice" ? "ice-received" : `${eventName.replace("live:webrtc-", "")}-received`, { streamId, fromSocketId: socket.id, targetSocketId });
       io.to(targetSocketId).emit(eventName, {
         ...data,
         streamId,

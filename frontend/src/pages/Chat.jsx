@@ -1422,11 +1422,11 @@ const Chat = () => {
     });
 
   return (
-    <section className="container-page py-10">
-      <div className="mb-8 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <section className="container-page py-4 sm:py-6">
+      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-brand">Chat</p>
-          <h1 className="mt-2 truncate text-3xl font-black text-navy">
+          <h1 className="mt-1 truncate text-2xl font-black text-navy">
             {activeTab === "requests"
               ? "Message Requests"
               : activeTab === "groups"
@@ -1451,21 +1451,21 @@ const Chat = () => {
       <div className="mb-5 grid grid-cols-3 gap-2 rounded-lg bg-white p-1 shadow-soft">
         <button
           type="button"
-          className={`rounded-lg px-4 py-3 text-sm font-black ${activeTab === "direct" ? "bg-brand text-navy" : "text-slate-500"}`}
+          className={`rounded-lg px-3 py-2 text-xs font-black sm:text-sm ${activeTab === "direct" ? "bg-brand text-navy" : "text-slate-500"}`}
           onClick={() => setActiveTab("direct")}
         >
           Direct Messages
         </button>
         <button
           type="button"
-          className={`rounded-lg px-4 py-3 text-sm font-black ${activeTab === "groups" ? "bg-brand text-navy" : "text-slate-500"}`}
+          className={`rounded-lg px-3 py-2 text-xs font-black sm:text-sm ${activeTab === "groups" ? "bg-brand text-navy" : "text-slate-500"}`}
           onClick={() => setActiveTab("groups")}
         >
           Group Chats
         </button>
         <button
           type="button"
-          className={`rounded-lg px-4 py-3 text-sm font-black ${activeTab === "requests" ? "bg-brand text-navy" : "text-slate-500"}`}
+          className={`rounded-lg px-3 py-2 text-xs font-black sm:text-sm ${activeTab === "requests" ? "bg-brand text-navy" : "text-slate-500"}`}
           onClick={() => setActiveTab("requests")}
         >
           Message Requests
@@ -1485,11 +1485,11 @@ const Chat = () => {
       )}
 
       {activeTab === "direct" ? (
-        <div className="flex max-h-[calc(100dvh-9rem)] min-h-[560px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+        <div className="flex max-h-[calc(100dvh-7.5rem)] min-h-[480px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
           {userId ? (
             <>
-              <div className="flex items-center gap-3 border-b border-slate-100 p-4">
-                <Avatar profile={otherUser} size="h-12 w-12" className="rounded-lg" />
+              <div className="flex items-center gap-3 border-b border-slate-100 p-3">
+                <Avatar profile={otherUser} size="h-10 w-10" className="rounded-lg" />
                 <div className="min-w-0">
                   <p className="truncate font-bold text-navy">{otherUser?.name || "Conversation"}</p>
                   <p className="truncate text-xs capitalize text-slate-500">
@@ -1498,7 +1498,7 @@ const Chat = () => {
                 </div>
               </div>
 
-              <div ref={directScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-smooth p-3 pb-5 sm:p-4">
+              <div ref={directScrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto scroll-smooth p-3 pb-4 sm:p-3">
                 {loading ? (
                   <div className="h-40 animate-pulse rounded-lg bg-slate-200" />
                 ) : messages.length ? (
@@ -1719,8 +1719,8 @@ const Chat = () => {
             </div>
           </div>
 
-          <div className="flex max-h-[calc(100dvh-9rem)] min-h-[560px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
-            <div className="shrink-0 border-b border-slate-100 p-4">
+          <div className="flex max-h-[calc(100dvh-7.5rem)] min-h-[480px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+            <div className="shrink-0 border-b border-slate-100 p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <button type="button" className="flex min-w-0 flex-1 gap-3 text-left" onClick={() => selectedGroupInfo && setDetailsModalOpen(true)}>
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-navy text-sm font-black text-white">
@@ -1766,7 +1766,7 @@ const Chat = () => {
                 </div>
               </div>
             </div>
-            <div ref={groupScrollRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto scroll-smooth p-3 pb-5 sm:p-4">
+            <div ref={groupScrollRef} className="min-h-0 flex-1 space-y-2 overflow-y-auto scroll-smooth p-3 pb-4 sm:p-3">
               {!selectedGroup ? (
                 <div className="flex h-full min-h-80 flex-col items-center justify-center rounded-lg bg-surface p-6 text-center">
                   <Users className="h-8 w-8 text-brand" />
