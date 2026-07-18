@@ -1,7 +1,7 @@
 // @ts-nocheck
 require("dotenv").config({ quiet: true });
 
-const http = require("http");
+const { createServer } = require("http");
 
 const connectDB = require("./src/config/db");
 const { initSocket } = require("./src/socket");
@@ -61,10 +61,10 @@ const startServer = async () => {
     await connectDB();
 
     const app = require("./src/app");
-    const server = http.createServer(app);
+    const httpServer = createServer(app);
 
     try {
-      const io = initSocket(server, {
+      const io = initSocket(httpServer, {
         ...socketCorsOptions,
       });
 
@@ -75,8 +75,8 @@ const startServer = async () => {
       app.set("io", null);
     }
 
-    server.listen(PORT, "0.0.0.0", () => {
-      const address = server.address();
+    httpServer.listen(PORT, "0.0.0.0", () => {
+      const address = httpServer.address();
       const activePort = typeof address === "object" && address ? address.port : PORT;
 
       console.log("=================================");
@@ -86,7 +86,7 @@ const startServer = async () => {
       console.log("=================================");
     });
 
-    server.on("error", (error) => {
+    httpServer.on("error", (error) => {
       logError("SERVER ERROR: Express failed to start", error);
       shutdown(1);
     });

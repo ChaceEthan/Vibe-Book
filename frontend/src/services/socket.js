@@ -3,6 +3,9 @@ import { io } from "socket.io-client";
 
 import { SOCKET_PATH, SOCKET_URL } from "../config/network";
 
+const DEPLOYED_SOCKET_URL = "https://vibe-book-api.onrender.com";
+const activeSocketUrl = import.meta.env.PROD ? DEPLOYED_SOCKET_URL : SOCKET_URL;
+
 let socket = null;
 let connectRequested = false;
 let disconnectTimer = null;
@@ -74,7 +77,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     return socket;
   }
 
-  socket = io(SOCKET_URL, {
+  socket = io(activeSocketUrl, {
     auth,
     autoConnect: false,
     closeOnBeforeunload: false,
@@ -119,7 +122,7 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
     emitSocketStatus("reconnecting", { message: error?.message || "Socket connection failed" });
     warnSocketIssue("[socket] connection failed", {
       message: error?.message || "Socket connection failed",
-      url: SOCKET_URL,
+      url: activeSocketUrl,
       path: SOCKET_PATH,
     });
   });

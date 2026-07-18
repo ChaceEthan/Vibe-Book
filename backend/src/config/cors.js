@@ -1,5 +1,6 @@
 // @ts-nocheck
 const rejectedOriginsLogged = new Set();
+const DEPLOYED_FRONTEND_ORIGIN = "https://vibe-book-kappa.vercel.app";
 
 const normalizeOrigin = (value = "") => {
   const trimmed = String(value || "").trim().replace(/\/+$/, "");
@@ -19,7 +20,7 @@ const normalizeOrigin = (value = "") => {
 };
 
 const requiredOrigins = [
-  "https://vibe-book-kappa.vercel.app",
+  DEPLOYED_FRONTEND_ORIGIN,
   "http://localhost:5173",
   "http://localhost:3000",
 ];
@@ -46,7 +47,7 @@ const allowedOrigins = Array.from(new Set(configuredOrigins.map(normalizeOrigin)
 
 // Ensure production URLs are always included
 const productionOrigins = [
-  "https://vibe-book-kappa.vercel.app",
+  DEPLOYED_FRONTEND_ORIGIN,
   "http://localhost:5173",
   "http://localhost:3000",
   "http://127.0.0.1:5173",
@@ -104,7 +105,7 @@ const corsOptions = {
 };
 
 const socketCorsOptions = {
-  origin: resolveCorsOrigin,
+  origin: process.env.NODE_ENV === "production" ? DEPLOYED_FRONTEND_ORIGIN : resolveCorsOrigin,
   credentials: true,
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
