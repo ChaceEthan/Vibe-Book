@@ -16,16 +16,6 @@ const VALID_GIFTS = new Set(Object.values(GIFT_DEFINITIONS).map((gift) => gift.i
 const COMMENT_RATE_LIMIT_MS = 900;
 const GIFT_RATE_LIMIT_MS = 1200;
 const MAX_DEDUPE_IDS = 80;
-const LIVE_EVENT_ALIASES = {
-  "livestream:comment": "live:message",
-  "livestream:reaction": "live:reaction",
-  "livestream:gift": "live:gift",
-  "livestream:viewers_updated": "live:viewers_updated",
-  "livestream:viewer_joined": "live:viewer_joined",
-  "livestream:viewer_left": "live:viewer_left",
-  "livestream:ended": "live:ended",
-  "livestream:metadata_updated": "live:metadata_updated",
-};
 const LIVE_PANEL_LIMIT = 10;
 const liveRoomState = new Map();
 
@@ -44,11 +34,8 @@ const textFromLiveValue = (value, fallback = "") => {
 
 const emitLiveRoomEvent = (io, streamId, eventName, payload) => {
   const room = roomFor(streamId);
+  // Emit only the primary event name to prevent double processing on frontend
   io.to(room).emit(eventName, payload);
-  const alias = LIVE_EVENT_ALIASES[eventName];
-  if (alias) {
-    io.to(room).emit(alias, payload);
-  }
 };
 
 const markDedupeId = (socket, scope, rawId = "") => {
@@ -218,8 +205,7 @@ const emitViewerCount = async (io, streamId) => {
     maxViewers,
   };
 
-  emitLiveRoomEvent(io, streamId, "livestream:viewers_updated", payload);
-  io.emit("livestream:viewers_updated_global", payload);
+  emitLiveRoomEvent(io, streamId, "live:viewers_updated", payload);
   io.emit("live:viewers_updated_global", payload);
 
   return { viewerCount, maxViewers };
@@ -246,7 +232,7 @@ const leaveTrackedLiveSession = async (io, socket, reason = "leave") => {
     await livestreamService.leaveLiveStream(live.sessionId).catch(() => null);
   }
 
-  emitLiveRoomEvent(io, live.streamId, "livestream:viewer_left", {
+  emitLiveRoomEvent(io, live.streamId, "live:viewer_left", {
     streamId: live.streamId,
     viewer: viewerPayloadFor(socket),
     reason,
@@ -261,12 +247,12 @@ const leaveTrackedLiveSession = async (io, socket, reason = "leave") => {
 
 const setupLiveStreamSockets = (io) => {
   io.on("connection", (socket) => {
-    socket.on("livestream:join", async (data = {}, callback) => {
+    socket.on("live:join", async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId);
         if (!streamId) {
           callback?.({ ok: false, error: "Stream ID required" });
-          socket.emit("livestream:error", { error: "Stream ID required" });
+          socket.emit("live:error", { error: "Stream ID required" });
           return;
         }
 
@@ -308,7 +294,7 @@ const setupLiveStreamSockets = (io) => {
 
         const viewers = await emitViewerCount(io, streamId);
         const roomState = emitLiveRoomState(io, streamId);
-        emitLiveRoomEvent(io, streamId, "livestream:viewer_joined", {
+        emitLiveRoomEvent(io, streamId, "live:viewer_joined", {
           streamId,
           viewer: viewerPayloadFor(socket, data.username),
           timestamp: nowIso(),
@@ -321,15 +307,15 @@ const setupLiveStreamSockets = (io) => {
           viewerCount: viewers?.viewerCount ?? streamPayload?.viewerCount ?? 0,
           roomState,
         };
-        socket.emit("livestream:joined", response);
+        socket.emit("live:joined", response);
         callback?.(response);
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to join livestream" });
-        socket.emit("livestream:error", { error: error.message || "Unable to join livestream" });
+        socket.emit("live:error", { error: error.message || "Unable to join livestream" });
       }
     });
 
-    socket.on("livestream:leave", async (data = {}, callback) => {
+    socket.on("live:leave", async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId);
         const sessionId = idOf(data.sessionId);
@@ -345,14 +331,14 @@ const setupLiveStreamSockets = (io) => {
         }
 
         callback?.({ ok: true, streamId });
-        socket.emit("livestream:left", { ok: true, streamId });
+        socket.emit("live:left", { ok: true, streamId });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to leave livestream" });
-        socket.emit("livestream:error", { error: error.message || "Unable to leave livestream" });
+        socket.emit("live:error", { error: error.message || "Unable to leave livestream" });
       }
     });
 
-    socket.on("livestream:heartbeat", async (data = {}, callback) => {
+    socket.on("live:heartbeat", async (data = {}, callback) => {
       try {
         const sessionId = idOf(data.sessionId || socket.data.livestream?.sessionId);
         if (!sessionId) {
@@ -446,11 +432,11 @@ const setupLiveStreamSockets = (io) => {
           timestamp: nowIso(),
         };
 
-        emitLiveRoomEvent(io, streamId, "livestream:comment", payload);
+        emitLiveRoomEvent(io, streamId, "live:message", payload);
         callback?.({ ok: true, comment: payload });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send comment" });
-        socket.emit("livestream:error", { error: error.message || "Unable to send comment" });
+        socket.emit("live:error", { error: error.message || "Unable to send comment" });
       }
     };
 
@@ -473,7 +459,7 @@ const setupLiveStreamSockets = (io) => {
           timestamp: nowIso(),
         };
 
-        emitLiveRoomEvent(io, streamId, "livestream:reaction", payload);
+        emitLiveRoomEvent(io, streamId, "live:reaction", payload);
         callback?.({ ok: true });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send reaction" });
@@ -580,16 +566,14 @@ const setupLiveStreamSockets = (io) => {
           }).catch(() => null);
         }
 
-        emitLiveRoomEvent(io, streamId, "livestream:gift", payload);
+        emitLiveRoomEvent(io, streamId, "live:gift", payload);
         callback?.({ ok: true, gift: payload, wallet: senderWallet, transaction: sendTransaction });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send gift" });
       }
     };
 
-    socket.on("livestream:comment", handleLiveComment);
     socket.on("live:message", handleLiveComment);
-    socket.on("livestream:reaction", handleLiveReaction);
     socket.on("live:reaction", handleLiveReaction);
     socket.on("live:double-tap", (data = {}, callback) => {
       try {
@@ -617,7 +601,6 @@ const setupLiveStreamSockets = (io) => {
         callback?.({ ok: false, error: error.message });
       }
     });
-    socket.on("livestream:gift", handleLiveGift);
     socket.on("live:gift", handleLiveGift);
 
     socket.on("live:viewers:list", (data = {}, callback) => {
@@ -1059,7 +1042,7 @@ const setupLiveStreamSockets = (io) => {
     socket.on("live:webrtc-answer", (data = {}, callback) => relayWebRtcPayload("live:webrtc-answer", data, callback));
     socket.on("live:webrtc-ice", (data = {}, callback) => relayWebRtcPayload("live:webrtc-ice", data, callback));
 
-    socket.on("livestream:update_viewers", async (data = {}, callback) => {
+    socket.on("live:update_viewers", async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
         if (!streamId) {

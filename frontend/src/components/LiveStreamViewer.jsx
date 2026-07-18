@@ -686,16 +686,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     const cleanupSocketHandlers = () => {
       if (!activeSocket) return;
-      activeSocket.off("livestream:comment", handleComment);
       activeSocket.off("live:message", handleComment);
-      activeSocket.off("livestream:reaction", handleReaction);
       activeSocket.off("live:reaction", handleReaction);
       activeSocket.off("live:double-tap", handleDoubleTapReaction);
-      activeSocket.off("livestream:gift", handleGift);
       activeSocket.off("live:gift", handleGift);
-      activeSocket.off("livestream:viewers_updated", handleViewersUpdated);
       activeSocket.off("live:viewers_updated", handleViewersUpdated);
-      activeSocket.off("livestream:viewer_joined", handleViewerJoined);
       activeSocket.off("live:viewer_joined", handleViewerJoined);
       activeSocket.off("live:room-state", handleRoomState);
       activeSocket.off("live:panel-updated", handleRoomState);
@@ -705,11 +700,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.off("live:panel-muted", handlePanelMuted);
       activeSocket.off("live:blocked-from-stream", handleBlockedFromStream);
       activeSocket.off("live:user-blocked", handleUserBlocked);
-      activeSocket.off("livestream:ended", handleEnded);
       activeSocket.off("live:ended", handleEnded);
-      activeSocket.off("livestream:metadata_updated", handleMetadataUpdated);
       activeSocket.off("live:metadata_updated", handleMetadataUpdated);
-      activeSocket.off("livestream:error", handleSocketError);
       activeSocket.off("connect", emitSocketJoin);
     };
 
@@ -929,7 +921,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     function emitSocketJoin() {
       if (!activeSocket || !streamId) return;
       activeSocket.emit(
-        "livestream:join",
+        "live:join",
         {
           streamId,
           sessionId: sessionIdRef.current,
@@ -950,16 +942,11 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (!activeSocket) return;
 
       cleanupSocketHandlers();
-      activeSocket.on("livestream:comment", handleComment);
       activeSocket.on("live:message", handleComment);
-      activeSocket.on("livestream:reaction", handleReaction);
       activeSocket.on("live:reaction", handleReaction);
       activeSocket.on("live:double-tap", handleDoubleTapReaction);
-      activeSocket.on("livestream:gift", handleGift);
       activeSocket.on("live:gift", handleGift);
-      activeSocket.on("livestream:viewers_updated", handleViewersUpdated);
       activeSocket.on("live:viewers_updated", handleViewersUpdated);
-      activeSocket.on("livestream:viewer_joined", handleViewerJoined);
       activeSocket.on("live:viewer_joined", handleViewerJoined);
       activeSocket.on("live:room-state", handleRoomState);
       activeSocket.on("live:panel-updated", handleRoomState);
@@ -969,11 +956,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.on("live:panel-muted", handlePanelMuted);
       activeSocket.on("live:blocked-from-stream", handleBlockedFromStream);
       activeSocket.on("live:user-blocked", handleUserBlocked);
-      activeSocket.on("livestream:ended", handleEnded);
       activeSocket.on("live:ended", handleEnded);
-      activeSocket.on("livestream:metadata_updated", handleMetadataUpdated);
       activeSocket.on("live:metadata_updated", handleMetadataUpdated);
-      activeSocket.on("livestream:error", handleSocketError);
       activeSocket.on("connect", emitSocketJoin);
 
       if (activeSocket.connected) {
@@ -983,7 +967,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       cleanupHeartbeat();
       heartbeatRef.current = window.setInterval(() => {
         if (sessionIdRef.current && activeSocket.connected) {
-          activeSocket.emit("livestream:heartbeat", { streamId, sessionId: sessionIdRef.current });
+          activeSocket.emit("live:heartbeat", { streamId, sessionId: sessionIdRef.current });
         }
       }, HEARTBEAT_MS);
     };
@@ -1034,7 +1018,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
       const sessionId = sessionIdRef.current;
       if (activeSocket?.connected && sessionId) {
-        activeSocket.emit("livestream:leave", { streamId, sessionId });
+        activeSocket.emit("live:leave", { streamId, sessionId });
       } else if (sessionId) {
         leaveLiveStream(sessionId);
       }
