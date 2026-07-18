@@ -981,7 +981,7 @@ const setupLiveStreamSockets = (io) => {
       }
     });
 
-    const relayWebRtcPayload = (eventName, data = {}, callback) => {
+    const relayWebRtcPayload = async (eventName, data = {}, callback) => {
       const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
       const targetSocketId = String(data.targetSocketId || data.to || "").trim();
 
@@ -991,6 +991,12 @@ const setupLiveStreamSockets = (io) => {
       }
 
       ensureSocketInLiveRoom(socket, streamId);
+
+      if (eventName === "live:webrtc-offer" && !(await socketIsHost(streamId, socket))) {
+        traceWebRtc("signal-rejected", { eventName, streamId, fromSocketId: socket.id, targetSocketId, reason: "sender-not-host" });
+        callback?.({ ok: false, error: "Only the authenticated host can send live video offers" });
+        return;
+      }
 
       const targetSocket = io.sockets.sockets.get(targetSocketId);
       const liveRoom = roomFor(streamId);

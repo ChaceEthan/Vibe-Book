@@ -5,6 +5,7 @@ import { getApiErrorMessage } from "../services/api";
 
 const DEFAULT_LIVESTREAM = {
   id: "",
+  hostUserId: "",
   creatorId: "",
   title: "",
   description: "",
@@ -31,16 +32,30 @@ const DEFAULT_LIVESTREAM = {
 
 const DEFAULT_PAGINATION = { limit: 20, skip: 0, total: 0, hasMore: false };
 
-const normalizeStream = (stream = {}) => ({
-  ...DEFAULT_LIVESTREAM,
-  ...stream,
-  id: stream.id || stream._id || DEFAULT_LIVESTREAM.id,
-  creatorId: stream.creatorId || stream.creator?._id || stream.creator?.id || DEFAULT_LIVESTREAM.creatorId,
-  settings: {
-    ...DEFAULT_LIVESTREAM.settings,
-    ...(stream.settings || {}),
-  },
-});
+const normalizeStream = (stream = {}) => {
+  const hostUserId = String(
+    stream.hostUserId ||
+    stream.host?._id ||
+    stream.host?.id ||
+    stream.hostId ||
+    stream.creator?._id ||
+    stream.creator?.id ||
+    stream.creatorId ||
+    ""
+  );
+
+  return {
+    ...DEFAULT_LIVESTREAM,
+    ...stream,
+    id: stream.id || stream._id || DEFAULT_LIVESTREAM.id,
+    hostUserId,
+    creatorId: hostUserId,
+    settings: {
+      ...DEFAULT_LIVESTREAM.settings,
+      ...(stream.settings || {}),
+    },
+  };
+};
 
 const normalizeStreams = (streams = []) => streams.map(normalizeStream).filter((stream) => stream.id && stream.isLive !== false && stream.status !== "ended");
 

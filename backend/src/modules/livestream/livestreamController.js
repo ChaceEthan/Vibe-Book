@@ -11,6 +11,7 @@ const creatorImageFor = (creator = {}) => creator.avatar || creator.profilePictu
 
 const formatLiveStreamResponse = (stream) => ({
   id: stream._id?.toString?.() || stream.id,
+  hostUserId: stream.creatorId?._id?.toString?.() || stream.creatorId,
   creatorId: stream.creatorId?._id?.toString?.() || stream.creatorId,
   creator: {
     id: stream.creatorId?._id?.toString?.() || stream.creatorId,

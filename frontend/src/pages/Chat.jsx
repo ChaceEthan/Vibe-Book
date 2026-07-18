@@ -1422,7 +1422,7 @@ const Chat = () => {
     });
 
   return (
-    <section className="container-page py-4 sm:py-6">
+    <section className="container-page pb-[calc(4.5rem+env(safe-area-inset-bottom))] pt-3 sm:py-6">
       <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-brand">Chat</p>
@@ -1578,7 +1578,7 @@ const Chat = () => {
                 </button>
                 <textarea
                   rows={1}
-                  className="field max-h-32 min-h-10 flex-1 resize-none rounded-2xl px-4 py-2"
+                  className="field max-h-[120px] min-h-11 flex-1 resize-none overflow-y-auto rounded-2xl px-3 py-2 text-base"
                   value={message}
                   onChange={(event) => {
                     const nextValue = event.target.value;
@@ -1640,28 +1640,28 @@ const Chat = () => {
       ) : (
         <div className="grid gap-5 lg:grid-cols-[0.85fr_1.15fr]">
           <div className="space-y-5">
-            <form className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft" onSubmit={handleCreateGroup}>
-              <div className="mb-4 flex items-center gap-2">
+            <form className="rounded-lg border border-slate-200 bg-white p-3 shadow-soft sm:p-4" onSubmit={handleCreateGroup}>
+              <div className="mb-3 flex items-center gap-2">
                 <Plus className="h-5 w-5 text-brand" />
                 <h2 className="text-lg font-black text-navy">New group</h2>
               </div>
               <label className="space-y-2">
                 <span className="label">Group name</span>
-                <input className="field" value={groupName} onChange={(event) => setGroupName(event.target.value)} />
+                <input className="field py-2 text-base" value={groupName} onChange={(event) => setGroupName(event.target.value)} />
               </label>
               <label className="mt-3 block space-y-2">
                 <span className="label">Description</span>
                 <textarea
-                  className="field min-h-20 resize-none"
+                  className="field min-h-16 resize-none py-2 text-base"
                   value={groupDescription}
                   onChange={(event) => setGroupDescription(event.target.value)}
                   maxLength={240}
                   placeholder="What is this community about?"
                 />
               </label>
-              <div className="mt-4 max-h-56 space-y-2 overflow-y-auto">
+              <div className="mt-3 max-h-48 space-y-1.5 overflow-y-auto">
                 {memberOptions.map((member) => (
-                  <label key={member._id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-surface p-3 text-sm font-semibold text-slate-700">
+                  <label key={member._id} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-surface p-2 text-sm font-semibold text-slate-700">
                     <input
                       type="checkbox"
                       checked={selectedMembers.includes(member._id)}
@@ -1885,7 +1885,7 @@ const Chat = () => {
               </button>
               <textarea
                 rows={1}
-                className="field max-h-32 min-h-10 flex-1 resize-none rounded-2xl px-4 py-2"
+                className="field max-h-[120px] min-h-11 flex-1 resize-none overflow-y-auto rounded-2xl px-3 py-2 text-base"
                 value={groupMessage}
                 onChange={(event) => setGroupMessage(event.target.value)}
                 placeholder={selectedGroupIsMember ? "Write a group message" : "Join the group to chat"}

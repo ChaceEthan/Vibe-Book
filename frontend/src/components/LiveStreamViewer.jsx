@@ -53,7 +53,7 @@ const TURN_ICE_SERVER = TURN_URLS.length
       ...(TURN_CREDENTIAL ? { credential: TURN_CREDENTIAL } : {}),
     }
   : null;
-const traceWebRtc = (event, details = {}) => console.info(`[webrtc] ${event}`, details);
+const traceWebRtc = (event, details = {}) => console.info(`[webrtc]${String(event).startsWith("[") ? "" : " "}${event}`, details);
 
 const PEER_CONNECTION_CONFIG = {
   iceServers: [
@@ -324,6 +324,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     return {
       id: streamId,
+      hostUserId: userIdFor(currentUser),
       creatorId: userIdFor(currentUser),
       creator: currentUser || {},
       title: "Starting live",
@@ -342,9 +343,20 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       },
     };
   }, [currentUser, previewStream, streamId]);
-  const liveStream = currentStream || fallbackLiveStream;
+  const liveStream = String(currentStream?.id || "") === String(streamId || "") ? currentStream : fallbackLiveStream;
   const creator = liveStream?.creator || {};
-  const isCreator = Boolean(userIdFor(currentUser) && (String(userIdFor(currentUser)) === String(creator.id || liveStream?.creatorId || "") || previewStream));
+  const currentUserId = String(currentUser?._id || currentUser?.id || "");
+  const hostUserId = String(
+    liveStream?.host?._id ||
+    liveStream?.host?.id ||
+    liveStream?.hostId ||
+    liveStream?.hostUserId ||
+    liveStream?.creator?._id ||
+    liveStream?.creator?.id ||
+    liveStream?.creatorId ||
+    ""
+  );
+  const isCreator = Boolean(currentUserId && hostUserId && currentUserId === hostUserId);
   const commentsEnabled = liveStream?.settings?.commentsEnabled !== false;
   const reactionsEnabled = liveStream?.settings?.allowReactions !== false;
   const giftsEnabled = liveStream?.settings?.giftsEnabled !== false;
@@ -364,8 +376,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       .sort((left, right) => Number(right.total || 0) - Number(left.total || 0))[0];
   }, [giftLeaderboard]);
   const selectedGift = giftById[selectedGiftId] || liveGiftOptions[0];
-  const currentUserId = userIdFor(currentUser);
-  const creatorId = String(creator.id || creator._id || liveStream?.creatorId || "");
+  const creatorId = hostUserId;
   const isPanelGuest = panelUsers.some((guest) => String(guest.userId || "") === String(currentUserId || "") || String(guest.socketId || "") === String(socketRef.current?.id || ""));
 
   const addReactionBubble = (data) => {
@@ -483,6 +494,17 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   }, [isCreator]);
 
   useEffect(() => {
+    if (!currentUserId || !hostUserId) return;
+
+    traceWebRtc("[role]", {
+      currentUserId,
+      hostUserId,
+      role: isCreator ? "host" : "viewer",
+      streamId,
+    });
+  }, [currentUserId, hostUserId, isCreator, streamId]);
+
+  useEffect(() => {
     endedRef.current = ended;
   }, [ended]);
 
@@ -537,11 +559,31 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   }, []);
 
   useEffect(() => {
-    if (!streamId) return undefined;
+    if (!streamId || !currentUserId || !hostUserId) return undefined;
 
     const mediaStream = getLivePreviewStream(streamId);
-    setPreviewStream(mediaStream);
-  }, [streamId]);
+    if (isCreator) {
+      setPreviewStream(mediaStream);
+      return undefined;
+    }
+
+    if (mediaStream) {
+      mediaStream.getTracks?.().forEach((track) => track.stop());
+      releaseLivePreviewStream(streamId);
+    }
+    previewStreamRef.current = null;
+    setPreviewStream(null);
+    return undefined;
+  }, [currentUserId, hostUserId, isCreator, streamId]);
+
+  useEffect(() => {
+    if (!currentUserId || !hostUserId || isCreator || !previewStream) return;
+
+    previewStream.getTracks?.().forEach((track) => track.stop());
+    releaseLivePreviewStream(streamId);
+    previewStreamRef.current = null;
+    setPreviewStream(null);
+  }, [currentUserId, hostUserId, isCreator, previewStream, streamId]);
 
   useEffect(() => {
     if (!streamId || !isCreator || previewStream || localLoading || ended) {
