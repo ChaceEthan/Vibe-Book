@@ -13,7 +13,6 @@ mobile.png
 .env
 .env.*
 !.env.example
-!frontend/.env
 
 backend/uploads/images/
 backend/uploads/videos/

@@ -19,7 +19,7 @@ import { useLiveStreamStore } from "../store/livestreamStore";
 
 const navClass = ({ isActive }) =>
   `group flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-0.5 text-[10px] font-black transition duration-200 sm:text-[11px] ${
-    isActive ? "active text-brand" : "text-white/88 hover:text-white"
+    isActive ? "active rounded-lg bg-white/10 text-brand" : "text-slate-200 hover:bg-white/5 hover:text-white"
   }`;
 
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
@@ -259,8 +259,8 @@ const Navbar = () => {
 
       <Upload open={uploadOpen} initialType={uploadType} onClose={() => setUploadOpen(false)} />
 
-      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto grid h-[3.7rem] w-full max-w-md grid-cols-5 items-center gap-0 bg-black px-1 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+      <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-brand/25 bg-[#050806] pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_rgba(0,0,0,0.48)]">
+        <div className="mx-auto grid h-[3.7rem] w-full max-w-md grid-cols-5 items-center gap-0 bg-[#050806] px-1">
           {bottomNavItems.slice(0, 2).map((item) => {
             const Icon = item.icon;
             return (
@@ -273,14 +273,14 @@ const Navbar = () => {
 
           <button
             type="button"
-            className="flex h-full flex-col items-center justify-center gap-0.5 px-1 py-0.5 text-[10px] font-black text-white transition active:scale-95 sm:text-[11px]"
+            className="flex h-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-0.5 text-[10px] font-black text-white transition hover:bg-white/5 active:scale-95 sm:text-[11px]"
             onClick={() => openUpload("image")}
             aria-label="Upload new content"
             title="Upload new content"
           >
             <span className="vibebook-upload-button relative flex h-10 w-11 items-center justify-center">
-              <span className="absolute inset-0 rounded-2xl bg-brand blur-lg opacity-45" />
-              <span className="relative flex h-8 w-10 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-emerald-300 via-brand to-teal-400 shadow-[0_0_24px_rgba(34,197,94,0.45)] backdrop-blur">
+              <span className="absolute inset-1 rounded-xl bg-brand/35 blur-md" />
+              <span className="relative flex h-8 w-10 items-center justify-center rounded-xl border border-white/20 bg-gradient-to-br from-emerald-300 via-brand to-teal-400 shadow-[0_0_16px_rgba(34,197,94,0.38)]">
                 <span className="vibebook-v-mark">V</span>
               </span>
             </span>

@@ -1,7 +1,11 @@
 services:
   - type: web
-    name: vibe-book-api
+    name: vibebook-backend
     runtime: node
+    branch: main
     rootDir: backend
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production

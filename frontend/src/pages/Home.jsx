@@ -265,7 +265,7 @@ const FeedItem = memo(
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[32%] bg-gradient-to-t from-black/64 via-black/10 to-transparent" />
 
-        <div className="home-feed-caption absolute bottom-[calc(5.45rem+env(safe-area-inset-bottom))] left-3 right-[5.6rem] z-20 text-white sm:bottom-[calc(5.85rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
+        <div className="home-feed-caption absolute bottom-[calc(4.55rem+env(safe-area-inset-bottom))] left-3 right-[5.6rem] z-20 text-white sm:bottom-[calc(4.75rem+env(safe-area-inset-bottom))] sm:left-5 sm:right-28">
           <div className="flex min-w-0 items-end gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-1.5">
@@ -1372,7 +1372,7 @@ const Home = () => {
             ))}
             <div ref={loadMoreRef} className="h-1 bg-slate-950" />
             {loadingMore && (
-              <div className="pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center">
+              <div className="pointer-events-none fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 flex justify-center">
                 <span className="rounded-full bg-slate-950/65 px-4 py-2 text-xs font-black uppercase tracking-[0.16em] text-white/75 backdrop-blur">
                   Loading more
                 </span>
