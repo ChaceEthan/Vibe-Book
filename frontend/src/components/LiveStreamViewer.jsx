@@ -53,6 +53,8 @@ const TURN_ICE_SERVER = TURN_URLS.length
       ...(TURN_CREDENTIAL ? { credential: TURN_CREDENTIAL } : {}),
     }
   : null;
+const traceWebRtc = (event, details = {}) => console.info(`[webrtc] ${event}`, details);
+
 const PEER_CONNECTION_CONFIG = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
@@ -248,6 +250,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const audioContextRef = useRef(null);
   const isCreatorRef = useRef(false);
   const webrtcReadyRef = useRef(false);
+  const liveRoomJoinedRef = useRef(false);
   const mediaStateRef = useRef({ muted: false, cameraEnabled: true });
   const endedRef = useRef(false);
   const creatorCameraRequestRef = useRef(0);
@@ -620,7 +623,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     video.defaultMuted = true;
     video.playsInline = true;
     ensureMediaTrackState(previewStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
-    video.play?.().catch(() => null);
+    video.play?.().then(() => traceWebRtc("playback-started", { streamId, remote: video === remoteVideoRef.current })).catch((error) => traceWebRtc("playback-failed", { streamId, remote: video === remoteVideoRef.current, error: error?.name || error?.message || "unknown" }));
 
     return () => {
       if (video.srcObject === previewStream) {
@@ -634,13 +637,14 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     if (!video || !remoteStream) return undefined;
 
     video.srcObject = remoteStream;
+    traceWebRtc("remote-stream-attached", { streamId, videoTracks: remoteStream.getVideoTracks?.().length || 0, audioTracks: remoteStream.getAudioTracks?.().length || 0 });
     video.muted = muted;
     video.defaultMuted = muted;
     video.playsInline = true;
     remoteStream.getVideoTracks?.().forEach((track) => {
       track.enabled = true;
     });
-    video.play?.().catch(() => null);
+    video.play?.().then(() => traceWebRtc("playback-started", { streamId, remote: video === remoteVideoRef.current })).catch((error) => traceWebRtc("playback-failed", { streamId, remote: video === remoteVideoRef.current, error: error?.name || error?.message || "unknown" }));
 
     return () => {
       if (video.srcObject === remoteStream) {
@@ -920,6 +924,8 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     function emitSocketJoin() {
       if (!activeSocket || !streamId) return;
+      liveRoomJoinedRef.current = false;
+      traceWebRtc("join-requested", { streamId, socketId: activeSocket.id || "pending" });
       activeSocket.emit(
         "live:join",
         {
@@ -928,14 +934,19 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           username: viewerName,
         },
         (ack = {}) => {
+          traceWebRtc("join-ack", { streamId, socketId: activeSocket.id, ok: ack.ok !== false, error: ack.error || "" });
+          if (ack.ok === false) return;
+          liveRoomJoinedRef.current = true;
           if (ack.roomState) handleRoomState(ack.roomState);
+          if (isCreatorRef.current && previewStreamRef.current) {
+            traceWebRtc("creator-ready", { streamId, socketId: activeSocket.id });
+            activeSocket.emit("live:creator-ready", { streamId });
+          } else if (webrtcReadyRef.current) {
+            traceWebRtc("viewer-ready", { streamId, socketId: activeSocket.id });
+            activeSocket.emit("live:request-video", { streamId, username: viewerName });
+          }
         }
       );
-      if (isCreatorRef.current && previewStreamRef.current) {
-        activeSocket.emit("live:creator-ready", { streamId });
-      } else if (webrtcReadyRef.current) {
-        activeSocket.emit("live:request-video", { streamId, username: viewerName });
-      }
     }
 
     const attachSocketHandlers = () => {
@@ -1081,6 +1092,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       const peerId = String(peerSocketId || "");
       const connection = peerConnectionsRef.current.get(peerId);
       if (connection) {
+        traceWebRtc("peer-closed", { streamId, peerSocketId: peerId, state: connection.connectionState });
         connection.onicecandidate = null;
         connection.ontrack = null;
         connection.onconnectionstatechange = null;
@@ -1129,8 +1141,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       }
 
       const connection = new RTCPeerConnection(PEER_CONNECTION_CONFIG);
+      traceWebRtc("peer-created", { streamId, peerSocketId: peerId, role: isCreatorRef.current ? "host" : "viewer" });
       connection.onicecandidate = (event) => {
         if (!event.candidate) return;
+        traceWebRtc("ice-candidate", { streamId, direction: "sent", peerSocketId: peerId, type: event.candidate.type || "unknown" });
         activeSocket.emit("live:webrtc-ice", {
           streamId,
           targetSocketId: peerId,
@@ -1138,6 +1152,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         });
       };
       connection.ontrack = (event) => {
+        traceWebRtc("ontrack", { streamId, peerSocketId: peerId, kind: event.track?.kind || "unknown", streamCount: event.streams?.length || 0 });
         const incomingStream = event.streams?.[0] || remoteStreamRef.current || new MediaStream();
         if (event.track && !incomingStream.getTracks().some((track) => track.id === event.track.id)) {
           event.track.enabled = true;
@@ -1193,7 +1208,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     };
 
     const requestCreatorVideo = () => {
-      if (!activeSocket.connected || isCreatorRef.current) return;
+      if (!activeSocket.connected || !liveRoomJoinedRef.current || isCreatorRef.current) return;
       const payload = {
         streamId,
         username: currentUser?.username || currentUser?.name || "Guest",
@@ -1251,7 +1266,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     };
 
     const announceCreatorReady = () => {
-      if (!activeSocket.connected || !isCreatorRef.current || !previewStreamRef.current) return;
+      if (!activeSocket.connected || !liveRoomJoinedRef.current || !isCreatorRef.current || !previewStreamRef.current) return;
       activeSocket.emit("live:creator-ready", { streamId });
     };
 
@@ -1263,6 +1278,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     const handleViewerReady = async (data = {}) => {
       if (data.streamId && data.streamId !== streamId) return;
       const viewerSocketId = data.viewerSocketId || data.fromSocketId;
+      traceWebRtc("viewer-ready", { streamId, viewerSocketId, hostSocketId: activeSocket.id });
       const localStream = previewStreamRef.current;
       if (!isCreatorRef.current || !localStream || !viewerSocketId || viewerSocketId === activeSocket.id) return;
 
@@ -1272,8 +1288,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         if (!connection) return;
         const mediaState = mediaStateRef.current;
         ensureMediaTrackState(localStream, { audioEnabled: !mediaState.muted, videoEnabled: mediaState.cameraEnabled });
+        traceWebRtc("host-tracks-added", { streamId, viewerSocketId, tracks: connection.getSenders().map((sender) => sender.track?.kind).filter(Boolean) });
         const offer = await connection.createOffer({ iceRestart: true });
         await connection.setLocalDescription(offer);
+        traceWebRtc("offer", { streamId, direction: "sent", viewerSocketId });
         activeSocket.emit("live:webrtc-offer", {
           streamId,
           targetSocketId: viewerSocketId,
@@ -1289,6 +1307,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (isCreatorRef.current) return;
       const creatorSocketId = data.creatorSocketId || data.fromSocketId;
       if (!creatorSocketId || !data.offer) return;
+      traceWebRtc("offer", { streamId, direction: "received", creatorSocketId });
 
       try {
         let connection = getPeerConnection(creatorSocketId);
@@ -1302,6 +1321,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         await flushPendingIceCandidates(creatorSocketId, connection);
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
+        traceWebRtc("answer", { streamId, direction: "sent", creatorSocketId });
         activeSocket.emit("live:webrtc-answer", {
           streamId,
           targetSocketId: creatorSocketId,
@@ -1317,6 +1337,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       const viewerSocketId = data.viewerSocketId || data.fromSocketId;
       const connection = peerConnectionsRef.current.get(String(viewerSocketId || ""));
       if (!connection || !data.answer) return;
+      traceWebRtc("answer", { streamId, direction: "received", viewerSocketId });
 
       try {
         await connection.setRemoteDescription(new RTCSessionDescription(data.answer));
@@ -1330,6 +1351,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (data.streamId && data.streamId !== streamId) return;
       const peerSocketId = data.fromSocketId || data.creatorSocketId || data.viewerSocketId;
       if (!peerSocketId || !data.candidate) return;
+      traceWebRtc("ice-candidate", { streamId, direction: "received", peerSocketId, type: data.candidate.type || "unknown" });
 
       try {
         const connection = getPeerConnection(peerSocketId);
@@ -1354,6 +1376,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     };
 
     const handleConnect = () => {
+      liveRoomJoinedRef.current = false;
       if (isCreatorRef.current) {
         announceCreatorReady();
       } else {
@@ -1380,6 +1403,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     return () => {
       webrtcReadyRef.current = false;
+      liveRoomJoinedRef.current = false;
       activeSocket.off("live:viewer-ready", handleViewerReady);
       activeSocket.off("live:creator-ready", handleCreatorReady);
       activeSocket.off("live:webrtc-offer", handleOffer);

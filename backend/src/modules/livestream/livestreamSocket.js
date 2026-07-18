@@ -22,6 +22,7 @@ const liveRoomState = new Map();
 const roomFor = (streamId) => `stream:${streamId}`;
 const idOf = (value) => value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
 const nowIso = () => new Date().toISOString();
+const traceWebRtc = (event, details = {}) => console.info(`[webrtc] ${event}`, details);
 const textFromLiveValue = (value, fallback = "") => {
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" || typeof value === "boolean") return String(value);
@@ -979,6 +980,7 @@ const setupLiveStreamSockets = (io) => {
 
       ensureSocketInLiveRoom(socket, streamId);
 
+      traceWebRtc(eventName === "live:webrtc-ice" ? "ice-candidate" : eventName.replace("live:webrtc-", ""), { streamId, fromSocketId: socket.id, targetSocketId });
       io.to(targetSocketId).emit(eventName, {
         ...data,
         streamId,
@@ -1003,6 +1005,7 @@ const setupLiveStreamSockets = (io) => {
       }
       upsertLiveRoomMember(streamId, socket, { isHost: true, role: "host" });
 
+      traceWebRtc("creator-ready", { streamId, creatorSocketId: socket.id });
       socket.to(roomFor(streamId)).emit("live:creator-ready", {
         streamId,
         creatorSocketId: socket.id,
@@ -1029,6 +1032,7 @@ const setupLiveStreamSockets = (io) => {
       };
       const hosts = hostMembersFor(streamId).filter((member) => member.socketId !== socket.id);
 
+      traceWebRtc("viewer-ready", { streamId, viewerSocketId: socket.id, hostSocketIds: hosts.map((host) => host.socketId) });
       if (hosts.length) {
         hosts.forEach((host) => io.to(host.socketId).emit("live:viewer-ready", payload));
       } else {
