@@ -40,6 +40,15 @@ const MAX_COMMENTS = 120;
 const HEARTBEAT_MS = 25000;
 const COMMENT_SEND_COOLDOWN_MS = 850;
 const GIFT_SEND_COOLDOWN_MS = 1000;
+const PANEL_LIMIT = 10;
+const PANEL_LAYOUT_OPTIONS = [
+  { id: "solo", label: "Solo" },
+  { id: "side-by-side", label: "Side by side" },
+  { id: "grid", label: "Grid" },
+  { id: "extended-grid", label: "Extended grid" },
+  { id: "host-focus", label: "Host focus" },
+  { id: "active-speaker", label: "Active speaker" },
+];
 const TURN_URLS = String(import.meta.env.VITE_TURN_URLS || import.meta.env.VITE_TURN_URL || import.meta.env.VITE_WEBRTC_TURN_URL || "")
   .split(",")
   .map((url) => url.trim())
@@ -281,7 +290,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const [liveViewers, setLiveViewers] = useState([]);
   const [panelUsers, setPanelUsers] = useState([]);
   const [panelRequests, setPanelRequests] = useState([]);
-  const [panelLimit, setPanelLimit] = useState(10);
+  const [pendingPanelRequest, setPendingPanelRequest] = useState(null);
+  const [incomingPanelInvite, setIncomingPanelInvite] = useState(null);
+  const [showPanelRequestConfirm, setShowPanelRequestConfirm] = useState(false);
+  const [panelLayout, setPanelLayout] = useState("solo");
+  const [panelLocked, setPanelLocked] = useState(false);
+  const [panelLimit, setPanelLimit] = useState(PANEL_LIMIT);
   const [activeSheet, setActiveSheet] = useState("");
   const [activeGuest, setActiveGuest] = useState(null);
   const [panelBusyId, setPanelBusyId] = useState("");
@@ -742,10 +756,20 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.off("live:viewer_joined", handleViewerJoined);
       activeSocket.off("live:room-state", handleRoomState);
       activeSocket.off("live:panel-updated", handleRoomState);
+      activeSocket.off("live:panel-request", handlePanelRequested);
       activeSocket.off("live:panel-requested", handlePanelRequested);
+      activeSocket.off("live:panel-request-approved", handlePanelRequestApproved);
+      activeSocket.off("live:panel-request-rejected", handlePanelRequestRejected);
+      activeSocket.off("live:panel-request-cancelled", handleRoomState);
       activeSocket.off("live:panel-invite", handlePanelInvite);
+      activeSocket.off("live:panel-guest-joined", handleRoomState);
+      activeSocket.off("live:panel-guest-left", handleRoomState);
+      activeSocket.off("live:panel-guest-removed", handlePanelRemoved);
       activeSocket.off("live:panel-removed", handlePanelRemoved);
       activeSocket.off("live:panel-muted", handlePanelMuted);
+      activeSocket.off("live:panel-video-hidden", handlePanelVideoHidden);
+      activeSocket.off("live:panel-layout-changed", handlePanelLayoutChanged);
+      activeSocket.off("live:panel-locked", handlePanelLocked);
       activeSocket.off("live:blocked-from-stream", handleBlockedFromStream);
       activeSocket.off("live:user-blocked", handleUserBlocked);
       activeSocket.off("live:ended", handleEnded);
@@ -894,12 +918,47 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       joinTimersRef.current.add(timer);
     }
 
+    async function activateGuestPanelMedia(source = "request") {
+      if (isCreatorRef.current || !activeSocket || !streamId) return;
+      try {
+        setLocalLoading(true);
+        setStatusMessage("Opening camera and microphone...");
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: liveFacingMode }, audio: true });
+        setPreviewStream(stream);
+        setLivePreviewStream(stream);
+        ensureMediaTrackState(stream, { audioEnabled: true, videoEnabled: true });
+        activeSocket.emit("live:panel-guest-joined", { streamId, username: currentUser?.username || currentUser?.name || "Viewer", source, micEnabled: true, cameraEnabled: true }, (ack = {}) => {
+          if (ack.ok) {
+            if (ack.roomState) handleRoomState(ack.roomState);
+            setActiveSheet("panel");
+            setStatusMessage("You are on the live panel");
+            activeSocket.emit("live:request-video", { streamId, username: currentUser?.username || currentUser?.name || "Viewer", panelGuest: true });
+          } else {
+            stream.getTracks().forEach((track) => track.stop());
+            setPreviewStream(null);
+            setStatusMessage(ack.error || "Unable to join panel");
+          }
+          setLocalLoading(false);
+          window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
+        });
+      } catch (error) {
+        setLocalLoading(false);
+        setStatusMessage(error?.name === "NotAllowedError" ? "Camera and microphone permission is required" : "Unable to open camera and microphone");
+        window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2600);
+      }
+    }
+
     function handleRoomState(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
+      const currentUserId = userIdFor(currentUser);
       setLiveViewers(Array.isArray(data.viewers) ? data.viewers : []);
-      setPanelUsers(Array.isArray(data.panelUsers) ? data.panelUsers.slice(0, 10) : []);
+      setPanelUsers(Array.isArray(data.panelUsers) ? data.panelUsers.slice(0, PANEL_LIMIT) : []);
       setPanelRequests(Array.isArray(data.requests) ? data.requests : []);
-      setPanelLimit(Number(data.panelLimit || 10));
+      setPanelLimit(Number(data.panelLimit || PANEL_LIMIT));
+      if (data.panelLayout) setPanelLayout(data.panelLayout);
+      if (typeof data.panelLocked === "boolean") setPanelLocked(data.panelLocked);
+      const ownRequest = Array.isArray(data.requests) ? data.requests.find((item) => String(item.viewerUserId || item.userId || "") === String(currentUserId)) : null;
+      if (ownRequest) setPendingPanelRequest(ownRequest);
     }
 
     function handlePanelRequested(data = {}) {
@@ -911,25 +970,61 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       }
     }
 
+    function handlePanelRequestApproved(data = {}) {
+      if (data.streamId && data.streamId !== streamId) return;
+      setPendingPanelRequest(null);
+      setShowPanelRequestConfirm(false);
+      setStatusMessage("Host approved your panel request");
+      activateGuestPanelMedia("request");
+    }
+
+    function handlePanelRequestRejected(data = {}) {
+      if (data.streamId && data.streamId !== streamId) return;
+      setPendingPanelRequest(null);
+      setStatusMessage("Host declined your panel request");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
+    }
+
     function handlePanelInvite(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
-      setStatusMessage("You were added to the live panel");
-      setActiveSheet("panel");
+      setIncomingPanelInvite(data.invite || data);
+      setStatusMessage("Host invited you to join the panel");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2400);
     }
 
     function handlePanelRemoved(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
+      if (data.roomState) handleRoomState(data.roomState);
       setStatusMessage("You left the live panel");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
     }
 
     function handlePanelMuted(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
+      ensureMediaTrackState(previewStreamRef.current, { audioEnabled: data.muted === false, videoEnabled: mediaStateRef.current.cameraEnabled });
       setStatusMessage(data.muted ? "Panel mic muted by host" : "Panel mic unmuted");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
     }
 
+    function handlePanelVideoHidden(data = {}) {
+      if (data.streamId && data.streamId !== streamId) return;
+      ensureMediaTrackState(previewStreamRef.current, { audioEnabled: !mediaStateRef.current.muted, videoEnabled: !data.hidden });
+      setCameraEnabled(!data.hidden);
+      setStatusMessage(data.hidden ? "Panel camera hidden by host" : "Panel camera restored");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
+    }
+
+    function handlePanelLayoutChanged(data = {}) {
+      if (data.streamId && data.streamId !== streamId) return;
+      if (data.layout) setPanelLayout(data.layout);
+      if (data.roomState) handleRoomState(data.roomState);
+    }
+
+    function handlePanelLocked(data = {}) {
+      if (data.streamId && data.streamId !== streamId) return;
+      setPanelLocked(Boolean(data.locked));
+      if (data.roomState) handleRoomState(data.roomState);
+    }
     function handleBlockedFromStream(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
       setStatusMessage(data.reason || "You were removed from this live");
@@ -1006,10 +1101,20 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.on("live:viewer_joined", handleViewerJoined);
       activeSocket.on("live:room-state", handleRoomState);
       activeSocket.on("live:panel-updated", handleRoomState);
+      activeSocket.on("live:panel-request", handlePanelRequested);
       activeSocket.on("live:panel-requested", handlePanelRequested);
+      activeSocket.on("live:panel-request-approved", handlePanelRequestApproved);
+      activeSocket.on("live:panel-request-rejected", handlePanelRequestRejected);
+      activeSocket.on("live:panel-request-cancelled", handleRoomState);
       activeSocket.on("live:panel-invite", handlePanelInvite);
+      activeSocket.on("live:panel-guest-joined", handleRoomState);
+      activeSocket.on("live:panel-guest-left", handleRoomState);
+      activeSocket.on("live:panel-guest-removed", handlePanelRemoved);
       activeSocket.on("live:panel-removed", handlePanelRemoved);
       activeSocket.on("live:panel-muted", handlePanelMuted);
+      activeSocket.on("live:panel-video-hidden", handlePanelVideoHidden);
+      activeSocket.on("live:panel-layout-changed", handlePanelLayoutChanged);
+      activeSocket.on("live:panel-locked", handlePanelLocked);
       activeSocket.on("live:blocked-from-stream", handleBlockedFromStream);
       activeSocket.on("live:user-blocked", handleUserBlocked);
       activeSocket.on("live:ended", handleEnded);
@@ -2041,11 +2146,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
   const applyRoomState = (payload = {}) => {
     if (Array.isArray(payload.viewers)) setLiveViewers(payload.viewers);
-    if (Array.isArray(payload.panelUsers)) setPanelUsers(payload.panelUsers.slice(0, 10));
+    if (Array.isArray(payload.panelUsers)) setPanelUsers(payload.panelUsers.slice(0, PANEL_LIMIT));
     if (Array.isArray(payload.requests)) setPanelRequests(payload.requests);
-    if (payload.panelLimit) setPanelLimit(Number(payload.panelLimit || 10));
+    if (payload.panelLimit) setPanelLimit(Number(payload.panelLimit || PANEL_LIMIT));
+    if (payload.panelLayout) setPanelLayout(payload.panelLayout);
+    if (typeof payload.panelLocked === "boolean") setPanelLocked(payload.panelLocked);
   };
-
   const requestRoomState = (sheet = "") => {
     const activeSocket = socketRef.current;
     if (sheet) {
@@ -2082,19 +2188,55 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       requestRoomState("panel");
       return;
     }
+    if (pendingPanelRequest) {
+      setActiveSheet("panel");
+      return;
+    }
+    if (panelLocked) {
+      setStatusMessage("Panel requests are locked");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+      return;
+    }
+    if (panelUsers.length >= panelLimit) {
+      setStatusMessage("Panel is full");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+      return;
+    }
+    setShowPanelRequestConfirm(true);
+    setShowGiftMenu(false);
+    setShowLiveSettings(false);
+  };
+
+  const sendPanelRequest = () => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || isCreator || pendingPanelRequest) return;
     setPanelBusyId("request");
     activeSocket.emit("live:panel-request", { streamId, username: currentUser?.username || currentUser?.name || "Viewer" }, (ack = {}) => {
       setPanelBusyId("");
       if (ack.ok) {
         applyRoomState(ack.roomState || ack);
-        setActiveSheet("panel");
-        setShowGiftMenu(false);
-        setShowLiveSettings(false);
-        setStatusMessage("Panel request sent");
+        setPendingPanelRequest(ack.request || null);
+        setShowPanelRequestConfirm(false);
+        setStatusMessage("Request sent");
       } else {
         setStatusMessage(ack.error || "Unable to request panel");
       }
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
+    });
+  };
+
+  const cancelPanelRequest = () => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !pendingPanelRequest) return;
+    setPanelBusyId("request");
+    activeSocket.emit("live:panel-request-cancel", { streamId, requestId: pendingPanelRequest.requestId }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok) {
+        setPendingPanelRequest(null);
+        if (ack.roomState) applyRoomState(ack.roomState);
+      }
+      setStatusMessage(ack.ok ? "Request cancelled" : ack.error || "Unable to cancel request");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
     });
   };
 
@@ -2103,10 +2245,39 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     if (!activeSocket || !streamId || !viewer) return;
     const targetId = viewer.socketId || viewer.userId;
     setPanelBusyId(targetId);
-    activeSocket.emit("live:panel-accept", { streamId, socketId: viewer.socketId, userId: viewer.userId }, (ack = {}) => {
+    activeSocket.emit("live:panel-request-approved", { streamId, viewerUserId: viewer.viewerUserId || viewer.userId, requestId: viewer.requestId }, (ack = {}) => {
       setPanelBusyId("");
       if (ack.ok) applyRoomState(ack.roomState || ack);
-      setStatusMessage(ack.ok ? "Added to panel" : ack.error || "Panel update failed");
+      setStatusMessage(ack.ok ? "Approved. Waiting for guest media" : ack.error || "Panel update failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
+
+  const handlePanelReject = (viewer) => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !viewer) return;
+    const targetId = viewer.socketId || viewer.userId;
+    setPanelBusyId(targetId);
+    activeSocket.emit("live:panel-request-rejected", { streamId, viewerUserId: viewer.viewerUserId || viewer.userId, requestId: viewer.requestId }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok) applyRoomState(ack.roomState || ack);
+      setStatusMessage(ack.ok ? "Request declined" : ack.error || "Decline failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
+
+  const handleInviteResponse = (accepted) => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !incomingPanelInvite) return;
+    setPanelBusyId("invite");
+    activeSocket.emit(accepted ? "live:panel-invite-accepted" : "live:panel-invite-declined", { streamId, inviteId: incomingPanelInvite.inviteId }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok) {
+        setIncomingPanelInvite(null);
+        if (ack.roomState) applyRoomState(ack.roomState);
+        if (accepted) window.dispatchEvent(new CustomEvent("vibebook:panel-invite-accepted"));
+      }
+      setStatusMessage(ack.ok ? (accepted ? "Invite accepted" : "Invite declined") : ack.error || "Invite update failed");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
     });
   };
@@ -2119,7 +2290,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     activeSocket.emit("live:panel-invite", { streamId, socketId: viewer.socketId, userId: viewer.userId }, (ack = {}) => {
       setPanelBusyId("");
       if (ack.ok) applyRoomState(ack.roomState || ack);
-      setStatusMessage(ack.ok ? "Viewer added to panel" : ack.error || "Invite failed");
+      setStatusMessage(ack.ok ? "Invite sent" : ack.error || "Invite failed");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
     });
   };
@@ -2150,6 +2321,41 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     });
   };
 
+  const handlePanelHideVideo = (viewer) => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !viewer) return;
+    const targetId = viewer.socketId || viewer.userId;
+    setPanelBusyId(targetId);
+    activeSocket.emit("live:panel-hide-video", { streamId, socketId: viewer.socketId, userId: viewer.userId, hidden: viewer.cameraEnabled !== false }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok) applyRoomState(ack.roomState || ack);
+      setStatusMessage(ack.ok ? "Guest video updated" : ack.error || "Video control failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
+
+  const handlePanelLayoutChange = (layout) => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !isCreator) return;
+    setPanelLayout(layout);
+    activeSocket.emit("live:panel-layout-changed", { streamId, layout }, (ack = {}) => {
+      if (ack.ok && ack.roomState) applyRoomState(ack.roomState);
+      if (!ack.ok) setStatusMessage(ack.error || "Layout update failed");
+    });
+  };
+
+  const handlePanelLockToggle = () => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !isCreator) return;
+    activeSocket.emit("live:panel-locked", { streamId, locked: !panelLocked }, (ack = {}) => {
+      if (ack.ok) {
+        setPanelLocked(Boolean(ack.locked));
+        if (ack.roomState) applyRoomState(ack.roomState);
+      }
+      setStatusMessage(ack.ok ? (ack.locked ? "Panel requests locked" : "Panel requests open") : ack.error || "Panel lock failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
   const handleEndLive = async () => {
     if (!streamId || !isCreator) return;
     window.clearTimeout(hostEndCleanupTimerRef.current);
@@ -2323,6 +2529,28 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       </AnimatePresence>
 
       <AnimatePresence>
+        {showPanelRequestConfirm && !isCreator && (
+          <motion.div className="absolute bottom-[calc(6.9rem+env(safe-area-inset-bottom))] left-3 right-3 z-40 rounded-2xl border border-white/10 bg-slate-950/82 p-3 text-white shadow-2xl backdrop-blur-xl sm:left-auto sm:right-5 sm:w-80" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.96 }}>
+            <p className="text-sm font-black">Request to join</p>
+            <p className="mt-1 text-xs font-semibold text-white/65">If the host approves, your camera and microphone may be used on the live panel.</p>
+            <div className="mt-3 grid grid-cols-2 gap-2"><button type="button" className="h-10 rounded-full bg-white/10 text-xs font-black text-white" onClick={() => setShowPanelRequestConfirm(false)}>Cancel</button><button type="button" className="h-10 rounded-full bg-white text-xs font-black text-slate-950 disabled:opacity-60" onClick={sendPanelRequest} disabled={panelBusyId === "request" || Boolean(pendingPanelRequest)}>{panelBusyId === "request" ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Send request"}</button></div>
+          </motion.div>
+        )}
+        {pendingPanelRequest && !isCreator && (
+          <motion.div className="absolute bottom-[calc(6.9rem+env(safe-area-inset-bottom))] left-3 right-3 z-40 flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/82 p-3 text-white shadow-2xl backdrop-blur-xl sm:left-auto sm:right-5 sm:w-80" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.96 }}>
+            <Users className="h-5 w-5 shrink-0 text-brand" /><div className="min-w-0 flex-1"><p className="text-sm font-black">Waiting for host approval</p><p className="text-[0.68rem] font-bold text-white/55">Request sent</p></div><button type="button" className="h-9 shrink-0 rounded-full bg-white/10 px-3 text-[0.68rem] font-black text-white disabled:opacity-60" onClick={cancelPanelRequest} disabled={panelBusyId === "request"}>Cancel</button>
+          </motion.div>
+        )}
+        {incomingPanelInvite && !isCreator && (
+          <motion.div className="absolute bottom-[calc(6.9rem+env(safe-area-inset-bottom))] left-3 right-3 z-40 rounded-2xl border border-white/10 bg-slate-950/86 p-3 text-white shadow-2xl backdrop-blur-xl sm:left-auto sm:right-5 sm:w-80" initial={{ opacity: 0, y: 14, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 14, scale: 0.96 }}>
+            <p className="text-sm font-black">Host invited you to join the panel</p><p className="mt-1 text-xs font-semibold text-white/65">Camera and microphone permission is requested after you accept.</p><div className="mt-3 grid grid-cols-2 gap-2"><button type="button" className="h-10 rounded-full bg-white/10 text-xs font-black text-white" onClick={() => handleInviteResponse(false)} disabled={panelBusyId === "invite"}>Decline</button><button type="button" className="h-10 rounded-full bg-white text-xs font-black text-slate-950" onClick={() => handleInviteResponse(true)} disabled={panelBusyId === "invite"}>{panelBusyId === "invite" ? <Loader2 className="mx-auto h-4 w-4 animate-spin" /> : "Accept"}</button></div>
+          </motion.div>
+        )}
+        {isCreator && panelRequests.length > 0 && !activeSheet && (
+          <motion.div className="absolute right-3 top-[calc(5.5rem+env(safe-area-inset-top))] z-40 grid w-[min(21rem,calc(100vw-1.5rem))] gap-2 text-white sm:right-5" initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 16 }}>
+            {panelRequests.slice(0, 2).map((request) => <div key={request.requestId || request.userId} className="flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/82 p-2.5 shadow-2xl backdrop-blur-xl"><SafeAvatar user={request} src={request.avatar} className="h-9 w-9 rounded-full border border-white/20 object-cover" /><div className="min-w-0 flex-1"><p className="truncate text-xs font-black">{request.username || "Viewer"}</p><p className="text-[0.64rem] font-bold text-white/55">Wants to join your panel</p></div><button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white text-slate-950 disabled:opacity-60" onClick={() => handlePanelAccept(request)} disabled={panelBusyId === (request.socketId || request.userId)} aria-label="Approve panel request"><Check className="h-3.5 w-3.5" /></button><button type="button" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-white disabled:opacity-60" onClick={() => handlePanelReject(request)} disabled={panelBusyId === (request.socketId || request.userId)} aria-label="Decline panel request"><X className="h-3.5 w-3.5" /></button></div>)}
+          </motion.div>
+        )}
         {showGiftMenu && (
           <motion.div
             className="absolute bottom-[calc(5.8rem+env(safe-area-inset-bottom))] left-2 right-2 z-40 max-h-[58dvh] overflow-hidden rounded-t-2xl border border-white/10 bg-slate-950/80 shadow-2xl backdrop-blur-xl sm:left-auto sm:right-20 sm:w-[26rem] sm:rounded-2xl"
@@ -2447,7 +2675,14 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                   <span className="text-[0.65rem] uppercase text-white/50">{cameraEnabled ? "On" : "Off"}</span>
                 </button>
               )}
-              <label className="grid gap-1 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white">
+              {isCreator && (
+                <div className="grid gap-2 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white">
+                  <div className="flex items-center justify-between gap-2"><span>Panel layout</span><button type="button" className="rounded-full bg-white/10 px-2.5 py-1 text-[0.62rem] font-black text-white" onClick={handlePanelLockToggle}>{panelLocked ? "Locked" : "Open"}</button></div>
+                  <select className="h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white outline-none" value={panelLayout} onChange={(event) => handlePanelLayoutChange(event.target.value)}>
+                    {PANEL_LAYOUT_OPTIONS.map((layout) => <option key={layout.id} value={layout.id}>{layout.label}</option>)}
+                  </select>
+                </div>
+              )}              <label className="grid gap-1 rounded-lg bg-white/10 px-3 py-2 text-xs font-black text-white">
                 <span>Quality</span>
                 <select className="h-10 rounded-lg border border-white/10 bg-slate-950 px-3 text-sm font-bold text-white outline-none" value={selectedQuality} onChange={(event) => handleQualityChange(event.target.value)}>
                   <option value="480p">480p Data saver</option>
@@ -2619,8 +2854,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                         <span className="min-w-0 flex-1 truncate text-xs font-black">{request.username || "Viewer"}</span>
                         <button type="button" className="inline-flex h-8 items-center gap-1 rounded-full bg-white px-3 text-[0.64rem] font-black text-slate-950 disabled:opacity-55" onClick={() => handlePanelAccept(request)} disabled={panelBusyId === (request.socketId || request.userId)}>
                           {panelBusyId === (request.socketId || request.userId) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-                          Add
+                          Approve
                         </button>
+                        <button type="button" className="inline-flex h-8 items-center gap-1 rounded-full bg-white/10 px-3 text-[0.64rem] font-black text-white disabled:opacity-55" onClick={() => handlePanelReject(request)} disabled={panelBusyId === (request.socketId || request.userId)}><X className="h-3.5 w-3.5" />Decline</button>
                       </div>
                     ))}
                   </div>
@@ -2647,6 +2883,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                       <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10" onClick={() => handlePanelMute(activeGuest)} aria-label={activeGuest.muted ? "Unmute guest" : "Mute guest"}>
                         {activeGuest.muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                       </button>
+                      <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10" onClick={() => handlePanelHideVideo(activeGuest)} aria-label={activeGuest.cameraEnabled === false ? "Show guest video" : "Hide guest video"}>{activeGuest.cameraEnabled === false ? <VideoOff className="h-4 w-4" /> : <Video className="h-4 w-4" />}</button>
                       <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-red-500 text-white" onClick={() => handlePanelRemove(activeGuest)} aria-label="Remove guest">
                         <X className="h-4 w-4" />
                       </button>
@@ -2688,7 +2925,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             </div>
           )}
 
-          <div ref={chatListRef} className="flex max-h-[24dvh] flex-col gap-1.5 overflow-y-auto pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div ref={chatListRef} className="flex max-h-[22dvh] flex-col justify-end gap-1.5 overflow-y-auto pr-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <AnimatePresence initial={false}>
               {comments.map((comment) => {
                 const giftComment = comment.type === "gift";
@@ -2736,12 +2973,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           </AnimatePresence>
         </div>
 
-        <div className="mt-2 flex max-w-[calc(100%-4.9rem)] items-center gap-2 sm:max-w-xl">
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-white/10 bg-slate-950/50 px-3 py-2 backdrop-blur">
+        <div className="mt-2 flex w-full max-w-[min(100%,38rem)] items-center gap-2 pr-[4.9rem] sm:pr-0">
+          <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-white/12 bg-slate-950/68 px-3 py-1.5 shadow-lg backdrop-blur">
             <MessageCircle className="h-4 w-4 shrink-0 text-white/58" />
             <input
               ref={commentInputRef}
-              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-white outline-none placeholder:text-white/45 disabled:opacity-55"
+              className="min-w-0 flex-1 bg-transparent text-base font-semibold text-white outline-none placeholder:text-white/58 disabled:opacity-55"
               placeholder={commentsEnabled ? "Add comment..." : "Comments off"}
               value={commentText}
               onChange={(event) => setCommentText(event.target.value)}

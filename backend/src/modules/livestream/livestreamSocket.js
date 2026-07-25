@@ -15,8 +15,11 @@ const VALID_REACTIONS = new Set(["heart", "fire", "clap", "wow", "laugh", "cry"]
 const VALID_GIFTS = new Set(Object.values(GIFT_DEFINITIONS).map((gift) => gift.id));
 const COMMENT_RATE_LIMIT_MS = 900;
 const GIFT_RATE_LIMIT_MS = 1200;
+const PANEL_REQUEST_RATE_LIMIT_MS = 5000;
+const PANEL_REQUEST_TIMEOUT_MS = 1000 * 60 * 2;
 const MAX_DEDUPE_IDS = 80;
 const LIVE_PANEL_LIMIT = 10;
+const VALID_PANEL_LAYOUTS = new Set(["solo", "side-by-side", "grid", "extended-grid", "host-focus", "active-speaker"]);
 const liveRoomState = new Map();
 
 const roomFor = (streamId) => `stream:${streamId}`;
@@ -77,6 +80,9 @@ const stateFor = (streamId) => {
       viewers: new Map(),
       panel: new Map(),
       requests: new Map(),
+      invites: new Map(),
+      layout: "solo",
+      panelLocked: false,
       updatedAt: Date.now(),
     });
   }
@@ -94,8 +100,70 @@ const serializeMember = (member = {}) => ({
   activeSpeaker: Boolean(member.activeSpeaker),
   joinedAt: member.joinedAt || nowIso(),
   requestedAt: member.requestedAt || undefined,
+  approvedAt: member.approvedAt || undefined,
+  invitedAt: member.invitedAt || undefined,
+  connectionStatus: member.connectionStatus || "connected",
+  micEnabled: member.micEnabled !== false,
+  cameraEnabled: member.cameraEnabled !== false,
 });
 
+
+const serializePanelRequest = (request = {}) => ({
+  requestId: request.requestId || "",
+  streamId: request.streamId || "",
+  viewerUserId: request.viewerUserId || request.userId || "",
+  viewerSocketId: request.viewerSocketId || request.socketId || "",
+  userId: request.viewerUserId || request.userId || "",
+  socketId: request.viewerSocketId || request.socketId || "",
+  username: request.username || "Viewer",
+  avatar: request.avatar || "",
+  status: request.status || "pending",
+  createdAt: request.createdAt || request.requestedAt || nowIso(),
+  requestedAt: request.createdAt || request.requestedAt || nowIso(),
+});
+
+const serializePanelInvite = (invite = {}) => ({
+  inviteId: invite.inviteId || "",
+  streamId: invite.streamId || "",
+  hostUserId: invite.hostUserId || "",
+  viewerUserId: invite.viewerUserId || invite.userId || "",
+  viewerSocketId: invite.viewerSocketId || invite.socketId || "",
+  userId: invite.viewerUserId || invite.userId || "",
+  socketId: invite.viewerSocketId || invite.socketId || "",
+  username: invite.username || "Viewer",
+  avatar: invite.avatar || "",
+  status: invite.status || "pending",
+  createdAt: invite.createdAt || nowIso(),
+});
+
+const pendingRequestKeyFor = (streamId, userId) => `${idOf(streamId)}:${idOf(userId)}`;
+const pendingInviteKeyFor = (streamId, userId) => `${idOf(streamId)}:${idOf(userId)}`;
+
+const cleanupExpiredPanelState = (io, streamId) => {
+  const state = stateFor(streamId);
+  const now = Date.now();
+  let changed = false;
+
+  Array.from(state.requests.entries()).forEach(([key, request]) => {
+    const age = now - new Date(request.createdAt || request.requestedAt || 0).getTime();
+    const disconnected = request.viewerSocketId && !state.viewers.has(request.viewerSocketId);
+    if (request.status === "pending" && (age > PANEL_REQUEST_TIMEOUT_MS || disconnected)) {
+      state.requests.set(key, { ...request, status: disconnected ? "cancelled" : "expired" });
+      changed = true;
+    }
+  });
+
+  Array.from(state.invites.entries()).forEach(([key, invite]) => {
+    const age = now - new Date(invite.createdAt || 0).getTime();
+    const disconnected = invite.viewerSocketId && !state.viewers.has(invite.viewerSocketId);
+    if (invite.status === "pending" && (age > PANEL_REQUEST_TIMEOUT_MS || disconnected)) {
+      state.invites.set(key, { ...invite, status: disconnected ? "cancelled" : "expired" });
+      changed = true;
+    }
+  });
+
+  if (changed) emitLiveRoomState(io, streamId);
+};
 const uniqueViewersForSnapshot = (state) => {
   const viewersByIdentity = new Map();
   Array.from(state.viewers.values()).forEach((member) => {
@@ -119,8 +187,11 @@ const roomSnapshotFor = (streamId) => {
     streamId: idOf(streamId),
     viewers: uniqueViewersForSnapshot(state).map(serializeMember).sort(byHostThenJoin),
     panelUsers: Array.from(state.panel.values()).map(serializeMember).sort(byHostThenJoin).slice(0, LIVE_PANEL_LIMIT),
-    requests: Array.from(state.requests.values()).map(serializeMember).sort((left, right) => String(left.requestedAt || "").localeCompare(String(right.requestedAt || ""))),
+    requests: Array.from(state.requests.values()).filter((request) => request.status === "pending").map(serializePanelRequest).sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || ""))),
+    invites: Array.from(state.invites.values()).filter((invite) => invite.status === "pending").map(serializePanelInvite).sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || ""))),
     panelLimit: LIVE_PANEL_LIMIT,
+    panelLayout: state.layout || "solo",
+    panelLocked: Boolean(state.panelLocked),
     updatedAt: nowIso(),
   };
 };
@@ -174,12 +245,23 @@ const removeLiveRoomMember = (streamId, socketId) => {
   const state = liveRoomState.get(id);
   if (!state) return null;
 
+  const leavingMember = state.viewers.get(socketId);
   state.viewers.delete(socketId);
   state.panel.delete(socketId);
   state.requests.delete(socketId);
+  if (leavingMember?.userId) {
+    state.requests.delete(pendingRequestKeyFor(id, leavingMember.userId));
+    state.invites.delete(pendingInviteKeyFor(id, leavingMember.userId));
+  }
+  Array.from(state.requests.entries()).forEach(([key, request]) => {
+    if (request.viewerSocketId === socketId) state.requests.set(key, { ...request, status: "cancelled" });
+  });
+  Array.from(state.invites.entries()).forEach(([key, invite]) => {
+    if (invite.viewerSocketId === socketId) state.invites.set(key, { ...invite, status: "cancelled" });
+  });
   state.updatedAt = Date.now();
 
-  if (!state.viewers.size && !state.panel.size && !state.requests.size) {
+  if (!state.viewers.size && !state.panel.size && !state.requests.size && !state.invites.size) {
     liveRoomState.delete(id);
     return null;
   }
@@ -635,36 +717,143 @@ const setupLiveStreamSockets = (io) => {
     socket.on("live:panel-request", (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
-        if (!streamId) {
-          callback?.({ ok: false, error: "Stream ID required" });
+        const viewerUserId = idOf(socket.user?._id);
+        if (!streamId || !viewerUserId) {
+          callback?.({ ok: false, error: "Sign in to request panel access" });
           return;
         }
 
+        cleanupExpiredPanelState(io, streamId);
+        ensureSocketInLiveRoom(socket, streamId);
         const state = stateFor(streamId);
         const member = upsertLiveRoomMember(streamId, socket, { username: data.username });
+        const requestKey = pendingRequestKeyFor(streamId, viewerUserId);
+
         if (member.isHost) {
           callback?.({ ok: false, error: "Host is already on panel" });
           return;
         }
+        if (state.panelLocked) {
+          callback?.({ ok: false, error: "Panel requests are locked" });
+          return;
+        }
+        if (state.panel.size >= LIVE_PANEL_LIMIT) {
+          callback?.({ ok: false, error: "Panel is full" });
+          return;
+        }
+        if (Array.from(state.panel.values()).some((guest) => guest.userId === viewerUserId)) {
+          callback?.({ ok: false, error: "You are already on panel" });
+          return;
+        }
+        const existing = state.requests.get(requestKey);
+        if (existing?.status === "pending") {
+          callback?.({ ok: true, request: serializePanelRequest(existing), roomState: roomSnapshotFor(streamId), duplicate: true });
+          return;
+        }
+        if (isRateLimited(socket, "panel-request", PANEL_REQUEST_RATE_LIMIT_MS)) {
+          callback?.({ ok: false, error: "Please wait before requesting again" });
+          return;
+        }
 
         const request = {
-          ...member,
-          role: "request",
-          requestedAt: nowIso(),
-        };
-        state.requests.set(socket.id, request);
-        const roomState = emitLiveRoomState(io, streamId);
-        emitLiveRoomEvent(io, streamId, "live:panel-requested", {
+          requestId: `panel-request:${streamId}:${viewerUserId}:${Date.now()}`,
           streamId,
-          request: serializeMember(request),
+          viewerUserId,
+          viewerSocketId: socket.id,
+          username: member.username,
+          avatar: member.avatar,
+          status: "pending",
+          createdAt: nowIso(),
+        };
+        state.requests.set(requestKey, request);
+        const roomState = emitLiveRoomState(io, streamId);
+        hostMembersFor(streamId).forEach((host) => io.to(host.socketId).emit("live:panel-request", {
+          streamId,
+          request: serializePanelRequest(request),
           roomState,
           timestamp: nowIso(),
-        });
-        callback?.({ ok: true, request: serializeMember(request), roomState });
+        }));
+        callback?.({ ok: true, request: serializePanelRequest(request), roomState });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to request panel" });
       }
     });
+
+    socket.on("live:panel-request-cancel", (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const viewerUserId = idOf(socket.user?._id);
+        if (!streamId || !viewerUserId) {
+          callback?.({ ok: false, error: "Stream and viewer required" });
+          return;
+        }
+        const state = stateFor(streamId);
+        const requestKey = pendingRequestKeyFor(streamId, viewerUserId);
+        const existing = state.requests.get(requestKey);
+        if (existing?.status === "pending") {
+          state.requests.set(requestKey, { ...existing, status: "cancelled" });
+        }
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-request-cancelled", { streamId, viewerUserId, roomState, timestamp: nowIso() });
+        callback?.({ ok: true, roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to cancel panel request" });
+      }
+    });
+
+    const handlePanelRequestDecision = async (approved, data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const targetUserId = idOf(data.viewerUserId || data.userId);
+        if (!streamId || !targetUserId) {
+          callback?.({ ok: false, error: "Stream and viewer required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can manage panel requests" });
+          return;
+        }
+
+        cleanupExpiredPanelState(io, streamId);
+        const state = stateFor(streamId);
+        if (approved && state.panel.size >= LIVE_PANEL_LIMIT) {
+          callback?.({ ok: false, error: "Panel is full" });
+          return;
+        }
+        const requestKey = pendingRequestKeyFor(streamId, targetUserId);
+        const request = state.requests.get(requestKey);
+        if (!request || request.status !== "pending") {
+          callback?.({ ok: false, error: "Panel request is no longer pending" });
+          return;
+        }
+
+        const nextRequest = { ...request, status: approved ? "approved" : "rejected", approvedAt: approved ? nowIso() : undefined };
+        state.requests.set(requestKey, nextRequest);
+        if (approved && request.viewerSocketId) {
+          io.to(request.viewerSocketId).emit("live:panel-request-approved", {
+            streamId,
+            request: serializePanelRequest(nextRequest),
+            panelLimit: LIVE_PANEL_LIMIT,
+            timestamp: nowIso(),
+          });
+        } else if (request.viewerSocketId) {
+          io.to(request.viewerSocketId).emit("live:panel-request-rejected", {
+            streamId,
+            request: serializePanelRequest(nextRequest),
+            timestamp: nowIso(),
+          });
+        }
+        const roomState = emitLiveRoomState(io, streamId);
+        callback?.({ ok: true, request: serializePanelRequest(nextRequest), roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to update panel request" });
+      }
+    };
+
+    socket.on("live:panel-request-approved", (data = {}, callback) => handlePanelRequestDecision(true, data, callback));
+    socket.on("live:panel-request-rejected", (data = {}, callback) => handlePanelRequestDecision(false, data, callback));
+    socket.on("live:panel-accept", (data = {}, callback) => handlePanelRequestDecision(true, data, callback));
+    socket.on("live:panel-reject", (data = {}, callback) => handlePanelRequestDecision(false, data, callback));
 
     socket.on("live:panel-invite", async (data = {}, callback) => {
       try {
@@ -674,109 +863,164 @@ const setupLiveStreamSockets = (io) => {
           callback?.({ ok: false, error: "Stream and viewer required" });
           return;
         }
-
         if (!(await socketIsHost(streamId, socket))) {
           callback?.({ ok: false, error: "Only host can invite viewers" });
           return;
         }
 
+        cleanupExpiredPanelState(io, streamId);
         const state = stateFor(streamId);
         if (state.panel.size >= LIVE_PANEL_LIMIT) {
           callback?.({ ok: false, error: "Panel is full" });
           return;
         }
-
         const member = findLiveRoomMember(streamId, targetId);
-        if (!member) {
+        if (!member || member.isHost) {
           callback?.({ ok: false, error: "Viewer is not in this live" });
           return;
         }
+        const inviteKey = pendingInviteKeyFor(streamId, member.userId);
+        const existing = state.invites.get(inviteKey);
+        if (existing?.status === "pending") {
+          callback?.({ ok: true, invite: serializePanelInvite(existing), roomState: roomSnapshotFor(streamId), duplicate: true });
+          return;
+        }
 
-        const panelMember = { ...member, role: "guest", invitedAt: nowIso() };
-        state.panel.set(member.socketId, panelMember);
-        state.requests.delete(member.socketId);
+        const invite = {
+          inviteId: `panel-invite:${streamId}:${member.userId}:${Date.now()}`,
+          streamId,
+          hostUserId: idOf(socket.user?._id),
+          viewerUserId: member.userId,
+          viewerSocketId: member.socketId,
+          username: member.username,
+          avatar: member.avatar,
+          status: "pending",
+          createdAt: nowIso(),
+        };
+        state.invites.set(inviteKey, invite);
         io.to(member.socketId).emit("live:panel-invite", {
           streamId,
-          fromHostId: idOf(socket.user?._id),
-          panelUser: serializeMember(panelMember),
+          invite: serializePanelInvite(invite),
           timestamp: nowIso(),
         });
         const roomState = emitLiveRoomState(io, streamId);
-        callback?.({ ok: true, panelUser: serializeMember(panelMember), roomState });
+        callback?.({ ok: true, invite: serializePanelInvite(invite), roomState });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to invite viewer" });
       }
     });
 
-    socket.on("live:panel-accept", async (data = {}, callback) => {
+    const handleInviteDecision = async (accepted, data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
-        const targetId = idOf(data.userId || data.socketId || socket.id);
-        if (!streamId) {
-          callback?.({ ok: false, error: "Stream ID required" });
+        const viewerUserId = idOf(socket.user?._id);
+        if (!streamId || !viewerUserId) {
+          callback?.({ ok: false, error: "Stream and viewer required" });
           return;
         }
+        const state = stateFor(streamId);
+        const inviteKey = pendingInviteKeyFor(streamId, viewerUserId);
+        const invite = state.invites.get(inviteKey);
+        if (!invite || invite.status !== "pending") {
+          callback?.({ ok: false, error: "Panel invite is no longer pending" });
+          return;
+        }
+        state.invites.set(inviteKey, { ...invite, status: accepted ? "approved" : "rejected" });
+        if (!accepted) {
+          const roomState = emitLiveRoomState(io, streamId);
+          hostMembersFor(streamId).forEach((host) => io.to(host.socketId).emit("live:panel-invite-declined", { streamId, invite: serializePanelInvite(invite), roomState, timestamp: nowIso() }));
+          callback?.({ ok: true, roomState });
+          return;
+        }
+        callback?.({ ok: true, invite: serializePanelInvite({ ...invite, status: "approved" }), roomState: roomSnapshotFor(streamId) });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to update panel invite" });
+      }
+    };
 
+    socket.on("live:panel-invite-accepted", (data = {}, callback) => handleInviteDecision(true, data, callback));
+    socket.on("live:panel-invite-declined", (data = {}, callback) => handleInviteDecision(false, data, callback));
+
+    socket.on("live:panel-guest-joined", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const viewerUserId = idOf(socket.user?._id);
+        if (!streamId || !viewerUserId) {
+          callback?.({ ok: false, error: "Stream and viewer required" });
+          return;
+        }
         const state = stateFor(streamId);
         if (state.panel.size >= LIVE_PANEL_LIMIT) {
           callback?.({ ok: false, error: "Panel is full" });
           return;
         }
-
-        const isHost = await socketIsHost(streamId, socket);
-        const targetMember = isHost ? findLiveRoomMember(streamId, targetId) : state.viewers.get(socket.id);
-        if (!targetMember) {
-          callback?.({ ok: false, error: "Viewer is not in this live" });
+        const request = state.requests.get(pendingRequestKeyFor(streamId, viewerUserId));
+        const invite = state.invites.get(pendingInviteKeyFor(streamId, viewerUserId));
+        const allowed = request?.status === "approved" || invite?.status === "approved";
+        if (!allowed) {
+          callback?.({ ok: false, error: "Host approval is required before joining panel" });
           return;
         }
-
-        const panelMember = { ...targetMember, role: targetMember.isHost ? "host" : "guest", acceptedAt: nowIso() };
-        state.panel.set(targetMember.socketId, panelMember);
-        state.requests.delete(targetMember.socketId);
+        const member = upsertLiveRoomMember(streamId, socket, { username: data.username, role: "guest" });
+        const panelMember = {
+          ...member,
+          role: "guest",
+          muted: Boolean(data.muted),
+          micEnabled: data.micEnabled !== false,
+          cameraEnabled: data.cameraEnabled !== false,
+          connectionStatus: "connecting",
+          joinedAt: nowIso(),
+        };
+        state.panel.set(socket.id, panelMember);
         const roomState = emitLiveRoomState(io, streamId);
-        emitLiveRoomEvent(io, streamId, "live:panel-updated", roomState);
+        emitLiveRoomEvent(io, streamId, "live:panel-guest-joined", { streamId, panelUser: serializeMember(panelMember), roomState, timestamp: nowIso() });
+        hostMembersFor(streamId).forEach((host) => io.to(host.socketId).emit("live:panel-guest-ready", { streamId, guestSocketId: socket.id, guest: serializeMember(panelMember), timestamp: nowIso() }));
         callback?.({ ok: true, panelUser: serializeMember(panelMember), roomState });
       } catch (error) {
-        callback?.({ ok: false, error: error.message || "Unable to update panel" });
+        callback?.({ ok: false, error: error.message || "Unable to join panel" });
+      }
+    });
+
+    socket.on("live:panel-guest-left", (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        if (!streamId) {
+          callback?.({ ok: false, error: "Stream ID required" });
+          return;
+        }
+        const state = stateFor(streamId);
+        state.panel.delete(socket.id);
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-guest-left", { streamId, socketId: socket.id, userId: idOf(socket.user?._id), roomState, timestamp: nowIso() });
+        callback?.({ ok: true, roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to leave panel" });
       }
     });
 
     socket.on("live:panel-remove", async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
-        const targetId = idOf(data.userId || data.socketId || socket.id);
-        if (!streamId) {
-          callback?.({ ok: false, error: "Stream ID required" });
+        const targetId = idOf(data.userId || data.socketId);
+        if (!streamId || !targetId) {
+          callback?.({ ok: false, error: "Stream and panel user required" });
           return;
         }
-
-        const isHost = await socketIsHost(streamId, socket);
-        const member = findLiveRoomMember(streamId, targetId);
-        if (!member) {
-          callback?.({ ok: false, error: "Panel user not found" });
-          return;
-        }
-
-        if (member.isHost) {
-          callback?.({ ok: false, error: "Host cannot be removed from panel" });
-          return;
-        }
-
-        if (!isHost && member.socketId !== socket.id) {
+        if (!(await socketIsHost(streamId, socket))) {
           callback?.({ ok: false, error: "Only host can remove panel guests" });
           return;
         }
-
         const state = stateFor(streamId);
+        const member = findLiveRoomMember(streamId, targetId);
+        if (!member || member.isHost || !state.panel.has(member.socketId)) {
+          callback?.({ ok: false, error: "Panel guest not found" });
+          return;
+        }
         state.panel.delete(member.socketId);
-        state.requests.delete(member.socketId);
-        io.to(member.socketId).emit("live:panel-removed", {
-          streamId,
-          reason: data.reason || "removed",
-          timestamp: nowIso(),
-        });
+        io.to(member.socketId).emit("live:panel-guest-removed", { streamId, reason: data.reason || "removed", timestamp: nowIso() });
+        io.to(member.socketId).emit("live:panel-removed", { streamId, reason: data.reason || "removed", timestamp: nowIso() });
         const roomState = emitLiveRoomState(io, streamId);
-        emitLiveRoomEvent(io, streamId, "live:panel-updated", roomState);
+        emitLiveRoomEvent(io, streamId, "live:panel-guest-removed", { streamId, panelUser: serializeMember(member), roomState, timestamp: nowIso() });
         callback?.({ ok: true, roomState });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to remove panel user" });
@@ -791,26 +1035,19 @@ const setupLiveStreamSockets = (io) => {
           callback?.({ ok: false, error: "Stream and panel user required" });
           return;
         }
-
         if (!(await socketIsHost(streamId, socket))) {
           callback?.({ ok: false, error: "Only host can mute panel guests" });
           return;
         }
-
         const state = stateFor(streamId);
         const member = findLiveRoomMember(streamId, targetId);
         if (!member || !state.panel.has(member.socketId) || member.isHost) {
           callback?.({ ok: false, error: "Panel guest not found" });
           return;
         }
-
-        const panelMember = { ...state.panel.get(member.socketId), muted: data.muted !== false };
+        const panelMember = { ...state.panel.get(member.socketId), muted: data.muted !== false, micEnabled: data.muted === false };
         state.panel.set(member.socketId, panelMember);
-        io.to(member.socketId).emit("live:panel-muted", {
-          streamId,
-          muted: panelMember.muted,
-          timestamp: nowIso(),
-        });
+        io.to(member.socketId).emit("live:panel-muted", { streamId, muted: panelMember.muted, timestamp: nowIso() });
         const roomState = emitLiveRoomState(io, streamId);
         callback?.({ ok: true, panelUser: serializeMember(panelMember), roomState });
       } catch (error) {
@@ -818,6 +1055,76 @@ const setupLiveStreamSockets = (io) => {
       }
     });
 
+    socket.on("live:panel-hide-video", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const targetId = idOf(data.userId || data.socketId);
+        if (!streamId || !targetId) {
+          callback?.({ ok: false, error: "Stream and panel user required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can hide guest video" });
+          return;
+        }
+        const state = stateFor(streamId);
+        const member = findLiveRoomMember(streamId, targetId);
+        if (!member || !state.panel.has(member.socketId) || member.isHost) {
+          callback?.({ ok: false, error: "Panel guest not found" });
+          return;
+        }
+        const panelMember = { ...state.panel.get(member.socketId), cameraEnabled: data.hidden === true ? false : data.cameraEnabled !== false };
+        state.panel.set(member.socketId, panelMember);
+        io.to(member.socketId).emit("live:panel-video-hidden", { streamId, hidden: !panelMember.cameraEnabled, timestamp: nowIso() });
+        const roomState = emitLiveRoomState(io, streamId);
+        callback?.({ ok: true, panelUser: serializeMember(panelMember), roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to hide panel guest video" });
+      }
+    });
+
+    socket.on("live:panel-layout-changed", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const layout = String(data.layout || "").trim();
+        if (!streamId || !VALID_PANEL_LAYOUTS.has(layout)) {
+          callback?.({ ok: false, error: "Valid panel layout required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can change panel layout" });
+          return;
+        }
+        const state = stateFor(streamId);
+        state.layout = layout;
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-layout-changed", { streamId, layout, roomState, timestamp: nowIso() });
+        callback?.({ ok: true, layout, roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to change panel layout" });
+      }
+    });
+
+    socket.on("live:panel-locked", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        if (!streamId) {
+          callback?.({ ok: false, error: "Stream ID required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can lock panel requests" });
+          return;
+        }
+        const state = stateFor(streamId);
+        state.panelLocked = data.locked !== false;
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-locked", { streamId, locked: state.panelLocked, roomState, timestamp: nowIso() });
+        callback?.({ ok: true, locked: state.panelLocked, roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to update panel lock" });
+      }
+    });
     socket.on("live:report", async (data = {}, callback) => {
       try {
         const streamId = idOf(data.streamId || socket.data.livestream?.streamId);

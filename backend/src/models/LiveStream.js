@@ -165,6 +165,65 @@ const liveStreamSchema = new mongoose.Schema(
         max: 120,
       },
     },
+    panel: {
+      limit: {
+        type: Number,
+        default: 10,
+        min: 1,
+        max: 10,
+      },
+      layout: {
+        type: String,
+        enum: ["solo", "side-by-side", "grid", "extended-grid", "host-focus", "active-speaker"],
+        default: "solo",
+      },
+      locked: {
+        type: Boolean,
+        default: false,
+      },
+      activeGuests: {
+        type: [
+          {
+            userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+            username: { type: String, default: "Viewer", maxlength: 80 },
+            avatar: { type: String, default: "" },
+            micEnabled: { type: Boolean, default: true },
+            cameraEnabled: { type: Boolean, default: true },
+            muted: { type: Boolean, default: false },
+            connectionStatus: { type: String, enum: ["connecting", "connected", "disconnected"], default: "connecting" },
+            joinedAt: { type: Date, default: Date.now },
+          },
+        ],
+        default: [],
+      },
+      pendingRequests: {
+        type: [
+          {
+            requestId: { type: String, required: true },
+            viewerUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+            username: { type: String, default: "Viewer", maxlength: 80 },
+            avatar: { type: String, default: "" },
+            status: { type: String, enum: ["pending", "approved", "rejected", "cancelled", "expired"], default: "pending" },
+            createdAt: { type: Date, default: Date.now },
+          },
+        ],
+        default: [],
+      },
+      pendingInvites: {
+        type: [
+          {
+            inviteId: { type: String, required: true },
+            hostUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+            viewerUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+            username: { type: String, default: "Viewer", maxlength: 80 },
+            avatar: { type: String, default: "" },
+            status: { type: String, enum: ["pending", "approved", "rejected", "cancelled", "expired"], default: "pending" },
+            createdAt: { type: Date, default: Date.now },
+          },
+        ],
+        default: [],
+      },
+    },
     stats: {
       totalViews: {
         type: Number,

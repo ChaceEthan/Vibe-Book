@@ -1422,8 +1422,8 @@ const Chat = () => {
     });
 
   return (
-    <section className="container-page pb-[calc(4.5rem+env(safe-area-inset-bottom))] pt-3 sm:py-6">
-      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+    <section className="container-page flex h-[100dvh] min-h-0 flex-col overflow-hidden pb-[calc(4.25rem+env(safe-area-inset-bottom))] pt-3 sm:py-6">
+      <div className="mb-3 flex shrink-0 flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-brand">Chat</p>
           <h1 className="mt-1 truncate text-2xl font-black text-navy">
@@ -1485,7 +1485,7 @@ const Chat = () => {
       )}
 
       {activeTab === "direct" ? (
-        <div className="flex max-h-[calc(100dvh-7.5rem)] min-h-[480px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
           {userId ? (
             <>
               <div className="flex items-center gap-3 border-b border-slate-100 p-3">
@@ -1564,7 +1564,7 @@ const Chat = () => {
                     ))}
                   </div>
                 )}
-                <div className="flex items-center gap-2">
+                <div className="flex min-w-0 items-end gap-2">
                 <input
                   ref={directFileInputRef}
                   type="file"
@@ -1578,7 +1578,7 @@ const Chat = () => {
                 </button>
                 <textarea
                   rows={1}
-                  className="field max-h-[120px] min-h-11 flex-1 resize-none overflow-y-auto rounded-2xl px-3 py-2 text-base"
+                  className="field max-h-[120px] min-h-11 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl px-3 py-2 text-base"
                   value={message}
                   onChange={(event) => {
                     const nextValue = event.target.value;
@@ -1719,7 +1719,7 @@ const Chat = () => {
             </div>
           </div>
 
-          <div className="flex max-h-[calc(100dvh-7.5rem)] min-h-[480px] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
             <div className="shrink-0 border-b border-slate-100 p-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <button type="button" className="flex min-w-0 flex-1 gap-3 text-left" onClick={() => selectedGroupInfo && setDetailsModalOpen(true)}>
@@ -1850,7 +1850,7 @@ const Chat = () => {
               )}
               <div ref={groupBottomRef} />
             </div>
-            <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
+            <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
               {groupReply && (
                 <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-xs text-slate-600">
                   <Reply className="h-4 w-4 text-brand" />
@@ -1871,7 +1871,7 @@ const Chat = () => {
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-end gap-2">
               <input
                 ref={groupFileInputRef}
                 type="file"
@@ -1885,7 +1885,7 @@ const Chat = () => {
               </button>
               <textarea
                 rows={1}
-                className="field max-h-[120px] min-h-11 flex-1 resize-none overflow-y-auto rounded-2xl px-3 py-2 text-base"
+                className="field max-h-[120px] min-h-11 min-w-0 flex-1 resize-none overflow-y-auto rounded-2xl px-3 py-2 text-base"
                 value={groupMessage}
                 onChange={(event) => setGroupMessage(event.target.value)}
                 placeholder={selectedGroupIsMember ? "Write a group message" : "Join the group to chat"}
