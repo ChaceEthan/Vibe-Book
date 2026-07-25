@@ -144,6 +144,7 @@ const giftGroups = [
 ];
 
 const activeVideoTrackFor = (stream) => stream?.getVideoTracks?.().find((track) => track.readyState === "live" && track.enabled !== false);
+const activeAudioTrackFor = (stream) => stream?.getAudioTracks?.().find((track) => track.readyState === "live");
 
 const ensureMediaTrackState = (stream, { audioEnabled = true, videoEnabled = true } = {}) => {
   stream?.getAudioTracks?.().forEach((track) => {
@@ -167,6 +168,26 @@ const cameraDeviceForFacingMode = async (facingMode = "user") => {
   } catch {
     return "";
   }
+};
+
+const videoConstraintsForFacingMode = async (facingMode = "user") => {
+  const base = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+  };
+
+  const deviceId = await cameraDeviceForFacingMode(facingMode);
+  if (deviceId) {
+    return {
+      ...base,
+      deviceId: { exact: deviceId },
+    };
+  }
+
+  return {
+    ...base,
+    facingMode: { ideal: facingMode },
+  };
 };
 
 const makeGiftParticles = (tier = "small") => {
@@ -392,6 +413,32 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   const selectedGift = giftById[selectedGiftId] || liveGiftOptions[0];
   const creatorId = hostUserId;
   const isPanelGuest = panelUsers.some((guest) => String(guest.userId || "") === String(currentUserId || "") || String(guest.socketId || "") === String(socketRef.current?.id || ""));
+
+  const closePeerConnections = (targetSocketId = "") => {
+    const target = String(targetSocketId || "");
+    peerConnectionsRef.current.forEach((connection, peerId) => {
+      if (target && String(peerId) !== target) return;
+      connection.onicecandidate = null;
+      connection.ontrack = null;
+      connection.onconnectionstatechange = null;
+      connection.oniceconnectionstatechange = null;
+      connection.close();
+      peerConnectionsRef.current.delete(peerId);
+      pendingIceCandidatesRef.current.delete(peerId);
+      const timer = peerRecoveryTimersRef.current.get(peerId);
+      if (timer) window.clearTimeout(timer);
+      peerRecoveryTimersRef.current.delete(peerId);
+      peerIceRestartedRef.current.delete(peerId);
+    });
+  };
+
+  const stopLocalPanelMedia = () => {
+    if (isCreatorRef.current) return;
+    previewStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    previewStreamRef.current = null;
+    setPreviewStream(null);
+    releaseLivePreviewStream(streamId);
+  };
 
   const addReactionBubble = (data) => {
     const id = data.id || `${data.reaction || "heart"}:${Date.now()}:${Math.random()}`;
@@ -624,7 +671,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       try {
         return await navigator.mediaDevices.getUserMedia({
           video: videoConstraints,
-          audio: true,
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
       } catch (mediaError) {
         if (mediaError?.name === "NotAllowedError") {
@@ -770,6 +817,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.off("live:panel-video-hidden", handlePanelVideoHidden);
       activeSocket.off("live:panel-layout-changed", handlePanelLayoutChanged);
       activeSocket.off("live:panel-locked", handlePanelLocked);
+      activeSocket.off("live:panel-seat-swapped", handleRoomState);
+      activeSocket.off("live:panel-seat-locked", handleRoomState);
+      activeSocket.off("live:panel-seat-closed", handleRoomState);
       activeSocket.off("live:blocked-from-stream", handleBlockedFromStream);
       activeSocket.off("live:user-blocked", handleUserBlocked);
       activeSocket.off("live:ended", handleEnded);
@@ -923,7 +973,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       try {
         setLocalLoading(true);
         setStatusMessage("Opening camera and microphone...");
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: liveFacingMode }, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: liveFacingMode }, audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
         setPreviewStream(stream);
         setLivePreviewStream(stream);
         ensureMediaTrackState(stream, { audioEnabled: true, videoEnabled: true });
@@ -950,6 +1000,10 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     function handleRoomState(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
+      if (data.roomState) {
+        handleRoomState(data.roomState);
+        return;
+      }
       const currentUserId = userIdFor(currentUser);
       setLiveViewers(Array.isArray(data.viewers) ? data.viewers : []);
       setPanelUsers(Array.isArray(data.panelUsers) ? data.panelUsers.slice(0, PANEL_LIMIT) : []);
@@ -995,7 +1049,32 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     function handlePanelRemoved(data = {}) {
       if (data.streamId && data.streamId !== streamId) return;
       if (data.roomState) handleRoomState(data.roomState);
-      setStatusMessage("You left the live panel");
+
+      const removedSocketId = data.socketId || data.panelUser?.socketId || "";
+      const removedUserId = data.userId || data.panelUser?.userId || "";
+      const ownSocketId = activeSocket?.id || "";
+      const ownUserId = userIdFor(currentUser);
+      const ownRemoval = !data.panelUser || String(removedSocketId || "") === String(ownSocketId) || String(removedUserId || "") === String(ownUserId || "");
+
+      if (removedSocketId) {
+        closePeerConnections(removedSocketId);
+      }
+      setPanelUsers((current) => current.filter((guest) => String(guest.socketId || "") !== String(removedSocketId) && String(guest.userId || "") !== String(removedUserId)));
+      setActiveGuest((current) => {
+        if (!current) return current;
+        return String(current.socketId || "") === String(removedSocketId) || String(current.userId || "") === String(removedUserId) ? null : current;
+      });
+
+      if (ownRemoval) {
+        stopLocalPanelMedia();
+        closePeerConnections();
+        setPendingPanelRequest(null);
+        setIncomingPanelInvite(null);
+        setActiveSheet("");
+        setStatusMessage("You left the live panel");
+      } else {
+        setStatusMessage(`${data.panelUser?.username || "Guest"} left the panel`);
+      }
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
     }
 
@@ -1115,6 +1194,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.on("live:panel-video-hidden", handlePanelVideoHidden);
       activeSocket.on("live:panel-layout-changed", handlePanelLayoutChanged);
       activeSocket.on("live:panel-locked", handlePanelLocked);
+      activeSocket.on("live:panel-seat-swapped", handleRoomState);
+      activeSocket.on("live:panel-seat-locked", handleRoomState);
+      activeSocket.on("live:panel-seat-closed", handleRoomState);
       activeSocket.on("live:blocked-from-stream", handleBlockedFromStream);
       activeSocket.on("live:user-blocked", handleUserBlocked);
       activeSocket.on("live:ended", handleEnded);
@@ -1995,6 +2077,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }
 
     const currentLocalStream = previewStreamRef.current;
+    const currentAudioTrack = activeAudioTrackFor(currentLocalStream);
     const nextFacingMode = liveFacingMode === "user" ? "environment" : "user";
 
     setSwitchingCamera(true);
@@ -2016,24 +2099,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           throw cameraError;
         }
 
-        const deviceId = await cameraDeviceForFacingMode(nextFacingMode);
         cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
-          video: deviceId
-            ? {
-                deviceId: { exact: deviceId },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              }
-            : {
-                facingMode: { ideal: nextFacingMode },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-              },
+          video: await videoConstraintsForFacingMode(nextFacingMode),
           audio: false,
         });
       }
-      const [nextVideoTrack] = cameraOnlyStream.getVideoTracks();
 
+      const [nextVideoTrack] = cameraOnlyStream.getVideoTracks();
       if (!nextVideoTrack) {
         cameraOnlyStream.getTracks().forEach((track) => track.stop());
         throw new Error("Camera track unavailable");
@@ -2044,13 +2116,21 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       const previousVideoTracks = nextLocalStream.getVideoTracks();
       previousVideoTracks.forEach((track) => nextLocalStream.removeTrack(track));
       nextLocalStream.addTrack(nextVideoTrack);
+      if (currentAudioTrack && !nextLocalStream.getAudioTracks().some((track) => track.id === currentAudioTrack.id)) {
+        nextLocalStream.addTrack(currentAudioTrack);
+      }
       ensureMediaTrackState(nextLocalStream, { audioEnabled: !muted, videoEnabled: cameraEnabled });
 
       const replacements = [];
       peerConnectionsRef.current.forEach((connection) => {
         if (!connection || connection.connectionState === "closed") return;
 
-        const videoSender = connection.getSenders().find((sender) => sender.track?.kind === "video");
+        const senders = connection.getSenders();
+        const videoSender = senders.find((sender) => sender.track?.kind === "video");
+        const audioSender = senders.find((sender) => sender.track?.kind === "audio");
+        if (!audioSender && currentAudioTrack) {
+          connection.addTrack(currentAudioTrack, nextLocalStream);
+        }
         if (videoSender) {
           replacements.push(videoSender.replaceTrack(nextVideoTrack));
         } else {
@@ -2076,7 +2156,6 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       setSwitchingCamera(false);
     }
   };
-
   const handleToggleMuted = () => {
     setMuted((current) => {
       const nextMuted = !current;
@@ -2145,12 +2224,13 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
   };
 
   const applyRoomState = (payload = {}) => {
-    if (Array.isArray(payload.viewers)) setLiveViewers(payload.viewers);
-    if (Array.isArray(payload.panelUsers)) setPanelUsers(payload.panelUsers.slice(0, PANEL_LIMIT));
-    if (Array.isArray(payload.requests)) setPanelRequests(payload.requests);
-    if (payload.panelLimit) setPanelLimit(Number(payload.panelLimit || PANEL_LIMIT));
-    if (payload.panelLayout) setPanelLayout(payload.panelLayout);
-    if (typeof payload.panelLocked === "boolean") setPanelLocked(payload.panelLocked);
+    const state = payload.roomState || payload;
+    if (Array.isArray(state.viewers)) setLiveViewers(state.viewers);
+    if (Array.isArray(state.panelUsers)) setPanelUsers(state.panelUsers.slice(0, PANEL_LIMIT));
+    if (Array.isArray(state.requests)) setPanelRequests(state.requests);
+    if (state.panelLimit) setPanelLimit(Number(state.panelLimit || PANEL_LIMIT));
+    if (state.panelLayout) setPanelLayout(state.panelLayout);
+    if (typeof state.panelLocked === "boolean") setPanelLocked(state.panelLocked);
   };
   const requestRoomState = (sheet = "") => {
     const activeSocket = socketRef.current;
@@ -2353,6 +2433,56 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
         if (ack.roomState) applyRoomState(ack.roomState);
       }
       setStatusMessage(ack.ok ? (ack.locked ? "Panel requests locked" : "Panel requests open") : ack.error || "Panel lock failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
+
+  const handlePanelSeatLock = (viewer) => {
+    const activeSocket = socketRef.current;
+    const seatIndex = Number(viewer?.seatIndex || 0);
+    if (!activeSocket || !streamId || !isCreator || !seatIndex || viewer?.isHost) return;
+    const targetId = viewer.socketId || viewer.userId || `seat:${seatIndex}`;
+    setPanelBusyId(targetId);
+    activeSocket.emit("live:panel-seat-locked", { streamId, seatIndex, locked: !viewer.seatLocked }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok && ack.roomState) applyRoomState(ack.roomState);
+      setStatusMessage(ack.ok ? (ack.locked ? "Seat locked" : "Seat unlocked") : ack.error || "Seat lock failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
+
+  const handlePanelSeatClose = (viewer) => {
+    const activeSocket = socketRef.current;
+    const seatIndex = Number(viewer?.seatIndex || 0);
+    if (!activeSocket || !streamId || !isCreator || !seatIndex || viewer?.isHost) return;
+    const targetId = viewer.socketId || viewer.userId || `seat:${seatIndex}`;
+    setPanelBusyId(targetId);
+    activeSocket.emit("live:panel-seat-closed", { streamId, seatIndex }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok && ack.roomState) applyRoomState(ack.roomState);
+      setActiveGuest(null);
+      setStatusMessage(ack.ok ? "Seat closed" : ack.error || "Close seat failed");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+    });
+  };
+
+  const handlePanelSeatSwap = (viewer) => {
+    const activeSocket = socketRef.current;
+    if (!activeSocket || !streamId || !isCreator || !viewer || viewer.isHost) return;
+    const guests = panelUsers.filter((guest) => !guest.isHost && (guest.socketId || guest.userId));
+    const currentIndex = guests.findIndex((guest) => (guest.socketId || guest.userId) === (viewer.socketId || viewer.userId));
+    const target = guests.length > 1 ? guests[(currentIndex + 1 + guests.length) % guests.length] : null;
+    if (!target || target === viewer) {
+      setStatusMessage("Add another guest to swap seats");
+      window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
+      return;
+    }
+    const targetId = viewer.socketId || viewer.userId;
+    setPanelBusyId(targetId);
+    activeSocket.emit("live:panel-seat-swap", { streamId, socketId: viewer.socketId, userId: viewer.userId, targetSocketId: target.socketId, targetUserId: target.userId }, (ack = {}) => {
+      setPanelBusyId("");
+      if (ack.ok && ack.roomState) applyRoomState(ack.roomState);
+      setStatusMessage(ack.ok ? "Seats swapped" : ack.error || "Swap failed");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1800);
     });
   };
@@ -2876,7 +3006,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
                   <SafeAvatar user={activeGuest} src={activeGuest.avatar} className="h-10 w-10 rounded-full object-cover" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-black">{activeGuest.username || "Guest"}</p>
-                    <p className="text-[0.64rem] font-bold text-white/50">{activeGuest.isHost ? "Host" : activeGuest.muted ? "Muted guest" : "Panel guest"}</p>
+                    <p className="text-[0.64rem] font-bold text-white/50">{activeGuest.isHost ? "Seat 1 - Host" : `Seat ${activeGuest.seatIndex || ""} - ${activeGuest.muted ? "Muted" : activeGuest.seatLocked ? "Locked" : "Guest"}`}</p>
                   </div>
                   {isCreator && !activeGuest.isHost && (
                     <>

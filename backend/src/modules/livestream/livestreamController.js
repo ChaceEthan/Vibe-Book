@@ -6,6 +6,7 @@
 
 const livestreamService = require("./livestreamService");
 const { getIo } = require("../../socket");
+const { destroyLiveRoom } = require("./livestreamSocket");
 
 const creatorImageFor = (creator = {}) => creator.avatar || creator.profilePicture || creator.profileImage || creator.images?.[0] || "";
 
@@ -144,10 +145,10 @@ const endLiveStream = async (req, res) => {
 
     const updatedStream = await livestreamService.endLiveStream(streamId);
     const payload = formatLiveStreamResponse(updatedStream);
-    getIo()?.to(`stream:${streamId}`).emit("livestream:ended", { stream: payload });
-    getIo()?.to(`stream:${streamId}`).emit("live:ended", { stream: payload });
-    getIo()?.emit("livestream:ended_global", { streamId, stream: payload });
-    getIo()?.emit("live:ended_global", { streamId, stream: payload });
+    const io = getIo();
+    if (io) {
+      destroyLiveRoom(io, streamId, { stream: payload });
+    }
     return res.json({
       ok: true,
       stream: payload,

@@ -83,6 +83,8 @@ const stateFor = (streamId) => {
       invites: new Map(),
       layout: "solo",
       panelLocked: false,
+      lockedSeats: new Set(),
+      closedSeats: new Set(),
       updatedAt: Date.now(),
     });
   }
@@ -103,6 +105,8 @@ const serializeMember = (member = {}) => ({
   approvedAt: member.approvedAt || undefined,
   invitedAt: member.invitedAt || undefined,
   connectionStatus: member.connectionStatus || "connected",
+  seatIndex: Number(member.seatIndex || (member.isHost ? 1 : 0)) || undefined,
+  seatLocked: Boolean(member.seatLocked),
   micEnabled: member.micEnabled !== false,
   cameraEnabled: member.cameraEnabled !== false,
 });
@@ -138,6 +142,17 @@ const serializePanelInvite = (invite = {}) => ({
 
 const pendingRequestKeyFor = (streamId, userId) => `${idOf(streamId)}:${idOf(userId)}`;
 const pendingInviteKeyFor = (streamId, userId) => `${idOf(streamId)}:${idOf(userId)}`;
+const seatNumberFor = (value) => {
+  const seat = Number(value || 0);
+  return Number.isInteger(seat) && seat >= 1 && seat <= LIVE_PANEL_LIMIT ? seat : 0;
+};
+const firstAvailablePanelSeat = (state) => {
+  const usedSeats = new Set(Array.from(state.panel.values()).map((member) => seatNumberFor(member.seatIndex)).filter(Boolean));
+  for (let seat = 2; seat <= LIVE_PANEL_LIMIT; seat += 1) {
+    if (!usedSeats.has(seat) && !state.closedSeats.has(seat)) return seat;
+  }
+  return 0;
+};
 
 const cleanupExpiredPanelState = (io, streamId) => {
   const state = stateFor(streamId);
@@ -183,10 +198,19 @@ const roomSnapshotFor = (streamId) => {
     return String(left.joinedAt || "").localeCompare(String(right.joinedAt || ""));
   };
 
+  const panelUsers = Array.from(state.panel.values())
+    .map((member) => ({
+      ...member,
+      seatLocked: state.lockedSeats.has(seatNumberFor(member.seatIndex)),
+    }))
+    .map(serializeMember)
+    .sort((left, right) => Number(left.seatIndex || 99) - Number(right.seatIndex || 99) || byHostThenJoin(left, right))
+    .slice(0, LIVE_PANEL_LIMIT);
+
   return {
     streamId: idOf(streamId),
     viewers: uniqueViewersForSnapshot(state).map(serializeMember).sort(byHostThenJoin),
-    panelUsers: Array.from(state.panel.values()).map(serializeMember).sort(byHostThenJoin).slice(0, LIVE_PANEL_LIMIT),
+    panelUsers,
     requests: Array.from(state.requests.values()).filter((request) => request.status === "pending").map(serializePanelRequest).sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || ""))),
     invites: Array.from(state.invites.values()).filter((invite) => invite.status === "pending").map(serializePanelInvite).sort((left, right) => String(left.createdAt || "").localeCompare(String(right.createdAt || ""))),
     panelLimit: LIVE_PANEL_LIMIT,
@@ -234,7 +258,7 @@ const upsertLiveRoomMember = (streamId, socket, options = {}) => {
 
   state.viewers.set(socket.id, member);
   if (member.isHost) {
-    state.panel.set(socket.id, { ...member, role: "host" });
+    state.panel.set(socket.id, { ...member, role: "host", seatIndex: 1 });
   }
   state.updatedAt = Date.now();
   return member;
@@ -313,6 +337,10 @@ const leaveTrackedLiveSession = async (io, socket, reason = "leave") => {
     return null;
   }
 
+  const previousState = liveRoomState.get(live.streamId);
+  const leavingMember = previousState?.viewers?.get(socket.id);
+  const hostLeaving = Boolean(leavingMember?.isHost);
+
   socket.leave(roomFor(live.streamId));
   socket.data.livestream = null;
   const remainingRoomState = removeLiveRoomMember(live.streamId, socket.id);
@@ -333,6 +361,12 @@ const leaveTrackedLiveSession = async (io, socket, reason = "leave") => {
     reason,
     timestamp: nowIso(),
   });
+  if (hostLeaving) {
+    const endedStream = await livestreamService.endLiveStream(live.streamId).catch(() => null);
+    destroyLiveRoom(io, live.streamId, endedStream ? { stream: endedStream } : {});
+    return null;
+  }
+
   if (remainingRoomState) {
     emitLiveRoomState(io, live.streamId);
   }
@@ -340,6 +374,19 @@ const leaveTrackedLiveSession = async (io, socket, reason = "leave") => {
   return emitViewerCount(io, live.streamId).catch(() => null);
 };
 
+
+const destroyLiveRoom = (io, streamId, payload = {}) => {
+  const id = idOf(streamId);
+  if (!id) return;
+  const room = roomFor(id);
+  emitLiveRoomEvent(io, id, "live:ended", { streamId: id, ...payload, timestamp: nowIso() });
+  emitLiveRoomEvent(io, id, "livestream:ended", { streamId: id, ...payload, timestamp: nowIso() });
+  io.emit("livestream:ended_global", { streamId: id, ...payload, timestamp: nowIso() });
+  io.emit("live:ended_global", { streamId: id, ...payload, timestamp: nowIso() });
+  io.to(room).emit("live:peer-left", { streamId: id, reason: "live-ended", timestamp: nowIso() });
+  liveRoomState.delete(id);
+  io.in(room).socketsLeave(room);
+};
 const setupLiveStreamSockets = (io) => {
   io.on("connection", (socket) => {
     socket.on("live:join", async (data = {}, callback) => {
@@ -737,7 +784,8 @@ const setupLiveStreamSockets = (io) => {
           callback?.({ ok: false, error: "Panel requests are locked" });
           return;
         }
-        if (state.panel.size >= LIVE_PANEL_LIMIT) {
+        const nextSeat = firstAvailablePanelSeat(state);
+        if (state.panel.size >= LIVE_PANEL_LIMIT || !nextSeat) {
           callback?.({ ok: false, error: "Panel is full" });
           return;
         }
@@ -870,7 +918,8 @@ const setupLiveStreamSockets = (io) => {
 
         cleanupExpiredPanelState(io, streamId);
         const state = stateFor(streamId);
-        if (state.panel.size >= LIVE_PANEL_LIMIT) {
+        const nextSeat = firstAvailablePanelSeat(state);
+        if (state.panel.size >= LIVE_PANEL_LIMIT || !nextSeat) {
           callback?.({ ok: false, error: "Panel is full" });
           return;
         }
@@ -950,7 +999,8 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
         const state = stateFor(streamId);
-        if (state.panel.size >= LIVE_PANEL_LIMIT) {
+        const nextSeat = firstAvailablePanelSeat(state);
+        if (state.panel.size >= LIVE_PANEL_LIMIT || !nextSeat) {
           callback?.({ ok: false, error: "Panel is full" });
           return;
         }
@@ -969,6 +1019,8 @@ const setupLiveStreamSockets = (io) => {
           micEnabled: data.micEnabled !== false,
           cameraEnabled: data.cameraEnabled !== false,
           connectionStatus: "connecting",
+          seatIndex: nextSeat,
+          seatLocked: state.lockedSeats.has(nextSeat),
           joinedAt: nowIso(),
         };
         state.panel.set(socket.id, panelMember);
@@ -1017,7 +1069,8 @@ const setupLiveStreamSockets = (io) => {
           return;
         }
         state.panel.delete(member.socketId);
-        io.to(member.socketId).emit("live:panel-guest-removed", { streamId, reason: data.reason || "removed", timestamp: nowIso() });
+        io.to(roomFor(streamId)).emit("live:peer-left", { streamId, socketId: member.socketId, reason: "panel-remove", timestamp: nowIso() });
+        io.to(member.socketId).emit("live:panel-guest-removed", { streamId, socketId: member.socketId, userId: member.userId, reason: data.reason || "removed", timestamp: nowIso() });
         io.to(member.socketId).emit("live:panel-removed", { streamId, reason: data.reason || "removed", timestamp: nowIso() });
         const roomState = emitLiveRoomState(io, streamId);
         emitLiveRoomEvent(io, streamId, "live:panel-guest-removed", { streamId, panelUser: serializeMember(member), roomState, timestamp: nowIso() });
@@ -1123,6 +1176,96 @@ const setupLiveStreamSockets = (io) => {
         callback?.({ ok: true, locked: state.panelLocked, roomState });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to update panel lock" });
+      }
+    });
+
+    socket.on("live:panel-seat-swap", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        if (!streamId) {
+          callback?.({ ok: false, error: "Stream ID required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can swap panel seats" });
+          return;
+        }
+        const state = stateFor(streamId);
+        const left = findLiveRoomMember(streamId, data.socketId || data.userId);
+        const right = findLiveRoomMember(streamId, data.targetSocketId || data.targetUserId);
+        if (!left || !right || left.isHost || right.isHost || !state.panel.has(left.socketId) || !state.panel.has(right.socketId)) {
+          callback?.({ ok: false, error: "Two panel guests are required" });
+          return;
+        }
+        const leftPanel = state.panel.get(left.socketId);
+        const rightPanel = state.panel.get(right.socketId);
+        const leftSeat = seatNumberFor(leftPanel.seatIndex);
+        const rightSeat = seatNumberFor(rightPanel.seatIndex);
+        if (state.lockedSeats.has(leftSeat) || state.lockedSeats.has(rightSeat)) {
+          callback?.({ ok: false, error: "Unlock seats before swapping" });
+          return;
+        }
+        state.panel.set(left.socketId, { ...leftPanel, seatIndex: rightSeat });
+        state.panel.set(right.socketId, { ...rightPanel, seatIndex: leftSeat });
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-seat-swapped", { streamId, roomState, timestamp: nowIso() });
+        callback?.({ ok: true, roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to swap seats" });
+      }
+    });
+
+    socket.on("live:panel-seat-locked", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const seat = seatNumberFor(data.seatIndex || data.seat);
+        if (!streamId || !seat || seat === 1) {
+          callback?.({ ok: false, error: "Valid guest seat required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can lock panel seats" });
+          return;
+        }
+        const state = stateFor(streamId);
+        if (data.locked === false) state.lockedSeats.delete(seat);
+        else state.lockedSeats.add(seat);
+        const member = Array.from(state.panel.values()).find((item) => seatNumberFor(item.seatIndex) === seat);
+        if (member) state.panel.set(member.socketId, { ...member, seatLocked: state.lockedSeats.has(seat) });
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-seat-locked", { streamId, seatIndex: seat, locked: state.lockedSeats.has(seat), roomState, timestamp: nowIso() });
+        callback?.({ ok: true, seatIndex: seat, locked: state.lockedSeats.has(seat), roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to update seat lock" });
+      }
+    });
+
+    socket.on("live:panel-seat-closed", async (data = {}, callback) => {
+      try {
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        const seat = seatNumberFor(data.seatIndex || data.seat);
+        if (!streamId || !seat || seat === 1) {
+          callback?.({ ok: false, error: "Valid guest seat required" });
+          return;
+        }
+        if (!(await socketIsHost(streamId, socket))) {
+          callback?.({ ok: false, error: "Only host can close panel seats" });
+          return;
+        }
+        const state = stateFor(streamId);
+        const member = Array.from(state.panel.values()).find((item) => seatNumberFor(item.seatIndex) === seat);
+        state.closedSeats.add(seat);
+        state.lockedSeats.delete(seat);
+        if (member && !member.isHost) {
+          state.panel.delete(member.socketId);
+          io.to(roomFor(streamId)).emit("live:peer-left", { streamId, socketId: member.socketId, reason: "seat-closed", timestamp: nowIso() });
+          io.to(member.socketId).emit("live:panel-guest-removed", { streamId, socketId: member.socketId, userId: member.userId, reason: "seat-closed", timestamp: nowIso() });
+        }
+        const roomState = emitLiveRoomState(io, streamId);
+        emitLiveRoomEvent(io, streamId, "live:panel-seat-closed", { streamId, seatIndex: seat, roomState, timestamp: nowIso() });
+        callback?.({ ok: true, seatIndex: seat, roomState });
+      } catch (error) {
+        callback?.({ ok: false, error: error.message || "Unable to close seat" });
       }
     });
     socket.on("live:report", async (data = {}, callback) => {
@@ -1400,4 +1543,4 @@ const setupLiveStreamSockets = (io) => {
   });
 };
 
-module.exports = { setupLiveStreamSockets };
+module.exports = { setupLiveStreamSockets, destroyLiveRoom };
