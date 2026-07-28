@@ -380,9 +380,8 @@ const sendDirectMessage = async (req, res, next) => {
     const realtimeMessage = serializeRealtimeMessage(populatedMessage);
     const io = getIo();
 
-    io?.to(recipient._id.toString()).emit("direct:message", populatedMessage);
-    io?.to(recipient._id.toString()).emit("receive_message", realtimeMessage);
-    io?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
+    io?.to(recipient._id.toString()).emit("chat:message", { ...realtimeMessage, type: "direct-message" });
+    io?.to(req.user._id.toString()).emit("chat:message", { ...realtimeMessage, type: "direct-message" });
     io?.to(req.user._id.toString()).emit("message:delivery", {
       messageId: populatedMessage._id,
       clientId: populatedMessage.clientId,
@@ -393,7 +392,7 @@ const sendDirectMessage = async (req, res, next) => {
     await emitUnreadCount(recipient._id);
     queueNotification({
       userId: recipient._id,
-      type: "message",
+      type: "direct_message",
       title: "New message",
       message: `${req.user.name || "Someone"} sent you a message`,
       actorId: req.user._id,
@@ -524,12 +523,12 @@ const replyToMessage = async (req, res, next) => {
     const realtimeMessage = serializeRealtimeMessage(populatedReply);
     const io = getIo();
 
-    io?.to(idOf(recipient)).emit("receive_message", realtimeMessage);
-    io?.to(req.user._id.toString()).emit("receive_message", realtimeMessage);
+    io?.to(idOf(recipient)).emit("chat:message", { ...realtimeMessage, type: "direct-message" });
+    io?.to(req.user._id.toString()).emit("chat:message", { ...realtimeMessage, type: "direct-message" });
     await emitUnreadCount(recipient);
     queueNotification({
       userId: recipient,
-      type: "message",
+      type: "direct_message",
       title: "New message",
       message: `${req.user.name || "Someone"} replied to you`,
       actorId: req.user._id,

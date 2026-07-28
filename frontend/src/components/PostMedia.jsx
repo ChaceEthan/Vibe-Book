@@ -11,7 +11,6 @@ const PostMedia = ({
   controls = true,
   loop = false,
   muted = false,
-  preload = "auto",
   managedPlayback = false,
   active = true,
   soundEnabled = !muted,
@@ -183,7 +182,7 @@ const PostMedia = ({
       });
     }
 
-    if (retryCount < 4) {
+    if (retryCount < 1) {
       setProcessing(isVideo);
       if (retryTimerRef.current) {
         window.clearTimeout(retryTimerRef.current);
@@ -383,7 +382,7 @@ const PostMedia = ({
           playsInline
           controls={controls}
           autoPlay={autoPlay}
-          preload={minimal ? "metadata" : preload}
+          preload="metadata"
           poster={poster || undefined}
           disablePictureInPicture
           controlsList="nodownload noplaybackrate"

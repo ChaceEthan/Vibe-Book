@@ -568,13 +568,14 @@ const setupLiveStreamSockets = (io) => {
 
         const payload = {
           id: clientId || `${socket.id}:${Date.now()}`,
+          type: "live-comment",
           streamId,
           ...viewerPayloadFor(socket, data.username),
           text: filterResult.text,
           timestamp: nowIso(),
         };
 
-        emitLiveRoomEvent(io, streamId, "live:message", payload);
+        emitLiveRoomEvent(io, streamId, "live:comment", payload);
         callback?.({ ok: true, comment: payload });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to send comment" });
@@ -715,7 +716,7 @@ const setupLiveStreamSockets = (io) => {
       }
     };
 
-    socket.on("live:message", handleLiveComment);
+    socket.on("live:comment", handleLiveComment);
     socket.on("live:reaction", handleLiveReaction);
     socket.on("live:double-tap", (data = {}, callback) => {
       try {

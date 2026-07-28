@@ -1,6 +1,5 @@
 // @ts-nocheck
 const jwt = require("jsonwebtoken");
-const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 
 const ChatMessage = require("./models/ChatMessage");
@@ -10,6 +9,7 @@ const Message = require("./models/Message");
 const User = require("./models/User");
 const VisitorStat = require("./models/VisitorStat");
 const { validateChatMessage } = require("./utils/chatModeration");
+const { isGroupMember, normalizeMemberId } = require("./utils/groupMembership");
 const { createNotification } = require("./utils/notifications");
 const { initializeWalletSockets } = require("./modules/wallet/walletSocket");
 const { setupLiveStreamSockets } = require("./modules/livestream/livestreamSocket");
@@ -89,10 +89,7 @@ const removeOnlineUser = (userId, socketId) => {
 const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
 const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
-const normalizeObjectId = (value) => {
-  const id = value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
-  return mongoose.isValidObjectId(id) ? id : "";
-};
+const normalizeObjectId = normalizeMemberId;
 const queueNotification = (payload) => {
   createNotification(payload).catch((error) => {
     logSocketError("socket:notification", error);
@@ -109,7 +106,9 @@ const textMentionsName = (text = "", name = "") => {
 };
 
 const serializeDirectMessage = (message) => ({
+  id: message._id,
   _id: message._id,
+  type: "direct-message",
   chatId: message.chatId,
   clientId: message.clientId,
   senderId: message.senderId || message.sender?.toString?.() || "",
@@ -133,15 +132,24 @@ const serializeDirectMessage = (message) => ({
 });
 
 const serializeGroupMessage = (message) => ({
+  id: message._id,
   _id: message._id,
   clientId: message.clientId,
   group: message.group,
   groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
   sender: message.sender,
   senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
+  senderName: message.sender?.name || "User",
+  senderAvatar:
+    message.sender?.profilePicture ||
+    message.sender?.profileImage ||
+    message.sender?.images?.[0] ||
+    message.sender?.gallery?.[0] ||
+    "",
   message: message.deletedAt ? "This message was deleted" : message.message,
   text: message.deletedAt ? "This message was deleted" : message.message,
-  type: message.type || "message",
+  type: "group-message",
+  messageType: message.type || "message",
   attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
   replyTo: message.replyTo,
   replyPreview: message.replyPreview,
@@ -149,15 +157,10 @@ const serializeGroupMessage = (message) => ({
   deletedBy: message.deletedBy,
   createdAt: message.createdAt,
   timestamp: message.createdAt,
+  status: "sent",
 });
 
-const userIsGroupMember = (group, userId) => {
-  const id = userId?.toString?.() || String(userId || "");
-  return Array.isArray(group?.members) && group.members.some((member) => {
-    const memberId = member?._id?.toString?.() || member?.toString?.() || "";
-    return memberId === id;
-  });
-};
+const userIsGroupMember = isGroupMember;
 
 const roleForGroup = (group, userId) => {
   const targetId = idOf(userId);
@@ -223,12 +226,11 @@ const buildGroupReplyPreview = async (groupId, replyToId) => {
 };
 
 const joinUserGroupRooms = async (socket, userId) => {
-  const groups = await ChatGroup.find({
-    members: userId,
-    isActive: true,
-  }).select("_id");
+  const groups = await ChatGroup.find({ isActive: true }).select("_id members");
 
-  groups.forEach((group) => socket.join(groupRoomFor(group._id)));
+  groups
+    .filter((group) => userIsGroupMember(group, userId))
+    .forEach((group) => socket.join(groupRoomFor(group._id)));
 };
 
 const unreadCountFor = (userId) =>
@@ -482,8 +484,8 @@ const initSocket = (server, corsOptions = {}) => {
         ]);
         const messagePayload = serializeDirectMessage(directMessage);
 
-        ioInstance.to(receiver._id.toString()).emit("receive_message", messagePayload);
-        ioInstance.to(userId).emit("receive_message", messagePayload);
+        ioInstance.to(receiver._id.toString()).emit("chat:message", messagePayload);
+        ioInstance.to(userId).emit("chat:message", messagePayload);
         ioInstance.to(userId).emit("message:delivery", {
           messageId: directMessage._id,
           clientId: directMessage.clientId,
@@ -494,7 +496,7 @@ const initSocket = (server, corsOptions = {}) => {
         await emitUnreadCount(receiver._id);
         queueNotification({
           userId: receiver._id,
-          type: "message",
+          type: "direct_message",
           title: "New message",
           message: `${socket.user.name || "Someone"} sent you a message`,
           actorId: socket.user._id,
@@ -689,10 +691,9 @@ const initSocket = (server, corsOptions = {}) => {
         const group = await ChatGroup.findOne({
           _id: groupId,
           isActive: true,
-          members: userId,
         });
 
-        if (!group) {
+        if (!group || !userIsGroupMember(group, userId)) {
           callback?.({ success: false, message: "You are not a member of this group" });
           return;
         }
@@ -712,11 +713,7 @@ const initSocket = (server, corsOptions = {}) => {
 
         const room = groupRoomFor(group._id);
         const messagePayload = serializeGroupMessage(groupMessage);
-        ioInstance.to(room).emit("receive_group_message", messagePayload);
-        ioInstance.to(room).emit("group:message", {
-          groupId: group._id,
-          message: messagePayload,
-        });
+        ioInstance.to(room).emit("group:message", messagePayload);
         User.find({ _id: { $in: group.members }, isBlocked: false })
           .select("name")
           .then((members) => {
@@ -727,7 +724,7 @@ const initSocket = (server, corsOptions = {}) => {
 
                 queueNotification({
                   userId: member._id,
-                  type: mentioned ? "mention" : "group_message",
+                  type: mentioned ? "group_mention" : "group_message",
                   title: mentioned ? "You were mentioned" : "New group message",
                   message: `${socket.user.name || "Someone"} posted in ${group.groupName || group.name || "a group"}`,
                   actorId: socket.user._id,

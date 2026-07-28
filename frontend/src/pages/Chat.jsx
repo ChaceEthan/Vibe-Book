@@ -30,7 +30,19 @@ const requestMessage = (requestError, fallback) => {
   return message || fallback;
 };
 
-const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+const idOf = (value) =>
+  value?.userId?._id?.toString?.() ||
+  value?.userId?.id?.toString?.() ||
+  value?.userId?.toString?.() ||
+  value?.user?._id?.toString?.() ||
+  value?.user?.id?.toString?.() ||
+  value?.user?.toString?.() ||
+  value?._id?.toString?.() ||
+  value?.id?.toString?.() ||
+  value?.toString?.() ||
+  "";
+
+const textOf = (value) => (typeof value === "string" ? value : "");
 
 const messageSenderId = (item) => item?.senderId || idOf(item?.sender);
 const messageReceiverId = (item) => item?.receiverId || idOf(item?.recipient || item?.receiver);
@@ -53,13 +65,14 @@ const messageStatus = (item) => {
 
 const normalizeSocketMessage = (item = {}) => ({
   ...item,
+  type: "direct-message",
   senderId: messageSenderId(item),
   receiverId: messageReceiverId(item),
   sender: item.sender || item.senderId,
   recipient: item.recipient || item.receiver || item.receiverId,
   receiver: item.receiver || item.recipient || item.receiverId,
-  message: item.message || item.text || "",
-  text: item.text || item.message || "",
+  message: textOf(item.message) || textOf(item.text),
+  text: textOf(item.text) || textOf(item.message),
   attachments: Array.isArray(item.attachments) ? item.attachments : [],
   replyTo: item.replyTo,
   replyPreview: item.replyPreview,
@@ -78,12 +91,12 @@ const normalizeGroupMessage = (item = {}) => ({
   groupId: item.groupId || idOf(item.group),
   senderId: item.senderId || idOf(item.sender),
   sender: item.sender || item.senderId,
-  message: item.message || "",
+  message: textOf(item.message) || textOf(item.text),
   attachments: Array.isArray(item.attachments) ? item.attachments : [],
   replyTo: item.replyTo,
   replyPreview: item.replyPreview,
   deletedAt: item.deletedAt,
-  type: item.type || "message",
+  type: item.type === "system" || item.messageType === "system" ? "system" : "group-message",
   createdAt: item.createdAt || new Date().toISOString(),
   deliveryStatus: messageStatus(item),
 });
@@ -684,6 +697,9 @@ const Chat = () => {
 
     // Direct message handlers
     const handleReceiveMessage = (payload) => {
+      if (payload?.type && payload.type !== "direct-message") {
+        return;
+      }
       const normalized = normalizeSocketMessage(payload);
       const senderId = normalized.senderId;
       const receiverId = normalized.receiverId;
@@ -731,6 +747,9 @@ const Chat = () => {
 
     // Group message handlers
     const handleGroupMessage = (payload = {}) => {
+      if (payload?.type && payload.type !== "group-message") {
+        return;
+      }
       if (activeTabRef.current !== "groups") {
         scheduleGroupsRefresh();
         return;
@@ -795,11 +814,11 @@ const Chat = () => {
     socket.on("connect", handleConnect);
     socket.on("disconnect", handleDisconnect);
     socket.io.on("reconnect", handleReconnect);
-    socket.on("receive_message", handleReceiveMessage);
+    socket.on("chat:message", handleReceiveMessage);
     socket.on("message:delivery", handleDeliveryUpdate);
     socket.on("message:deleted", handleDirectDeleted);
     socket.on("typing", handleTyping);
-    socket.on("receive_group_message", handleGroupMessage);
+    socket.on("group:message", handleGroupMessage);
     socket.on("group:created", handleGroupCreated);
     socket.on("group:member-joined", handleGroupMembership);
     socket.on("group:member-left", handleGroupMembership);
@@ -818,11 +837,11 @@ const Chat = () => {
       socket.off("connect", handleConnect);
       socket.off("disconnect", handleDisconnect);
       socket.io.off("reconnect", handleReconnect);
-      socket.off("receive_message", handleReceiveMessage);
+      socket.off("chat:message", handleReceiveMessage);
       socket.off("message:delivery", handleDeliveryUpdate);
       socket.off("message:deleted", handleDirectDeleted);
       socket.off("typing", handleTyping);
-      socket.off("receive_group_message", handleGroupMessage);
+      socket.off("group:message", handleGroupMessage);
       socket.off("group:created", handleGroupCreated);
       socket.off("group:member-joined", handleGroupMembership);
       socket.off("group:member-left", handleGroupMembership);
@@ -1422,7 +1441,7 @@ const Chat = () => {
     });
 
   return (
-    <section className="container-page flex h-[100dvh] min-h-0 flex-col overflow-hidden pb-[calc(4.25rem+env(safe-area-inset-bottom))] pt-3 sm:py-6">
+    <section className="container-page flex h-[100dvh] min-h-[100dvh] flex-col overflow-hidden pb-[calc(4.25rem+env(safe-area-inset-bottom))] pt-3 sm:py-6">
       <div className="mb-3 flex shrink-0 flex-col gap-2 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-semibold uppercase text-brand">Chat</p>
@@ -1448,7 +1467,7 @@ const Chat = () => {
         </Link>
       </div>
 
-      <div className="mb-5 grid grid-cols-3 gap-2 rounded-lg bg-white p-1 shadow-soft">
+      <div className="mb-5 grid shrink-0 grid-cols-3 gap-2 rounded-lg bg-white p-1 shadow-soft">
         <button
           type="button"
           className={`rounded-lg px-3 py-2 text-xs font-black sm:text-sm ${activeTab === "direct" ? "bg-brand text-navy" : "text-slate-500"}`}
@@ -1543,7 +1562,7 @@ const Chat = () => {
                 <div ref={bottomRef} />
               </div>
 
-              <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleSend}>
+              <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 backdrop-blur sm:p-3" onSubmit={handleSend}>
                 {directReply && (
                   <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-xs text-slate-600">
                     <Reply className="h-4 w-4 text-brand" />
@@ -1850,7 +1869,7 @@ const Chat = () => {
               )}
               <div ref={groupBottomRef} />
             </div>
-            <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
+            <form className="shrink-0 border-t border-slate-100 bg-white/95 p-2 pb-3 backdrop-blur sm:p-3" onSubmit={handleGroupSend}>
               {groupReply && (
                 <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-xs text-slate-600">
                   <Reply className="h-4 w-4 text-brand" />

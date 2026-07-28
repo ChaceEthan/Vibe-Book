@@ -1,5 +1,6 @@
 // @ts-nocheck
 const mongoose = require("mongoose");
+const { normalizeMemberId } = require("../utils/groupMembership");
 
 const chatGroupSchema = new mongoose.Schema(
   {
@@ -71,7 +72,7 @@ const chatGroupSchema = new mongoose.Schema(
   }
 );
 
-const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+const idOf = normalizeMemberId;
 
 chatGroupSchema.methods.syncGroupAliases = function () {
   if (this.groupName && !this.name) {

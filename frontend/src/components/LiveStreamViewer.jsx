@@ -238,7 +238,7 @@ const liveUserFrom = (data = {}) => {
 
 const sanitizeLiveComment = (data = {}, fallbackText = "") => {
   const user = liveUserFrom(data);
-  const type = data.type === "gift" || data.giftId || data.giftName ? "gift" : "comment";
+  const type = data.type === "gift" || data.giftId || data.giftName ? "gift" : "live-comment";
   const giftName = textFromLiveValue(data.giftName || data.gift?.name || data.gift, "");
   const text = type === "gift"
     ? textFromLiveValue(data.text || data.message, giftName ? `sent ${giftName}` : "sent a gift")
@@ -795,7 +795,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     const cleanupSocketHandlers = () => {
       if (!activeSocket) return;
-      activeSocket.off("live:message", handleComment);
+      activeSocket.off("live:comment", handleComment);
       activeSocket.off("live:reaction", handleReaction);
       activeSocket.off("live:double-tap", handleDoubleTapReaction);
       activeSocket.off("live:gift", handleGift);
@@ -1172,7 +1172,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       if (!activeSocket) return;
 
       cleanupSocketHandlers();
-      activeSocket.on("live:message", handleComment);
+      activeSocket.on("live:comment", handleComment);
       activeSocket.on("live:reaction", handleReaction);
       activeSocket.on("live:double-tap", handleDoubleTapReaction);
       activeSocket.on("live:gift", handleGift);
@@ -1747,8 +1747,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     }, 8000);
 
     activeSocket.emit(
-      "live:message",
+      "live:comment",
       {
+        type: "live-comment",
         streamId,
         clientId,
         text,

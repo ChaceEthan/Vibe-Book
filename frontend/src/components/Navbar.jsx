@@ -139,6 +139,9 @@ const Navbar = () => {
     };
 
     const handleDirectMessage = (payload = {}) => {
+      if (payload.type && payload.type !== "direct-message") {
+        return;
+      }
       const senderId = idOf(payload.sender || payload.senderId);
 
       if (!senderId || senderId === user._id) {
@@ -150,6 +153,9 @@ const Navbar = () => {
     };
 
     const handleGroupMessage = (payload = {}) => {
+      if (payload.type && payload.type !== "group-message") {
+        return;
+      }
       const message = payload.message || payload;
       const senderId = idOf(message.sender || message.senderId);
 
@@ -187,16 +193,16 @@ const Navbar = () => {
       }
     };
 
-    socket.on("receive_message", handleDirectMessage);
-    socket.on("receive_group_message", handleGroupMessage);
+    socket.on("chat:message", handleDirectMessage);
+    socket.on("group:message", handleGroupMessage);
     socket.on("unread:update", handleUnreadUpdate);
     socket.on("livestream:started", handleLiveStarted);
     socket.on("livestream:ended_global", handleLiveEnded);
     socket.on("livestream:viewers_updated_global", handleLiveViewerUpdate);
 
     return () => {
-      socket.off("receive_message", handleDirectMessage);
-      socket.off("receive_group_message", handleGroupMessage);
+      socket.off("chat:message", handleDirectMessage);
+      socket.off("group:message", handleGroupMessage);
       socket.off("unread:update", handleUnreadUpdate);
       socket.off("livestream:started", handleLiveStarted);
       socket.off("livestream:ended_global", handleLiveEnded);

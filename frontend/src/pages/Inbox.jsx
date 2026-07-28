@@ -108,6 +108,9 @@ const Inbox = () => {
     }
 
     const mergeMessage = (payload = {}) => {
+      if (payload.type && payload.type !== "direct-message") {
+        return;
+      }
       const senderId = idOf(payload.sender);
       const receiverId = idOf(payload.recipient || payload.receiver);
       const otherUser = senderId === user._id ? payload.recipient || payload.receiver : payload.sender;
@@ -156,12 +159,12 @@ const Inbox = () => {
       );
     };
 
-    socket.on("receive_message", mergeMessage);
+    socket.on("chat:message", mergeMessage);
     socket.on("typing", handleTyping);
     socket.on("global:stats", handleStats);
 
     return () => {
-      socket.off("receive_message", mergeMessage);
+      socket.off("chat:message", mergeMessage);
       socket.off("typing", handleTyping);
       socket.off("global:stats", handleStats);
       Object.values(typingTimersRef.current).forEach(clearTimeout);

@@ -1,11 +1,10 @@
 // @ts-nocheck
-const mongoose = require("mongoose");
-
 const ChatGroup = require("../models/ChatGroup");
 const GroupMessage = require("../models/GroupMessage");
 const User = require("../models/User");
 const { getIo, isUserOnline } = require("../socket");
 const { sanitizeChatMessage, validateChatMessage } = require("../utils/chatModeration");
+const { isGroupMember, normalizeMemberId } = require("../utils/groupMembership");
 const { createNotification } = require("../utils/notifications");
 
 const memberSelect = "name username role profileImage profilePicture images gallery";
@@ -64,10 +63,7 @@ const saveDocument = async (document, scope) => {
   }
 };
 
-const normalizeId = (value) => {
-  const id = value?._id?.toString?.() || value?.id?.toString?.() || value?.toString?.() || "";
-  return mongoose.isValidObjectId(id) ? id : "";
-};
+const normalizeId = normalizeMemberId;
 
 const uniqueIds = (values = []) => Array.from(new Set(values.map(normalizeId).filter(Boolean)));
 
@@ -96,12 +92,7 @@ const sendGroupError = (res, scope, error, fallback = "Group request failed") =>
   });
 };
 
-const ensureMember = (group, userId) => {
-  const members = Array.isArray(group?.members) ? group.members : [];
-  const targetId = normalizeId(userId);
-
-  return members.some((member) => normalizeId(member) === targetId);
-};
+const ensureMember = isGroupMember;
 
 const roleFor = (group, userId) => {
   const targetId = normalizeId(userId);
@@ -198,7 +189,7 @@ const buildGroupReplyPreview = async (groupId, replyToId) => {
 const serializeGroup = (group, viewerId = "") => {
   const members = Array.isArray(group.members) ? group.members : [];
   const pendingInvites = Array.isArray(group.pendingInvites) ? group.pendingInvites : [];
-  const activeUsers = members.filter((member) => isUserOnline(member?._id || member));
+  const activeUsers = members.filter((member) => isUserOnline(normalizeId(member)));
   const viewer = normalizeId(viewerId);
 
   return {
@@ -228,15 +219,24 @@ const serializeGroup = (group, viewerId = "") => {
 };
 
 const serializeGroupMessage = (message) => ({
+  id: message._id,
   _id: message._id,
   clientId: message.clientId,
   group: message.group,
   groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
   sender: message.sender,
   senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
+  senderName: message.sender?.name || "User",
+  senderAvatar:
+    message.sender?.profilePicture ||
+    message.sender?.profileImage ||
+    message.sender?.images?.[0] ||
+    message.sender?.gallery?.[0] ||
+    "",
   message: message.deletedAt ? "This message was deleted" : message.message,
   text: message.deletedAt ? "This message was deleted" : message.message,
-  type: message.type || "message",
+  type: "group-message",
+  messageType: message.type || "message",
   attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
   replyTo: message.replyTo,
   replyPreview: message.replyPreview,
@@ -244,19 +244,25 @@ const serializeGroupMessage = (message) => ({
   deletedBy: message.deletedBy,
   createdAt: message.createdAt,
   timestamp: message.createdAt,
+  status: "sent",
 });
 
 const listGroups = async (req, res) => {
   try {
-    const groups = await ChatGroup.find({
-      isActive: true,
-      $or: [{ members: req.user._id }, { pendingInvites: req.user._id }, { visibility: "public" }],
-    })
+    const groups = await ChatGroup.find({ isActive: true })
       .populate("members", memberSelect)
       .populate("pendingInvites", memberSelect)
       .sort({ updatedAt: -1 });
+    const visibleGroups = groups.filter(
+      (group) =>
+        group.visibility === "public" ||
+        ensureMember(group, req.user._id) ||
+        (group.pendingInvites || []).some(
+          (member) => normalizeId(member) === normalizeId(req.user._id)
+        )
+    );
 
-    return res.json({ groups: groups.map((group) => serializeGroup(group, req.user._id)) });
+    return res.json({ groups: visibleGroups.map((group) => serializeGroup(group, req.user._id)) });
   } catch (error) {
     return sendGroupError(res, "group:list", error, "Unable to load groups");
   }
@@ -679,11 +685,7 @@ const sendGroupMessage = async (req, res) => {
     const messagePayload = serializeGroupMessage(groupMessage);
     const io = getIo();
 
-    io?.to(groupRoomFor(group._id)).emit("receive_group_message", messagePayload);
-    io?.to(groupRoomFor(group._id)).emit("group:message", {
-      groupId: group._id,
-      message: messagePayload,
-    });
+    io?.to(groupRoomFor(group._id)).emit("group:message", messagePayload);
 
     User.find({ _id: { $in: group.members }, isBlocked: false })
       .select("name")
@@ -695,7 +697,7 @@ const sendGroupMessage = async (req, res) => {
 
             queueNotification({
               userId: member._id,
-              type: mentioned ? "mention" : "group_message",
+              type: mentioned ? "group_mention" : "group_message",
               title: mentioned ? "You were mentioned" : "New group message",
               message: `${req.user.name || "Someone"} posted in ${group.groupName || group.name || "a group"}`,
               actorId: req.user._id,
