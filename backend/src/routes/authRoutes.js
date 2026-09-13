@@ -19,14 +19,28 @@ const emailOtpLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Too many email verification requests. Please try again soon." },
 });
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many login attempts. Please try again in a few minutes." },
+});
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many registration attempts. Please try again later." },
+});
 
 router.get("/", (req, res) => {
   return res.json({ message: "Auth API is ready" });
 });
 
 router.get("/check", checkAvailability);
-router.post("/register", register);
-router.post("/login", login);
+router.post("/register", registerLimiter, register);
+router.post("/login", loginLimiter, login);
 router.post("/send-email-code", authMiddleware, emailOtpLimiter, sendEmailCode);
 router.post("/verify-email-code", authMiddleware, emailOtpLimiter, verifyEmailCode);
 router.post("/send-phone-code", authMiddleware, phoneOtpLimiter, sendPhoneCode);
