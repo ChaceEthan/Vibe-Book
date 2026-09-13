@@ -103,13 +103,22 @@ export const getSocket = (token = getStoredToken(), extraAuth = {}) => {
 
   socket.on("connect_error", (error) => {
     connectRequested = false;
-    if (/unauthorized|jwt|token/i.test(error?.message || "")) {
+    const authCode = error?.data?.code;
+    const AUTH_CODES = new Set([
+      "TOKEN_MISSING",
+      "TOKEN_EXPIRED",
+      "TOKEN_INVALID",
+      "USER_NOT_FOUND",
+      "ACCOUNT_BLOCKED",
+      "ACCOUNT_SUSPENDED",
+    ]);
+    if (authCode && AUTH_CODES.has(authCode)) {
       if (typeof window !== "undefined") {
         window.dispatchEvent(
           new CustomEvent("vibebook:auth-invalid", {
             detail: {
-              code: "SOCKET_AUTH_INVALID",
-              message: "Your realtime session expired. Please log in again.",
+              code: authCode,
+              message: error.data.message || "Your realtime session expired. Please log in again.",
             },
           })
         );

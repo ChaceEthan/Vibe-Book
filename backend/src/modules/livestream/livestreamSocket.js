@@ -241,7 +241,7 @@ const ensureSocketInLiveRoom = (socket, streamId) => {
   };
 };
 
-const upsertLiveRoomMember = (streamId, socket, options = {}) => {
+const upsertLiveRoomMember = (io, streamId, socket, options = {}) => {
   const state = stateFor(streamId);
   const existing = state.viewers.get(socket.id) || {};
   const member = {
@@ -255,6 +255,21 @@ const upsertLiveRoomMember = (streamId, socket, options = {}) => {
     joinedAt: existing.joinedAt || nowIso(),
     lastSeenAt: nowIso(),
   };
+
+  // A reconnecting user gets a new socket.id; drop any stale entries left
+  // behind under their old socket id so peer connections don't leak/duplicate.
+  if (member.userId) {
+    for (const [otherSocketId, otherMember] of state.viewers.entries()) {
+      if (otherSocketId === socket.id) continue;
+      if (String(otherMember.userId || "") !== String(member.userId)) continue;
+
+      state.viewers.delete(otherSocketId);
+      state.panel.delete(otherSocketId);
+      if (io) {
+        emitLiveRoomEvent(io, streamId, "live:peer-left", { streamId: idOf(streamId), socketId: otherSocketId, reason: "reconnected" });
+      }
+    }
+  }
 
   state.viewers.set(socket.id, member);
   if (member.isHost) {
@@ -428,7 +443,7 @@ const setupLiveStreamSockets = (io) => {
         const streamDetails = streamPayload ? { stream: streamPayload } : await livestreamService.getStreamDetails(streamId).catch(() => null);
         const creatorId = idOf(streamDetails?.stream?.creatorId);
         const isHost = Boolean(creatorId && creatorId === idOf(socket.user?._id));
-        upsertLiveRoomMember(streamId, socket, {
+        upsertLiveRoomMember(io, streamId, socket, {
           username: data.username,
           isHost,
           role: isHost ? "host" : "viewer",
@@ -755,7 +770,7 @@ const setupLiveStreamSockets = (io) => {
         }
 
         ensureSocketInLiveRoom(socket, streamId);
-        upsertLiveRoomMember(streamId, socket, { username: data.username });
+        upsertLiveRoomMember(io, streamId, socket, { username: data.username });
         callback?.({ ok: true, ...roomSnapshotFor(streamId) });
       } catch (error) {
         callback?.({ ok: false, error: error.message || "Unable to load viewers" });
@@ -774,7 +789,7 @@ const setupLiveStreamSockets = (io) => {
         cleanupExpiredPanelState(io, streamId);
         ensureSocketInLiveRoom(socket, streamId);
         const state = stateFor(streamId);
-        const member = upsertLiveRoomMember(streamId, socket, { username: data.username });
+        const member = upsertLiveRoomMember(io, streamId, socket, { username: data.username });
         const requestKey = pendingRequestKeyFor(streamId, viewerUserId);
 
         if (member.isHost) {
@@ -1012,7 +1027,7 @@ const setupLiveStreamSockets = (io) => {
           callback?.({ ok: false, error: "Host approval is required before joining panel" });
           return;
         }
-        const member = upsertLiveRoomMember(streamId, socket, { username: data.username, role: "guest" });
+        const member = upsertLiveRoomMember(io, streamId, socket, { username: data.username, role: "guest" });
         const panelMember = {
           ...member,
           role: "guest",
@@ -1480,7 +1495,7 @@ const setupLiveStreamSockets = (io) => {
         callback?.({ ok: false, error: "Only the host can publish live video" });
         return;
       }
-      upsertLiveRoomMember(streamId, socket, { isHost: true, role: "host" });
+      upsertLiveRoomMember(io, streamId, socket, { isHost: true, role: "host" });
 
       traceWebRtc("creator-ready", { streamId, creatorSocketId: socket.id });
       socket.to(roomFor(streamId)).emit("live:creator-ready", {
@@ -1499,7 +1514,7 @@ const setupLiveStreamSockets = (io) => {
       }
 
       ensureSocketInLiveRoom(socket, streamId);
-      upsertLiveRoomMember(streamId, socket, { username: data.username });
+      upsertLiveRoomMember(io, streamId, socket, { username: data.username });
 
       const payload = {
         streamId,
@@ -1517,6 +1532,28 @@ const setupLiveStreamSockets = (io) => {
       }
 
       callback?.({ ok: true, hosts: hosts.length });
+    });
+
+    socket.on("live:host-media-error", async (data = {}, callback) => {
+      const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+      if (!streamId) {
+        callback?.({ ok: false, error: "Stream ID required" });
+        return;
+      }
+
+      if (!(await socketIsHost(streamId, socket))) {
+        callback?.({ ok: false, error: "Only the host can report media errors" });
+        return;
+      }
+
+      const message = typeof data.message === "string" ? data.message.slice(0, 200) : "The host's camera/microphone is unavailable.";
+      traceWebRtc("host-media-error", { streamId, hostSocketId: socket.id, message });
+      socket.to(roomFor(streamId)).emit("live:host-media-error", {
+        streamId,
+        message,
+        timestamp: nowIso(),
+      });
+      callback?.({ ok: true });
     });
 
     socket.on("live:webrtc-offer", (data = {}, callback) => relayWebRtcPayload("live:webrtc-offer", data, callback));

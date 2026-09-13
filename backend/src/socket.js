@@ -316,6 +316,14 @@ const normalizeSocketToken = (value = "") => {
   return /^(undefined|null|false|nan)$/i.test(token) ? "" : token;
 };
 
+class SocketAuthError extends Error {
+  constructor(code, message) {
+    super(code);
+    this.code = code;
+    this.userMessage = message;
+  }
+}
+
 const getUserFromSocket = async (socket) => {
   const token = normalizeSocketToken(
     socket.handshake.auth?.token ||
@@ -324,12 +332,36 @@ const getUserFromSocket = async (socket) => {
   );
 
   if (!token) {
-    return null;
+    throw new SocketAuthError("TOKEN_MISSING", "Authentication required. Please log in again.");
   }
 
-  const decoded = jwt.verify(token, process.env.JWT_SECRET);
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (error) {
+    const expired = error?.name === "TokenExpiredError";
+    throw new SocketAuthError(
+      expired ? "TOKEN_EXPIRED" : "TOKEN_INVALID",
+      expired ? "Session expired. Please log in again." : "Authentication failed. Please log in again."
+    );
+  }
+
   const userId = decoded.id || decoded._id || decoded.userId || decoded.sub;
-  return User.findById(userId).select("-password");
+  const user = await User.findById(userId).select("-password");
+
+  if (!user) {
+    throw new SocketAuthError("USER_NOT_FOUND", "Authentication expired. Please log in again.");
+  }
+
+  if (user.isBlocked) {
+    throw new SocketAuthError("ACCOUNT_BLOCKED", "Your account is blocked");
+  }
+
+  if (user.accountStatus === "suspended") {
+    throw new SocketAuthError("ACCOUNT_SUSPENDED", "Your account has been suspended");
+  }
+
+  return user;
 };
 
 const initSocket = (server, corsOptions = {}) => {
@@ -371,17 +403,15 @@ const initSocket = (server, corsOptions = {}) => {
   ioInstance.use(async (socket, next) => {
     try {
       const user = await getUserFromSocket(socket);
-
-      if (!user || user.isBlocked || user.accountStatus === "suspended") {
-        warnSocketOnce("auth:unauthorized", `[socket] unauthorized connection attempts are being rejected`);
-        return next(new Error("Unauthorized"));
-      }
-
       socket.user = user;
       return next();
     } catch (error) {
-      warnSocketOnce("auth:failed", `[socket] authentication failures are being rejected: ${error.message}`);
-      return next(new Error("Unauthorized"));
+      const code = error instanceof SocketAuthError ? error.code : "TOKEN_INVALID";
+      const userMessage = error instanceof SocketAuthError ? error.userMessage : "Authentication failed. Please log in again.";
+      warnSocketOnce(`auth:${code}`, `[socket] authentication rejected (${code}): ${error.message}`);
+      const authError = new Error(code);
+      authError.data = { code, message: userMessage };
+      return next(authError);
     }
   });
 

@@ -62,7 +62,9 @@ const TURN_ICE_SERVER = TURN_URLS.length
       ...(TURN_CREDENTIAL ? { credential: TURN_CREDENTIAL } : {}),
     }
   : null;
-const traceWebRtc = (event, details = {}) => console.info(`[webrtc]${String(event).startsWith("[") ? "" : " "}${event}`, details);
+const traceWebRtc = import.meta.env.DEV
+  ? (event, details = {}) => console.info(`[webrtc]${String(event).startsWith("[") ? "" : " "}${event}`, details)
+  : () => {};
 
 const PEER_CONNECTION_CONFIG = {
   iceServers: [
@@ -711,7 +713,9 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       socketRef.current?.emit("live:creator-ready", { streamId });
     }).catch((error) => {
       if (canceled || creatorCameraRequestRef.current !== requestId) return;
-      setStatusMessage(error?.name === "NotAllowedError" ? "Camera permission was denied" : "Camera could not restart");
+      const message = error?.name === "NotAllowedError" ? "Camera permission was denied" : "Camera could not restart";
+      setStatusMessage(message);
+      socketRef.current?.emit("live:host-media-error", { streamId, message });
     });
 
     return () => {
@@ -1431,7 +1435,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
             return;
           }
           closePeerConnection(peerId);
-          if (!isCreatorRef.current) scheduleVideoRequests([900]);
+          if (!isCreatorRef.current) {
+            scheduleVideoRequests([900]);
+            if (!TURN_ICE_SERVER) {
+              setStatusMessage("Connection failed. This network may require a TURN relay server, which isn't configured.");
+            }
+          }
           return;
         }
         if (state === "disconnected" && !peerRecoveryTimersRef.current.has(peerId)) {
@@ -1645,6 +1654,12 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       }
     };
 
+    const handleHostMediaError = (data = {}) => {
+      if (data.streamId && data.streamId !== streamId) return;
+      if (isCreatorRef.current) return;
+      setStatusMessage(data.message || "The host's camera is unavailable right now.");
+    };
+
     webrtcReadyRef.current = true;
     activeSocket.on("live:viewer-ready", handleViewerReady);
     activeSocket.on("live:creator-ready", handleCreatorReady);
@@ -1652,6 +1667,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
     activeSocket.on("live:webrtc-answer", handleAnswer);
     activeSocket.on("live:webrtc-ice", handleIce);
     activeSocket.on("live:peer-left", handlePeerLeft);
+    activeSocket.on("live:host-media-error", handleHostMediaError);
     activeSocket.on("connect", handleConnect);
 
     if (isCreator) {
@@ -1670,6 +1686,7 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       activeSocket.off("live:webrtc-answer", handleAnswer);
       activeSocket.off("live:webrtc-ice", handleIce);
       activeSocket.off("live:peer-left", handlePeerLeft);
+      activeSocket.off("live:host-media-error", handleHostMediaError);
       activeSocket.off("connect", handleConnect);
       peerConnectionsRef.current.forEach((connection) => connection.close());
       peerConnectionsRef.current.clear();

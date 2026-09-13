@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 const ToastContext = createContext(null);
 
@@ -23,6 +23,16 @@ export const ToastProvider = ({ children }) => {
     window.setTimeout(() => removeToast(id), 3600);
     return id;
   }, [removeToast]);
+
+  useEffect(() => {
+    const handleAuthInvalid = (event) => {
+      const message = event.detail?.message || "Your session has ended. Please log in again.";
+      addToast(message, "error");
+    };
+
+    window.addEventListener("vibebook:auth-invalid", handleAuthInvalid);
+    return () => window.removeEventListener("vibebook:auth-invalid", handleAuthInvalid);
+  }, [addToast]);
 
   const value = useMemo(() => ({ addToast, removeToast }), [addToast, removeToast]);
 
