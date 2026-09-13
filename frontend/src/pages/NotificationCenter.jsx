@@ -99,6 +99,7 @@ export default function NotificationCenter() {
   const seenRealtimeRef = useRef(new Set());
   const observerRef = useRef(null);
   const swipeStartRef = useRef(null);
+  const fetchRequestIdRef = useRef(0);
 
   const filteredNotifications = useMemo(() => {
     const typed = selectedType === "all" ? notifications : notifications.filter((n) => n.type === selectedType);
@@ -121,6 +122,8 @@ export default function NotificationCenter() {
       setIsLoadingMore(true);
     }
 
+    const requestId = ++fetchRequestIdRef.current;
+
     try {
       const type = selectedType === "all" ? "" : selectedType;
       const { data } = await notificationApi.list({
@@ -129,16 +132,20 @@ export default function NotificationCenter() {
         ...(type && { type }),
       });
 
+      if (requestId !== fetchRequestIdRef.current) return;
+
       const newNotifications = Array.isArray(data.notifications) ? data.notifications : [];
       setNotifications((prev) => mergeNotificationPage(prev, newNotifications, pageNum === 1));
       setUnreadCount(Number(data.unreadCount || 0));
       setHasMore(data.pagination?.page < data.pagination?.pages);
     } catch (error) {
+      if (requestId !== fetchRequestIdRef.current) return;
       console.error("Failed to fetch notifications:", error);
       if (pageNum === 1) {
         setNotifications([]);
       }
     } finally {
+      if (requestId !== fetchRequestIdRef.current) return;
       if (isInitial) {
         setLoading(false);
       } else {
@@ -161,7 +168,9 @@ export default function NotificationCenter() {
         setUnreadCount(Number(detail.unreadCount || 0));
       }
 
-      if (detail.allRead) {
+      if (detail.cleared) {
+        setNotifications([]);
+      } else if (detail.allRead) {
         setNotifications((current) => current.map((item) => ({ ...item, read: true })));
       } else if (detail.readId) {
         setNotifications((current) => current.map((item) => (item._id === detail.readId ? { ...item, read: true } : item)));

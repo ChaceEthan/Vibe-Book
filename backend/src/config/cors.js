@@ -105,7 +105,7 @@ const corsOptions = {
 };
 
 const socketCorsOptions = {
-  origin: process.env.NODE_ENV === "production" ? DEPLOYED_FRONTEND_ORIGIN : resolveCorsOrigin,
+  origin: resolveCorsOrigin,
   credentials: true,
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],

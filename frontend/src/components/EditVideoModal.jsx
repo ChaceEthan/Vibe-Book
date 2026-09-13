@@ -51,7 +51,7 @@ export function EditVideoModal({ post, onClose, onSave }) {
         onClose();
       }, 1000);
     } catch (err) {
-      setError(err.message || "Error updating post");
+      setError(err.response?.data?.message || "Error updating post");
     } finally {
       setSaving(false);
     }

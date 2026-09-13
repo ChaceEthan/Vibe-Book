@@ -684,26 +684,34 @@ const Profile = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    let stale = false;
+
     const fetchProfile = async () => {
       setLoading(true);
       setError("");
 
       try {
         const { data } = await userApi.getById(id);
+        if (stale) return;
         setUser(data.user);
         if (Array.isArray(data.user?.posts)) {
           mergePosts(data.user.posts);
         }
       } catch (requestError) {
+        if (stale) return;
         const status = requestError.response?.status;
         setUser(null);
         setError(status === 404 ? "We could not find that VibeBook profile." : requestError.response?.data?.message || "Profile could not load. Please retry.");
       } finally {
-        setLoading(false);
+        if (!stale) setLoading(false);
       }
     };
 
     fetchProfile();
+
+    return () => {
+      stale = true;
+    };
   }, [id, mergePosts, profileRetry]);
 
   useEffect(() => {

@@ -2,6 +2,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { authApi, isRetryableApiError, userApi } from "../services/api";
+import { disconnectSocket } from "../services/socket";
 
 const AuthContext = createContext(null);
 
@@ -48,6 +49,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem("vibebook_user");
     localStorage.removeItem("token");
     localStorage.removeItem("vibebook_token");
+    disconnectSocket({ immediate: true });
   };
 
   const refreshProfile = useCallback(async () => {
