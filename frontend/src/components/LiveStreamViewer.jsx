@@ -157,28 +157,53 @@ const ensureMediaTrackState = (stream, { audioEnabled = true, videoEnabled = tru
   });
 };
 
-const cameraDeviceForFacingMode = async (facingMode = "user") => {
+const cameraDeviceForFacingMode = async (facingMode = "user", excludeDeviceId = "") => {
   if (!navigator.mediaDevices?.enumerateDevices) return "";
 
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    const videoDevices = devices.filter((device) => device.kind === "videoinput");
-    const rearPattern = /(back|rear|environment|world|wide|0)/i;
-    const frontPattern = /(front|user|face|selfie|1)/i;
-    const pattern = facingMode === "environment" ? rearPattern : frontPattern;
-    return videoDevices.find((device) => pattern.test(device.label || ""))?.deviceId || videoDevices[facingMode === "environment" && videoDevices.length > 1 ? videoDevices.length - 1 : 0]?.deviceId || "";
+    const videoDevices = devices
+      .filter((device) => device.kind === "videoinput")
+      .filter((device) => !excludeDeviceId || device.deviceId !== excludeDeviceId);
+
+    if (!videoDevices.length) return "";
+
+    // Bare digits ("0"/"1") are deliberately excluded here: many device labels
+    // (e.g. "Camera 0, facing front" AND "Camera2 0, facing back") contain both
+    // a digit and a facing keyword, so matching on digits alone can pick either
+    // camera at random. Only unambiguous facing keywords are trusted.
+    const rearPattern = /(back|rear|environment|world|wide)/i;
+    const frontPattern = /(front|user|face|selfie)/i;
+    const targetPattern = facingMode === "environment" ? rearPattern : frontPattern;
+    const oppositePattern = facingMode === "environment" ? frontPattern : rearPattern;
+
+    const directMatch = videoDevices.find((device) => targetPattern.test(device.label || ""));
+    if (directMatch) return directMatch.deviceId;
+
+    // No device explicitly labels itself as the target camera. If exactly one
+    // other device confidently labels itself as the OPPOSITE camera, and there
+    // are only two cameras total, the remaining one is almost certainly the
+    // target — this is the common two-camera-phone case with partial labels.
+    if (videoDevices.length === 2) {
+      const oppositeMatch = videoDevices.find((device) => oppositePattern.test(device.label || ""));
+      if (oppositeMatch) {
+        return videoDevices.find((device) => device.deviceId !== oppositeMatch.deviceId)?.deviceId || "";
+      }
+    }
+
+    return "";
   } catch {
     return "";
   }
 };
 
-const videoConstraintsForFacingMode = async (facingMode = "user") => {
+const videoConstraintsForFacingMode = async (facingMode = "user", excludeDeviceId = "") => {
   const base = {
     width: { ideal: 1280 },
     height: { ideal: 720 },
   };
 
-  const deviceId = await cameraDeviceForFacingMode(facingMode);
+  const deviceId = await cameraDeviceForFacingMode(facingMode, excludeDeviceId);
   if (deviceId) {
     return {
       ...base,
@@ -191,6 +216,9 @@ const videoConstraintsForFacingMode = async (facingMode = "user") => {
     facingMode: { ideal: facingMode },
   };
 };
+
+const isCameraResourceError = (error) =>
+  ["NotReadableError", "TrackStartError", "OverconstrainedError", "ConstraintNotSatisfiedError"].includes(error?.name);
 
 const makeGiftParticles = (tier = "small") => {
   const count = tier === "premium" ? 28 : tier === "medium" ? 16 : 9;
@@ -2096,15 +2124,19 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
 
     const currentLocalStream = previewStreamRef.current;
     const currentAudioTrack = activeAudioTrackFor(currentLocalStream);
+    const currentVideoDeviceId = currentLocalStream.getVideoTracks()[0]?.getSettings?.().deviceId || "";
     const nextFacingMode = liveFacingMode === "user" ? "environment" : "user";
 
-    setSwitchingCamera(true);
-    setStatusMessage("Switching camera...");
+    const matchesTargetFacing = (stream) => {
+      const settings = stream.getVideoTracks()[0]?.getSettings?.() || {};
+      // Some browsers/devices never report `facingMode` in settings — that's
+      // normal and not itself a failure, only an explicit wrong value is.
+      return !settings.facingMode || settings.facingMode === nextFacingMode;
+    };
 
-    try {
-      let cameraOnlyStream;
+    const acquireTargetCamera = async () => {
       try {
-        cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
+        const exactStream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: { exact: nextFacingMode },
             width: { ideal: 1280 },
@@ -2112,15 +2144,50 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
           },
           audio: false,
         });
+
+        if (matchesTargetFacing(exactStream)) {
+          return exactStream;
+        }
+
+        // The browser silently ignored the exact constraint and handed back
+        // the camera we already had — fall through to deviceId-based lookup
+        // instead of pretending the switch succeeded.
+        traceWebRtc("camera-switch-facing-mismatch", { streamId, nextFacingMode });
+        exactStream.getTracks().forEach((track) => track.stop());
       } catch (cameraError) {
         if (cameraError?.name === "NotAllowedError") {
           throw cameraError;
         }
+        traceWebRtc("camera-switch-exact-failed", { streamId, nextFacingMode, error: cameraError?.name || "unknown" });
+      }
 
-        cameraOnlyStream = await navigator.mediaDevices.getUserMedia({
-          video: await videoConstraintsForFacingMode(nextFacingMode),
-          audio: false,
-        });
+      return navigator.mediaDevices.getUserMedia({
+        video: await videoConstraintsForFacingMode(nextFacingMode, currentVideoDeviceId),
+        audio: false,
+      });
+    };
+
+    setSwitchingCamera(true);
+    setStatusMessage("Switching camera...");
+
+    let releasedCurrentCamera = false;
+
+    try {
+      let cameraOnlyStream;
+      try {
+        cameraOnlyStream = await acquireTargetCamera();
+      } catch (firstAttemptError) {
+        if (firstAttemptError?.name === "NotAllowedError" || !isCameraResourceError(firstAttemptError)) {
+          throw firstAttemptError;
+        }
+
+        // Some devices only support one active camera capture session at a
+        // time and refuse to open a second physical camera while the first
+        // is still running — release it and retry once before giving up.
+        traceWebRtc("camera-switch-releasing-current", { streamId, nextFacingMode, error: firstAttemptError?.name || "unknown" });
+        currentLocalStream.getVideoTracks().forEach((track) => track.stop());
+        releasedCurrentCamera = true;
+        cameraOnlyStream = await acquireTargetCamera();
       }
 
       const [nextVideoTrack] = cameraOnlyStream.getVideoTracks();
@@ -2168,8 +2235,45 @@ const LiveStreamViewer = ({ streamId, onClose }) => {
       setStatusMessage(nextFacingMode === "user" ? "Front camera active" : "Back camera active");
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 1600);
     } catch (error) {
-      setStatusMessage(error?.name === "NotAllowedError" ? "Camera permission was denied" : "Could not switch camera");
+      const rearUnavailable = nextFacingMode === "environment" && (error?.name === "OverconstrainedError" || error?.name === "NotFoundError");
+      setStatusMessage(
+        error?.name === "NotAllowedError"
+          ? "Camera permission was denied"
+          : rearUnavailable
+          ? "This device has no usable rear camera"
+          : "Could not switch camera"
+      );
       window.setTimeout(() => mountedRef.current && setStatusMessage(""), 2200);
+
+      if (releasedCurrentCamera) {
+        // We already stopped the previous camera before this attempt failed —
+        // recover it instead of leaving the broadcast dark while reporting a
+        // fake success.
+        try {
+          const recoveryStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: liveFacingMode }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          });
+          const [recoveredTrack] = recoveryStream.getVideoTracks();
+          if (recoveredTrack) {
+            recoveredTrack.enabled = Boolean(cameraEnabled);
+            const recoveredStream = currentLocalStream;
+            recoveredStream.getVideoTracks().forEach((track) => recoveredStream.removeTrack(track));
+            recoveredStream.addTrack(recoveredTrack);
+            peerConnectionsRef.current.forEach((connection) => {
+              if (!connection || connection.connectionState === "closed") return;
+              const videoSender = connection.getSenders().find((sender) => sender.track?.kind === "video");
+              videoSender?.replaceTrack(recoveredTrack);
+            });
+            previewStreamRef.current = recoveredStream;
+            setPreviewStream(recoveredStream);
+            setLivePreviewStream(streamId, recoveredStream);
+          }
+        } catch {
+          // If recovery also fails there is nothing more we can safely do
+          // client-side; the existing statusMessage already reflects the error.
+        }
+      }
     } finally {
       setSwitchingCamera(false);
     }
