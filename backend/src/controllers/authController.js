@@ -758,7 +758,9 @@ const sendEmailCode = async (req, res, next) => {
         timings,
       });
 
-      return res.json({
+      const statusCode = delivery.reason === "RESEND_RATE_LIMITED" ? 429 : 503;
+
+      return res.status(statusCode).json({
         success: false,
         message: delivery.message || "Email delivery failed. Please try again later or contact support.",
         reason: delivery.reason || "RESEND_SEND_FAILED",

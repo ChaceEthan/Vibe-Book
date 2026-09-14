@@ -182,9 +182,13 @@ const verificationErrorMessage = (requestError, fallback = "Verification is temp
   const message = requestError?.response?.data?.message || requestError?.message || "";
 
   if (reason === "SMS_PROVIDER_NOT_CONFIGURED") return "Verification service temporarily unavailable. Please try again.";
-  if (reason === "SMTP_NOT_CONFIGURED") return "Verification service temporarily unavailable. Please try again.";
-  if (reason === "SMTP_AUTH_FAILED") return "Verification service temporarily unavailable. Please try again.";
-  if (reason === "SMTP_CONNECTION_FAILED") return "Verification service temporarily unavailable. Please try again.";
+  if (reason === "RESEND_NOT_CONFIGURED") return "Email verification is currently unavailable. Please try again later.";
+  if (reason === "SENDER_NOT_VERIFIED") return "Email verification is currently unavailable. Please try again later.";
+  if (reason === "RESEND_AUTH_FAILED") return "Email verification is currently unavailable. Please try again later.";
+  if (reason === "RESEND_CONNECTION_FAILED") return "Email delivery connection failed. Please try again in a few moments.";
+  if (reason === "RESEND_RATE_LIMITED") return "Too many requests. Please try again in a few moments.";
+  if (reason === "RESEND_SERVICE_UNAVAILABLE") return "Email verification is currently unavailable. Your account remains active.";
+  if (reason === "RESEND_SEND_FAILED") return "Email delivery failed. Please try again later or contact support.";
   if (message) return message;
   return fallback;
 };
@@ -681,6 +685,31 @@ const Settings = () => {
       }));
       notifySuccess(data.code ? `Local verification code: ${data.code}` : "Security code sent.");
       return data;
+    } catch (requestError) {
+      // The backend persists the OTP before attempting delivery, so even a
+      // failed send still returns a cooldown (and, outside production, a
+      // local dev code) — reflect that instead of silently claiming success.
+      const failureData = requestError.response?.data || {};
+      const cooldownSeconds = Number(failureData.cooldownSeconds || failureData.retryAfterSeconds || 0);
+
+      if (failureData.code) {
+        setEmailFlow((current) => ({
+          ...current,
+          newEmail: nextEmail,
+          code: "",
+          expectedCode: failureData.code,
+          expiresAt: failureData.expiresAt || "",
+          cooldown: cooldownSeconds || 60,
+          step: 3,
+        }));
+        notifySuccess(`Email delivery failed. Local verification code: ${failureData.code}`);
+        return failureData;
+      }
+
+      if (cooldownSeconds > 0) {
+        setEmailFlow((current) => ({ ...current, cooldown: cooldownSeconds }));
+      }
+      throw requestError;
     } finally {
       setSaving("");
     }
