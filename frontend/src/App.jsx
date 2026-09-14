@@ -13,7 +13,6 @@ import Admin from "./pages/Admin.jsx";
 import Drafts from "./pages/Drafts.jsx";
 import Explore from "./pages/Explore.jsx";
 import Home from "./pages/Home.jsx";
-import Inbox from "./pages/Inbox.jsx";
 import LegalPage from "./pages/LegalPage.jsx";
 import Login from "./pages/Login.jsx";
 import LiveDiscovery from "./pages/LiveDiscovery.jsx";
@@ -123,24 +122,10 @@ const App = () => {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/inbox"
-            element={
-              <ProtectedRoute>
-                <Inbox />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/inbox" element={<Navigate to="/chat" replace />} />
+          <Route path="/groups" element={<Navigate to="/chat" replace />} />
           <Route
             path="/chat"
-            element={
-              <ProtectedRoute>
-                <Chat />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/groups"
             element={
               <ProtectedRoute>
                 <Chat />

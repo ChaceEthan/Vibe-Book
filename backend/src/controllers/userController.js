@@ -5,6 +5,7 @@ const Booking = require("../models/Booking");
 const Feed = require("../models/Feed");
 const LiveStream = require("../models/LiveStream");
 const User = require("../models/User");
+const { isUserOnline } = require("../socket");
 const { sendContactNotification } = require("../utils/emailService");
 const {
   PLATFORM_ACCESS_AMOUNT,
@@ -596,14 +597,89 @@ const getUserById = async (req, res, next) => {
   }
 };
 
+const relationshipUserSelect = "name username profilePicture profileImage images gallery isVerified isPremium role";
+
+const relationshipCardFor = (user, viewer) => {
+  const viewerFollowingIds = (viewer.following || []).map((id) => id.toString());
+  const viewerFollowerIds = (viewer.followers || []).map((id) => id.toString());
+  const targetId = user._id.toString();
+
+  return {
+    _id: user._id,
+    name: user.name,
+    username: user.username || user.name,
+    profileImage: normalizeStoredUploadPath(user.profilePicture || user.profileImage) || user.images?.[0] || DEFAULT_PROFILE_IMAGE_PATH,
+    isVerified: Boolean(user.isVerified),
+    isPremium: Boolean(user.isPremium),
+    online: isUserOnline(targetId),
+    isFollowing: viewerFollowingIds.includes(targetId),
+    followsViewer: viewerFollowerIds.includes(targetId),
+  };
+};
+
+const paginationFromQuery = (req) => {
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+  const skip = Math.max(0, Number(req.query.skip) || 0);
+  return { limit, skip };
+};
+
+// Only the signed-in user's own relationships are exposed here — this
+// intentionally does not accept an arbitrary :id, so a user can only ever
+// list who THEY follow / who follows THEM, never another user's lists.
+const getMyFollowing = async (req, res, next) => {
+  try {
+    const { limit, skip } = paginationFromQuery(req);
+    const total = Array.isArray(req.user.following) ? req.user.following.length : 0;
+    const ids = (req.user.following || []).slice(skip, skip + limit);
+    const users = await User.find({ _id: { $in: ids }, isBlocked: false, role: { $ne: "admin" } }).select(relationshipUserSelect);
+    const byId = new Map(users.map((user) => [user._id.toString(), user]));
+    const ordered = ids.map((id) => byId.get(id.toString())).filter(Boolean);
+
+    return res.json({
+      users: ordered.map((user) => relationshipCardFor(user, req.user)),
+      total,
+      hasMore: skip + limit < total,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const getMyFollowers = async (req, res, next) => {
+  try {
+    const { limit, skip } = paginationFromQuery(req);
+    const total = Array.isArray(req.user.followers) ? req.user.followers.length : 0;
+    const ids = (req.user.followers || []).slice(skip, skip + limit);
+    const users = await User.find({ _id: { $in: ids }, isBlocked: false, role: { $ne: "admin" } }).select(relationshipUserSelect);
+    const byId = new Map(users.map((user) => [user._id.toString(), user]));
+    const ordered = ids.map((id) => byId.get(id.toString())).filter(Boolean);
+
+    return res.json({
+      users: ordered.map((user) => relationshipCardFor(user, req.user)),
+      total,
+      hasMore: skip + limit < total,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 const searchUsers = async (req, res, next) => {
   try {
-    const { role, gender, category, type, availability, location, province, district, skill, minPrice, maxPrice } = req.query;
+    const { role, gender, category, type, availability, location, province, district, skill, minPrice, maxPrice, q } = req.query;
     const filters = {
       isBlocked: false,
       role: { $ne: "admin" },
     };
     const andConditions = [];
+
+    const queryText = normalizeText(q).trim();
+    if (queryText) {
+      const queryRegex = new RegExp(escapeRegex(queryText), "i");
+      andConditions.push({
+        $or: [{ name: queryRegex }, { username: queryRegex }],
+      });
+    }
 
     if (role) {
       const roleValue = searchRoleAliases[normalizeText(role).toLowerCase()] || role;
@@ -722,7 +798,8 @@ const searchUsers = async (req, res, next) => {
 
     const users = await User.find(filters)
       .select("-password")
-      .sort({ isPremium: -1, premiumBadge: -1, isVerified: -1, averageRating: -1, createdAt: -1 });
+      .sort({ isPremium: -1, premiumBadge: -1, isVerified: -1, averageRating: -1, createdAt: -1 })
+      .limit(60);
 
     const activeLiveStreams = await activeLiveStreamMapFor(users);
 
@@ -1463,6 +1540,8 @@ module.exports = {
   profileResponse,
   getProfile,
   getUserById,
+  getMyFollowing,
+  getMyFollowers,
   searchUsers,
   updateProfile,
   uploadProfileCover,

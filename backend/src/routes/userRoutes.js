@@ -7,6 +7,8 @@ const {
   followProfile,
   getProfile,
   getUserById,
+  getMyFollowing,
+  getMyFollowers,
   searchUsers,
   payPlatformAccess,
   likeProfile,
@@ -38,6 +40,8 @@ router.put("/update", authMiddleware, updateProfile);
 router.patch("/update", authMiddleware, updateProfile);
 router.post("/pay-access", authMiddleware, payPlatformAccess);
 router.delete("/me", authMiddleware, deleteMyAccount);
+router.get("/me/following", authMiddleware, getMyFollowing);
+router.get("/me/followers", authMiddleware, getMyFollowers);
 router.post("/:id/follow", authMiddleware, followProfile);
 router.post("/:id/follow-back", authMiddleware, followBackProfile);
 router.post("/:id/unfollow", authMiddleware, unfollowProfile);

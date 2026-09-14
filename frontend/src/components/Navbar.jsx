@@ -152,25 +152,6 @@ const Navbar = () => {
       notify(`dm:${payload._id || payload.clientId || senderId}`, notificationTitleFor(payload.sender, "New direct message"), notificationBodyFor(payload));
     };
 
-    const handleGroupMessage = (payload = {}) => {
-      if (payload.type && payload.type !== "group-message") {
-        return;
-      }
-      const message = payload.message || payload;
-      const senderId = idOf(message.sender || message.senderId);
-
-      if (!senderId || senderId === user._id) {
-        return;
-      }
-
-      const mention = new RegExp(`@${String(user.name || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i").test(message.message || "");
-      notify(
-        `group:${message._id || message.clientId || message.groupId}`,
-        mention ? "You were mentioned" : "New group message",
-        `${notificationTitleFor(message.sender, "Group")}: ${notificationBodyFor(message)}`
-      );
-    };
-
     const handleUnreadUpdate = (payload = {}) => {
       setUnreadCount(Number(payload.unreadCount || 0));
     };
@@ -194,7 +175,6 @@ const Navbar = () => {
     };
 
     socket.on("chat:message", handleDirectMessage);
-    socket.on("group:message", handleGroupMessage);
     socket.on("unread:update", handleUnreadUpdate);
     socket.on("livestream:started", handleLiveStarted);
     socket.on("livestream:ended_global", handleLiveEnded);
@@ -202,7 +182,6 @@ const Navbar = () => {
 
     return () => {
       socket.off("chat:message", handleDirectMessage);
-      socket.off("group:message", handleGroupMessage);
       socket.off("unread:update", handleUnreadUpdate);
       socket.off("livestream:started", handleLiveStarted);
       socket.off("livestream:ended_global", handleLiveEnded);

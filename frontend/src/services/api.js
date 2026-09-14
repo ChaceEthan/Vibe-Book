@@ -201,6 +201,8 @@ export const userApi = {
   },
   getById: (id) => API.get(`/users/${id}`),
   getProfile: () => API.get("/profile"),
+  getFollowing: (params = {}) => API.get("/users/me/following", { params }),
+  getFollowers: (params = {}) => API.get("/users/me/followers", { params }),
   updateProfile: async (payload) => {
     try {
       return await API.put("/profile", payload);
@@ -323,26 +325,6 @@ export const messageApi = {
   reply: (id, payload) => API.post(`/messages/${id}/reply`, payload),
   saveDraft: (payload) => API.post("/messages/drafts", payload),
   updateDraft: (id, payload) => API.patch(`/messages/drafts/${id}`, payload),
-};
-
-export const groupChatApi = {
-  list: () => API.get("/groups"),
-  create: (payload) => API.post("/groups/create", payload),
-  getMessages: (groupId) => API.get(`/groups/${groupId}`),
-  send: (groupId, payload) => API.post("/groups/message", { ...payload, groupId }),
-  sendWithAttachments: (groupId, formData, options = {}) => {
-    formData.set("groupId", groupId);
-    return API.post("/groups/message-with-attachments", formData, { timeout: UPLOAD_TIMEOUT_MS, signal: options.signal });
-  },
-  join: (groupId) => API.post(`/groups/join/${groupId}`),
-  joinById: (groupId) => API.post(`/groups/${groupId}/join`),
-  invite: (groupId, payload = {}) => API.post(`/groups/${groupId}/invite`, payload),
-  addMember: (groupId, payload = {}) => API.post(`/groups/${groupId}/add-member`, payload),
-  updateRole: (groupId, memberId, payload = {}) => API.patch(`/groups/${groupId}/members/${memberId}/role`, payload),
-  removeMember: (groupId, memberId) => API.delete(`/groups/${groupId}/members/${memberId}`),
-  deleteMessage: (groupId, messageId) => API.delete(`/groups/${groupId}/messages/${messageId}`),
-  leave: (groupId) => API.post(`/groups/leave/${groupId}`),
-  members: (groupId) => API.get(`/groups/${groupId}/members`),
 };
 
 export const adminApi = {
