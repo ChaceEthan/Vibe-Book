@@ -504,6 +504,15 @@ const setupLiveStreamSockets = (io) => {
         }
 
         await livestreamService.touchLiveSession(sessionId);
+
+        // Both host and viewers emit this same event on the same interval —
+        // only the host's heartbeat is allowed to refresh hostHeartbeatAt,
+        // so a stream's liveness is never confused with viewer activity.
+        const streamId = idOf(data.streamId || socket.data.livestream?.streamId);
+        if (streamId && (await socketIsHost(streamId, socket))) {
+          await livestreamService.touchHostHeartbeat(streamId).catch(() => null);
+        }
+
         callback?.({ ok: true, timestamp: nowIso() });
       } catch {
         callback?.({ ok: false, error: "Unable to update live session" });

@@ -354,6 +354,14 @@ const liveStreamSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    // Updated only by the host's own heartbeat (see live:heartbeat in
+    // livestreamSocket.js), never by viewer activity — this is the
+    // authoritative liveness signal used to detect a crashed/restarted host
+    // process independently of how many viewers are currently watching.
+    hostHeartbeatAt: {
+      type: Date,
+      default: Date.now,
+    },
     metadata: {
       type: mongoose.Schema.Types.Mixed,
       default: {},
@@ -370,6 +378,9 @@ liveStreamSchema.index({ isLive: 1, status: 1 });
 liveStreamSchema.index({ category: 1, isLive: 1 });
 liveStreamSchema.index({ startedAt: -1 });
 liveStreamSchema.index({ viewerCount: -1 });
+// Matches the stale-host sweep's exact filter (isLive+status+hostHeartbeatAt)
+// in livestreamService.endStaleLiveStreams.
+liveStreamSchema.index({ isLive: 1, status: 1, hostHeartbeatAt: 1 });
 
 // Calculate duration for ended streams
 liveStreamSchema.pre("save", function () {

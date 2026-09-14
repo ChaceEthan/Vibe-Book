@@ -12,6 +12,12 @@ const { GIFT_DEFINITIONS } = require("../wallet/walletConstants");
 const mongoose = require("mongoose");
 
 const ACTIVE_SESSION_STALE_MS = 90 * 1000;
+// The host emits live:heartbeat every 25s (HEARTBEAT_MS in
+// LiveStreamViewer.jsx) while connected. 120s gives generous headroom for a
+// throttled/backgrounded mobile tab or a brief network hiccup before a
+// stream is ever considered abandoned — ending a still-legitimate stream
+// early is worse than leaving a truly-dead one visible a little longer.
+const HOST_HEARTBEAT_STALE_MS = 120 * 1000;
 const VALID_CATEGORIES = new Set(["gaming", "music", "art", "talk", "performance", "education", "lifestyle", "other"]);
 const VALID_PRIVACY = new Set(["public", "friends", "private"]);
 const VALID_QUALITIES = new Set(["360p", "480p", "720p", "1080p"]);
@@ -152,6 +158,7 @@ const startLiveStream = async (creatorId, streamData = {}) => {
     status: "live",
     isLive: true,
     startedAt: now,
+    hostHeartbeatAt: now,
     metadata: streamData.metadata || {},
   });
 
@@ -283,6 +290,47 @@ const touchLiveSession = async (sessionId) => {
   return LiveSession.findByIdAndUpdate(sessionId, { $set: { updatedAt: new Date() } }, { returnDocument: "after" });
 };
 
+// Updated only when the socket sending the heartbeat is confirmed to be the
+// stream's host (see live:heartbeat in livestreamSocket.js) — this is
+// intentionally separate from touchLiveSession (viewer sessions) so a
+// stream's liveness is never confused with how many viewers it currently has.
+const touchHostHeartbeat = async (streamId) => {
+  const safeStreamId = validateStreamId(streamId);
+  return LiveStream.findOneAndUpdate(
+    { _id: safeStreamId, status: "live", isLive: true },
+    { $set: { hostHeartbeatAt: new Date() } }
+  );
+};
+
+// A stream can only stay "live" while its host is demonstrably still
+// connected and heartbeating. If the server process hosting that socket
+// connection crashes or restarts, the in-memory room state is lost and the
+// normal disconnect-triggered endLiveStream() never runs — this sweep is the
+// DB-level backstop for that case. It only looks at hostHeartbeatAt (never
+// viewer activity or stream age), so a legitimate brand-new stream with zero
+// viewers is never affected: its host is still heartbeating normally.
+// Safe to call from multiple server instances concurrently (each update is
+// a plain conditional Mongo write, not dependent on any in-memory state).
+const endStaleLiveStreams = async () => {
+  const staleBefore = new Date(Date.now() - HOST_HEARTBEAT_STALE_MS);
+  const staleStreams = await LiveStream.find({
+    isLive: true,
+    status: "live",
+    // $lt alone would never match documents that predate this field (Mongo
+    // excludes missing fields from comparison-operator matches), silently
+    // leaving every pre-existing ghost stream live forever — explicitly
+    // catch "never heartbeated under this field" too.
+    $or: [{ hostHeartbeatAt: { $lt: staleBefore } }, { hostHeartbeatAt: { $exists: false } }],
+  }).select("_id");
+
+  if (!staleStreams.length) return [];
+
+  const results = await Promise.allSettled(staleStreams.map((stream) => endLiveStream(stream._id)));
+  return staleStreams
+    .filter((_, index) => results[index].status === "fulfilled")
+    .map((stream) => stream._id.toString());
+};
+
 const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
   const safeStreamId = validateStreamId(streamId);
   const safeSenderId = validateUserId(senderId);
@@ -407,6 +455,7 @@ const sendLiveGift = async (streamId, senderId, giftId, metadata = {}) => {
  */
 const getActiveLiveStreams = async (limit = 20, skip = 0) => {
   await cleanupStaleSessions().catch(() => null);
+  await endStaleLiveStreams().catch(() => null);
   const streams = await LiveStream.find({ isLive: true, status: "live" })
     .populate("creatorId", creatorSelect)
     .sort({ viewerCount: -1, startedAt: -1 })
@@ -431,6 +480,7 @@ const getActiveLiveStreams = async (limit = 20, skip = 0) => {
  * Get livestreams by category
  */
 const getLiveStreamsByCategory = async (category, limit = 20, skip = 0) => {
+  await endStaleLiveStreams().catch(() => null);
   const safeCategory = VALID_CATEGORIES.has(String(category || "")) ? String(category) : "other";
   const streams = await LiveStream.find({ isLive: true, status: "live", category: safeCategory })
     .populate("creatorId", creatorSelect)
@@ -456,6 +506,7 @@ const getLiveStreamsByCategory = async (category, limit = 20, skip = 0) => {
  * Get livestreams by creator
  */
 const getCreatorLiveStreams = async (creatorId, statusFilter = null, limit = 20, skip = 0) => {
+  await endStaleLiveStreams().catch(() => null);
   const safeCreatorId = validateUserId(creatorId);
 
   const query = { creatorId: safeCreatorId };
@@ -488,10 +539,17 @@ const getCreatorLiveStreams = async (creatorId, statusFilter = null, limit = 20,
 const getStreamDetails = async (streamId) => {
   const safeStreamId = validateStreamId(streamId);
 
-  const stream = await LiveStream.findById(safeStreamId).populate("creatorId", creatorSelect);
+  let stream = await LiveStream.findById(safeStreamId).populate("creatorId", creatorSelect);
 
   if (!stream) {
     throw new Error("Stream not found");
+  }
+
+  if (stream.status === "live" && stream.isLive && Date.now() - new Date(stream.hostHeartbeatAt || 0).getTime() > HOST_HEARTBEAT_STALE_MS) {
+    // Targeted check for this one stream rather than the full sweep query —
+    // a viewer opening this specific stream shouldn't have to wait on a
+    // collection-wide scan just to find out it's actually dead.
+    stream = await endLiveStream(safeStreamId).catch(() => stream);
   }
 
   const activeSessions = await LiveSession.find({ streamId: safeStreamId, isActive: true }).lean();
@@ -553,6 +611,8 @@ module.exports = {
   joinLiveStream,
   leaveLiveStream,
   touchLiveSession,
+  touchHostHeartbeat,
+  endStaleLiveStreams,
   sendLiveGift,
   getActiveLiveStreams,
   getLiveStreamsByCategory,
