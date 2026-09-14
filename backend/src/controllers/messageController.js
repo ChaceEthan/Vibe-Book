@@ -236,7 +236,9 @@ const getInbox = async (req, res, next) => {
       Message.find({
         ...participantFilter(req.user._id),
         isDraft: false,
-      }).sort({ createdAt: -1 })
+      })
+        .sort({ createdAt: -1 })
+        .limit(500)
     );
 
     const conversationsByUser = new Map();

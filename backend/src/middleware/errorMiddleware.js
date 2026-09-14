@@ -1,7 +1,5 @@
 // @ts-nocheck
 const errorMiddleware = (err, req, res, next) => {
-  console.error("GLOBAL ERROR:", err);
-
   let statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : err.statusCode || 500;
   let message = err.message || "Server error";
   let data = null;
@@ -44,6 +42,16 @@ const errorMiddleware = (err, req, res, next) => {
   if (message === "Not allowed by CORS" || message === "Origin not allowed") {
     statusCode = 403;
     message = "Origin not allowed";
+  }
+
+  // 404s and other client-caused 4xx responses are expected, routine traffic
+  // (stale links, bots probing, a typo'd URL) — logging them as "GLOBAL
+  // ERROR" makes them indistinguishable from real server failures and
+  // drowns out the incidents that actually need attention.
+  if (statusCode >= 500) {
+    console.error("GLOBAL ERROR:", err);
+  } else if (process.env.NODE_ENV !== "production") {
+    console.warn(`[${statusCode}] ${req.method} ${req.originalUrl}: ${message}`);
   }
 
   return res.status(statusCode).json({
