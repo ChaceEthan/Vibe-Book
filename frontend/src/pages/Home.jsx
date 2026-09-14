@@ -576,6 +576,14 @@ const Home = () => {
         ...(feedMode === "following" ? { mode: "following" } : {}),
       };
       const { data } = await feedApi.get(params);
+
+      if (feedRequestRef.current !== requestKey) {
+        // A newer request (e.g. the user switched feed mode) already started
+        // and will apply its own results — don't overwrite them with this
+        // now-stale response.
+        return;
+      }
+
       const payload = data && typeof data === "object" ? data : {};
       const rawPosts = Array.isArray(payload.posts) ? payload.posts : Array.isArray(payload.feed) ? payload.feed : [];
       const nextPosts = rawPosts.filter(isValidPost);

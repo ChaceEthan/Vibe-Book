@@ -249,20 +249,20 @@ const serializeGroupMessage = (message) => ({
 
 const listGroups = async (req, res) => {
   try {
-    const groups = await ChatGroup.find({ isActive: true })
+    // Filter visibility at the query level instead of fetching every active
+    // group in the system and discarding most of them in memory afterward —
+    // this previously had no .limit() at all and would scale with the total
+    // number of active groups system-wide, not with this user's own groups.
+    const groups = await ChatGroup.find({
+      isActive: true,
+      $or: [{ visibility: "public" }, { members: req.user._id }, { pendingInvites: req.user._id }],
+    })
       .populate("members", memberSelect)
       .populate("pendingInvites", memberSelect)
-      .sort({ updatedAt: -1 });
-    const visibleGroups = groups.filter(
-      (group) =>
-        group.visibility === "public" ||
-        ensureMember(group, req.user._id) ||
-        (group.pendingInvites || []).some(
-          (member) => normalizeId(member) === normalizeId(req.user._id)
-        )
-    );
+      .sort({ updatedAt: -1 })
+      .limit(200);
 
-    return res.json({ groups: visibleGroups.map((group) => serializeGroup(group, req.user._id)) });
+    return res.json({ groups: groups.map((group) => serializeGroup(group, req.user._id)) });
   } catch (error) {
     return sendGroupError(res, "group:list", error, "Unable to load groups");
   }

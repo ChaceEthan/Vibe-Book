@@ -5,6 +5,7 @@ const multer = require("multer");
 const streamifier = require("streamifier");
 
 const cloudinary = require("../config/cloudinary");
+const { removeFiles } = require("../utils/fileCleanup");
 
 const imageMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const documentMimeTypes = ["application/pdf", "text/plain", "text/markdown"];
@@ -229,13 +230,25 @@ const withCloudinaryUpload = (multerMiddleware) => (req, res, next) => {
       return next(error);
     }
 
-    try {
-      const files = [req.file, ...flattenFiles(req.files)].filter(Boolean);
-      await Promise.all(files.map((file) => uploadBufferToCloudinary(file)));
-      return next();
-    } catch (uploadError) {
-      return next(uploadError);
+    const files = [req.file, ...flattenFiles(req.files)].filter(Boolean);
+    const results = await Promise.allSettled(files.map((file) => uploadBufferToCloudinary(file)));
+    const failure = results.find((result) => result.status === "rejected");
+
+    if (failure) {
+      // Some files in this batch already reached Cloudinary and are real,
+      // billable assets before a sibling file failed — without cleaning
+      // those up here they'd be permanently orphaned (never referenced by
+      // any DB record, never deleted).
+      const uploadedFiles = files.filter((file) => file.cloudinary);
+      if (uploadedFiles.length) {
+        removeFiles(uploadedFiles).catch((cleanupError) => {
+          console.error("[upload] failed to clean up orphaned Cloudinary assets after a partial batch failure:", cleanupError.message);
+        });
+      }
+      return next(failure.reason);
     }
+
+    return next();
   });
 };
 

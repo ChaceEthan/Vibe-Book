@@ -70,7 +70,12 @@ const getUploadedFile = (req) => {
 };
 
 const sendUploadError = (res, error) => {
-  const statusCode = error.statusCode || error.status || (error.name === "MulterError" ? 400 : 500);
+  const cloudinaryStatus = Number(error.http_code || 0);
+  const statusCode =
+    (cloudinaryStatus >= 400 && cloudinaryStatus < 600 ? cloudinaryStatus : 0) ||
+    error.statusCode ||
+    error.status ||
+    (error.name === "MulterError" ? 400 : 500);
   const message = error.message || "Upload failed";
 
   return res.status(statusCode).json({

@@ -1,6 +1,12 @@
 // @ts-nocheck
 const errorMiddleware = (err, req, res, next) => {
-  let statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : err.statusCode || 500;
+  // Cloudinary's SDK sets http_code (not statusCode/status) on its errors —
+  // without reading it, a routine 4xx rejection from Cloudinary (bad format,
+  // oversized file, unsupported codec) was always reported to the client as
+  // a 500 and logged as a GLOBAL ERROR.
+  const cloudinaryStatus = Number(err.http_code || 0);
+  const inferredStatusCode = cloudinaryStatus >= 400 && cloudinaryStatus < 600 ? cloudinaryStatus : err.statusCode || 500;
+  let statusCode = res.statusCode && res.statusCode !== 200 ? res.statusCode : inferredStatusCode;
   let message = err.message || "Server error";
   let data = null;
 

@@ -121,4 +121,9 @@ chatGroupSchema.pre("save", function () {
   this.syncGroupAliases();
 });
 
+// listGroups filters on isActive and sorts by updatedAt with no .limit(); an
+// unindexed sort forces an in-memory sort over every active group as the
+// collection grows.
+chatGroupSchema.index({ isActive: 1, updatedAt: -1 });
+
 module.exports = mongoose.model("ChatGroup", chatGroupSchema);

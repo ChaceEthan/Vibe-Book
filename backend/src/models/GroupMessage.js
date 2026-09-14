@@ -111,4 +111,9 @@ const groupMessageSchema = new mongoose.Schema(
   }
 );
 
+// getGroupMessages filters by group and sorts by createdAt; the existing
+// single-field index on `group` alone can't satisfy that sort without an
+// in-memory sort stage once a group accumulates many messages.
+groupMessageSchema.index({ group: 1, createdAt: 1 });
+
 module.exports = mongoose.model("GroupMessage", groupMessageSchema);

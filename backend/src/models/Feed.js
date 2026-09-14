@@ -318,5 +318,11 @@ feedSchema.index({ userId: 1, mediaUrl: 1 }, { unique: true });
 feedSchema.index({ type: 1, viralScore: -1, createdAt: -1 });
 feedSchema.index({ tags: 1, createdAt: -1 });
 feedSchema.index({ visibility: 1, type: 1, createdAt: -1 });
+// getFeed's hot-path query (feedController.js) filters on visibility via an
+// $or/$exists check (not a plain equality) and doesn't filter by type, so
+// the compound index above isn't reliably selected for its createdAt sort.
+// A plain createdAt index lets Mongo satisfy the sort without an in-memory
+// sort stage regardless of which visibility/type branch matched.
+feedSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("Feed", feedSchema);
