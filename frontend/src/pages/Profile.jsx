@@ -2,6 +2,7 @@
 import {
   BadgeCheck,
   Bookmark,
+  Check,
   Coins,
   CreditCard,
   Eye,
@@ -27,10 +28,12 @@ import {
   Sparkles,
   Star,
   Tag,
+  Smartphone,
   Trash2,
   UserMinus,
   UserPlus,
   Video,
+  Wallet,
   X,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -85,6 +88,20 @@ const PAYMENT_OPTIONS = [
   { value: "USD", label: "USD" },
   { value: "MTN_MOMO", label: "MTN MoMo" },
   { value: "AIRTEL_MONEY", label: "Airtel Money" },
+];
+
+const PAYMENT_OPTION_ICON = {
+  USDT: Coins,
+  USDC: Coins,
+  USD: CreditCard,
+  MTN_MOMO: Smartphone,
+  AIRTEL_MONEY: Smartphone,
+};
+
+const PREMIUM_BENEFITS = [
+  "Premium badge shown on your profile",
+  "Priority placement in search & discovery",
+  "Stand out to the VibeBook community",
 ];
 
 const toEmbedUrl = (url) => {
@@ -2097,7 +2114,7 @@ const Profile = () => {
             {isOwnProfile && !premiumActive && (
               <button type="button" className="btn-secondary gap-2" onClick={handleUpgradePremium}>
                 <Sparkles className="h-4 w-4" />
-                Upgrade
+                Go Premium
               </button>
             )}
           </div>
@@ -2147,35 +2164,87 @@ const Profile = () => {
             </div>
           )}
 
-          {paymentAction && (
-            <div className="mx-auto mt-4 max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-4 text-left">
-              <div className="flex items-center gap-3 text-sm font-bold text-amber-900">
-                <CreditCard className="h-5 w-5" />
-                {paymentAction.type === "tip"
-                  ? "Send creator tip"
-                  : paymentAction.type === "boost"
-                    ? "Boost this post"
-                    : paymentAction.type === "premium"
-                      ? "Activate premium"
-                      : "Unlock action"}
+          {paymentAction && paymentAction.type === "premium" ? (
+            <div className="mx-auto mt-4 max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-lg">
+              <div className="relative bg-navy px-5 py-5 text-white">
+                <button
+                  type="button"
+                  className="absolute right-3 top-3 rounded-full p-1 text-white/70 transition hover:bg-white/10 hover:text-white"
+                  onClick={() => setPaymentAction(null)}
+                  aria-label="Close premium activation"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+                <div className="inline-flex items-center gap-2 rounded-full bg-brand/20 px-3 py-1 text-xs font-black uppercase tracking-wide text-brand">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  VibeBook Premium
+                </div>
+                <div className="mt-3 flex items-end gap-2">
+                  <span className="text-3xl font-black">{formatPrice(paymentAction.amount)}</span>
+                  <span className="pb-1 text-xs font-semibold text-white/60">one-time activation</span>
+                </div>
               </div>
-              <p className="mt-2 text-xs font-semibold text-amber-800">
-                Sandbox charge: {Number(paymentAction.amount || 0).toLocaleString()} {paymentAction.currency || "RWF"}
-              </p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {PAYMENT_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className="btn-secondary justify-start"
-                    onClick={() => handlePayment(option.value)}
-                    disabled={Boolean(processingPayment)}
-                  >
-                    {processingPayment === option.value ? "Verifying..." : option.label}
-                  </button>
-                ))}
+
+              <div className="space-y-4 p-5">
+                <ul className="space-y-2">
+                  {PREMIUM_BENEFITS.map((benefit) => (
+                    <li key={benefit} className="flex items-start gap-2 text-sm font-semibold text-slate-600">
+                      <Check className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
+                      {benefit}
+                    </li>
+                  ))}
+                </ul>
+
+                <div>
+                  <p className="mb-2 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-400">
+                    <Wallet className="h-3.5 w-3.5" />
+                    Choose a payment method
+                  </p>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {PAYMENT_OPTIONS.map((option) => {
+                      const OptionIcon = PAYMENT_OPTION_ICON[option.value] || CreditCard;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className="btn-secondary justify-start gap-2"
+                          onClick={() => handlePayment(option.value)}
+                          disabled={Boolean(processingPayment)}
+                        >
+                          <OptionIcon className="h-4 w-4 shrink-0" />
+                          {processingPayment === option.value ? "Verifying..." : option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
+          ) : (
+            paymentAction && (
+              <div className="mx-auto mt-4 max-w-3xl rounded-lg border border-amber-200 bg-amber-50 p-4 text-left">
+                <div className="flex items-center gap-3 text-sm font-bold text-amber-900">
+                  <CreditCard className="h-5 w-5" />
+                  {paymentAction.type === "tip" ? "Send creator tip" : paymentAction.type === "boost" ? "Boost this post" : "Unlock action"}
+                </div>
+                <p className="mt-2 text-xs font-semibold text-amber-800">
+                  Sandbox charge: {Number(paymentAction.amount || 0).toLocaleString()} {paymentAction.currency || "RWF"}
+                </p>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {PAYMENT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className="btn-secondary justify-start"
+                      onClick={() => handlePayment(option.value)}
+                      disabled={Boolean(processingPayment)}
+                    >
+                      {processingPayment === option.value ? "Verifying..." : option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
           )}
         </div>
       </div>
