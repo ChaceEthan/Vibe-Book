@@ -25,7 +25,7 @@ const iconForType = (type) => {
   if (type === "follow") return UserPlus;
   if (type === "like") return Heart;
   if (type === "comment") return MessageSquare;
-  if (type === "message" || type === "group_message" || type === "group_invite" || type === "mention") return MessageCircle;
+  if (type === "message" || type === "mention") return MessageCircle;
   return Bell;
 };
 

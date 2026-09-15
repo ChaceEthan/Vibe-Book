@@ -214,4 +214,7 @@ messageSchema.pre("validate", function () {
   this.syncMessageAliases();
 });
 
+messageSchema.index({ recipient: 1, isDraft: 1, readAt: 1, hiddenFor: 1 });
+messageSchema.index({ receiver: 1, isDraft: 1, readAt: 1, hiddenFor: 1 });
+
 module.exports = mongoose.model("Message", messageSchema);

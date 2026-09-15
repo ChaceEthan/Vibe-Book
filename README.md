@@ -30,7 +30,6 @@ Production services:
 Direct messages, group messages, and livestream comments are intentionally separate.
 
 - Direct chat uses `send_message`, `receive_message`, direct message controllers, and direct message collections.
-- Group chat uses `send_group_message`, `receive_group_message`, group chat controllers, and group message collections.
 - Livestream comments use `live:message` inside livestream sockets only. Live comments are not emitted as chat messages and do not create direct chat, group chat, or notification records.
 - Live gifts can create wallet and monetization notifications, but live comments do not appear in the notification center.
 

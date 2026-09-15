@@ -145,7 +145,7 @@ const unreadCountFor = (userId) =>
     isDraft: false,
     readAt: { $exists: false },
     hiddenFor: { $ne: userId },
-  });
+  }).maxTimeMS(8000);
 
 const emitUnreadCount = async (userId) => {
   const io = getIo();

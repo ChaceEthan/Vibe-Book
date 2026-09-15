@@ -312,7 +312,7 @@ export const paymentApi = {
 
 export const messageApi = {
   getInbox: () => API.get("/messages/inbox"),
-  getUnreadCount: () => API.get("/messages/unread-count"),
+  getUnreadCount: (options = {}) => API.get("/messages/unread-count", { timeout: 10000, signal: options.signal }),
   getDrafts: () => API.get("/messages/drafts"),
   getById: (id) => API.get(`/messages/id/${id}`),
   getConversation: (userId) => API.get(`/messages/${userId}`),

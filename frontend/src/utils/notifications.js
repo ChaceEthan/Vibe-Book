@@ -28,10 +28,6 @@ export const notificationCategoryFor = (notification = {}) => {
     return "messages";
   }
 
-  if (type === "group_message" || type === "group_mention" || type === "group_invite" || text.includes("group")) {
-    return "groups";
-  }
-
   if (["gift", "panel_request", "live_started", "monetization"].includes(type) || type.startsWith("live_")) {
     return "live";
   }
@@ -46,7 +42,6 @@ export const notificationCategoryFor = (notification = {}) => {
 export const NOTIFICATION_SECTIONS = [
   { id: "followers", label: "Followers", empty: "No follower updates." },
   { id: "messages", label: "Messages / Inbox", empty: "No message updates." },
-  { id: "groups", label: "Group Chats", empty: "No group updates." },
   { id: "live", label: "Live", empty: "No live updates." },
   { id: "posts", label: "Posts / Engagement", empty: "No post updates." },
 ];
@@ -70,14 +65,12 @@ export const getNotificationTarget = (notification = {}, currentUser = {}) => {
   const senderId = idOf(data.senderId) || actorId;
   const postId = idOf(notification.postId) || idOf(data.postId) || idOf(data.feedItemId) || idOf(data.post?._id);
   const postOwnerId = idOf(notification.postId?.userId) || idOf(data.postOwnerId) || idOf(data.ownerId) || idOf(currentUser?._id);
-  const groupId = idOf(notification.groupId) || idOf(data.groupId) || idOf(data.group?._id);
   const type = String(notification.type || "").toLowerCase();
   const streamId = idOf(data.streamId) || idOf(data.stream?._id);
 
   if (type === "account_verification") return "/settings";
   if (type === "follow" && actorId) return `/profile/${actorId}`;
   if ((type === "message" || type === "direct_message") && senderId) return `/chat/${senderId}`;
-  if (type === "group_message" || type === "group_mention" || type === "group_invite") return groupId ? `/groups?group=${encodeURIComponent(groupId)}` : "/groups";
   if (["gift", "panel_request", "live_started", "monetization"].includes(type) || type.startsWith("live_")) {
     return streamId ? `/live/${encodeURIComponent(streamId)}` : "/live";
   }

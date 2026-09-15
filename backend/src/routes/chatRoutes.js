@@ -7,15 +7,6 @@ const {
   sendGlobalMessage,
 } = require("../controllers/chatController");
 const {
-  createGroup,
-  getGroupMessages,
-  joinGroup,
-  leaveGroup,
-  listMembers,
-  listGroups,
-  sendGroupMessage,
-} = require("../controllers/groupChatController");
-const {
   getConversation,
   sendDirectMessage,
 } = require("../controllers/messageController");
@@ -29,13 +20,6 @@ router.get("/global", getGlobalMessages);
 router.post("/global", sendGlobalMessage);
 router.delete("/global/me", clearMyChatView);
 router.get("/stats", getChatStats);
-router.get("/groups", listGroups);
-router.post("/group", createGroup);
-router.post("/group/:groupId/join", joinGroup);
-router.post("/group/:groupId/leave", leaveGroup);
-router.get("/group/:groupId/members", listMembers);
-router.get("/group/:groupId/messages", getGroupMessages);
-router.post("/group/:groupId/messages", sendGroupMessage);
 router.get("/:userId", getConversation);
 router.post("/:userId", sendDirectMessage);
 

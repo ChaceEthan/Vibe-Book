@@ -110,9 +110,9 @@ const pages = {
           "Content involving minors must be safe, age-appropriate, and respectful. Exploitation, grooming, sexualized minor content, or attempts to contact minors in unsafe ways are not allowed.",
       },
       {
-        title: "Groups, Messages, And Comments",
+        title: "Messages And Comments",
         body:
-          "Community chats and comments should remain respectful. Group owners and members should avoid unwanted spam, repeated invitations, abuse, threats, and sharing private information without permission.",
+          "Messages and comments should remain respectful. Avoid unwanted spam, abuse, threats, and sharing private information without permission.",
       },
       {
         title: "Moderation",
@@ -135,7 +135,7 @@ const pages = {
       {
         title: "Our Platform",
         body:
-          "VibeBook helps people discover short videos, follow creators, upload media, chat, build groups, and grow creative audiences with mobile-first tools.",
+          "VibeBook helps people discover short videos, follow creators, upload media, chat, and grow creative audiences with mobile-first tools.",
       },
       {
         title: "Rwanda And Global Vision",

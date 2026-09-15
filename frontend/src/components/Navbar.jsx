@@ -62,24 +62,46 @@ const Navbar = () => {
     }
 
     let active = true;
+    let requestController = null;
+    let requestInFlight = false;
     const loadUnreadCount = async () => {
+      if (!active || requestInFlight || (typeof navigator !== "undefined" && navigator.onLine === false) || document.visibilityState === "hidden") {
+        return;
+      }
+
+      requestInFlight = true;
+      requestController?.abort();
+      requestController = new AbortController();
       try {
-        const { data } = await messageApi.getUnreadCount();
+        const { data } = await messageApi.getUnreadCount({ signal: requestController.signal });
         if (active) {
           setUnreadCount(Number(data?.unreadCount || 0));
         }
-      } catch {
-        if (active) {
-          setUnreadCount(0);
+      } catch (error) {
+        if (active && error?.name !== "CanceledError" && error?.code !== "ERR_CANCELED") {
+          return;
         }
+      } finally {
+        requestInFlight = false;
       }
     };
 
     loadUnreadCount();
-    const timer = setInterval(loadUnreadCount, 15000);
+    const timer = setInterval(loadUnreadCount, 30000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        loadUnreadCount();
+      }
+    };
+    const handleOnline = () => loadUnreadCount();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("online", handleOnline);
     return () => {
       active = false;
       clearInterval(timer);
+      requestController?.abort();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("online", handleOnline);
     };
   }, [isAuthenticated]);
 

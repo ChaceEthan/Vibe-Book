@@ -123,7 +123,6 @@ const App = () => {
             }
           />
           <Route path="/inbox" element={<Navigate to="/chat" replace />} />
-          <Route path="/groups" element={<Navigate to="/chat" replace />} />
           <Route
             path="/chat"
             element={

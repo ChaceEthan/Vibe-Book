@@ -25,8 +25,6 @@ const notificationTypes = [
   { value: "comment", label: "Comments", icon: MessageSquare },
   { value: "follow", label: "Follows", icon: UserPlus },
   { value: "message", label: "Messages", icon: MessageCircle },
-  { value: "group_message", label: "Groups", icon: MessageCircle },
-  { value: "group_invite", label: "Invites", icon: MessageCircle },
   { value: "mention", label: "Mentions", icon: MessageCircle },
   { value: "account_verification", label: "Security", icon: BadgeCheck },
 ];
@@ -36,7 +34,7 @@ const iconForType = (type) => {
   if (type === "follow") return UserPlus;
   if (type === "like") return Heart;
   if (type === "comment") return MessageSquare;
-  if (type === "message" || type === "group_message" || type === "group_invite" || type === "mention") return MessageCircle;
+  if (type === "message" || type === "mention") return MessageCircle;
   return Bell;
 };
 
@@ -45,7 +43,7 @@ const colorForType = (type) => {
   if (type === "follow") return "bg-green-100 text-green-600";
   if (type === "like") return "bg-red-100 text-red-600";
   if (type === "comment") return "bg-blue-100 text-blue-600";
-  if (type === "message" || type === "group_message" || type === "group_invite" || type === "mention") return "bg-purple-100 text-purple-600";
+  if (type === "message" || type === "mention") return "bg-purple-100 text-purple-600";
   return "bg-slate-100 text-slate-600";
 };
 

@@ -31,7 +31,6 @@ const createNotification = async ({
   actorId = null,
   postId = null,
   messageId = null,
-  groupId = null,
   data = {},
   dedupeKey = "",
 }) => {
@@ -64,7 +63,6 @@ const createNotification = async ({
       actorId: actorId || null,
       postId: postId || null,
       messageId: messageId || null,
-      groupId: groupId || null,
       data: data || {},
       dedupeKey: normalizedDedupeKey || undefined,
       read: false,
@@ -74,7 +72,6 @@ const createNotification = async ({
       { path: "actorId", select: "name username profilePicture profileImage isVerified verified premiumBadge" },
       { path: "postId", select: "mediaUrl caption userId" },
       { path: "messageId", select: "message" },
-      { path: "groupId", select: "groupName name avatar description" },
     ]);
     await emitNotification(notification);
     return notification;

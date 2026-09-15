@@ -1,15 +1,13 @@
 // @ts-nocheck
 const jwt = require("jsonwebtoken");
+const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 
 const ChatMessage = require("./models/ChatMessage");
-const ChatGroup = require("./models/ChatGroup");
-const GroupMessage = require("./models/GroupMessage");
 const Message = require("./models/Message");
 const User = require("./models/User");
 const VisitorStat = require("./models/VisitorStat");
 const { validateChatMessage } = require("./utils/chatModeration");
-const { isGroupMember, normalizeMemberId } = require("./utils/groupMembership");
 const { createNotification } = require("./utils/notifications");
 const { initializeWalletSockets } = require("./modules/wallet/walletSocket");
 const { setupLiveStreamSockets } = require("./modules/livestream/livestreamSocket");
@@ -87,24 +85,13 @@ const removeOnlineUser = (userId, socketId) => {
 };
 
 const chatIdFor = (left, right) => [left?.toString(), right?.toString()].filter(Boolean).sort().join(":");
-const groupRoomFor = (groupId) => `group:${groupId?.toString?.() || groupId}`;
 const idOf = (value) => value?._id?.toString?.() || value?.toString?.() || "";
-const normalizeObjectId = normalizeMemberId;
+const normalizeObjectId = (value) => (mongoose.isValidObjectId(value) ? value : "");
 const queueNotification = (payload) => {
   createNotification(payload).catch((error) => {
     logSocketError("socket:notification", error);
   });
 };
-const textMentionsName = (text = "", name = "") => {
-  const safeName = String(name || "").trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-  if (!safeName) {
-    return false;
-  }
-
-  return new RegExp(`(^|\\s)@${safeName}(?=\\s|$|[.,!?])`, "i").test(text);
-};
-
 const serializeDirectMessage = (message) => ({
   id: message._id,
   _id: message._id,
@@ -131,50 +118,6 @@ const serializeDirectMessage = (message) => ({
   receiver: message.receiver || message.recipient,
 });
 
-const serializeGroupMessage = (message) => ({
-  id: message._id,
-  _id: message._id,
-  clientId: message.clientId,
-  group: message.group,
-  groupId: message.group?._id?.toString?.() || message.group?.toString?.() || "",
-  sender: message.sender,
-  senderId: message.sender?._id?.toString?.() || message.sender?.toString?.() || "",
-  senderName: message.sender?.name || "User",
-  senderAvatar:
-    message.sender?.profilePicture ||
-    message.sender?.profileImage ||
-    message.sender?.images?.[0] ||
-    message.sender?.gallery?.[0] ||
-    "",
-  message: message.deletedAt ? "This message was deleted" : message.message,
-  text: message.deletedAt ? "This message was deleted" : message.message,
-  type: "group-message",
-  messageType: message.type || "message",
-  attachments: message.deletedAt ? [] : Array.isArray(message.attachments) ? message.attachments : [],
-  replyTo: message.replyTo,
-  replyPreview: message.replyPreview,
-  deletedAt: message.deletedAt,
-  deletedBy: message.deletedBy,
-  createdAt: message.createdAt,
-  timestamp: message.createdAt,
-  status: "sent",
-});
-
-const userIsGroupMember = isGroupMember;
-
-const roleForGroup = (group, userId) => {
-  const targetId = idOf(userId);
-
-  if (idOf(group?.owner || group?.createdBy || group?.adminId) === targetId) {
-    return "owner";
-  }
-
-  if ((group?.moderators || []).some((memberId) => idOf(memberId) === targetId)) {
-    return "moderator";
-  }
-
-  return "member";
-};
 const deletedMessageText = "This message was deleted";
 const snippetFor = (message = {}) => String(message.deletedAt ? deletedMessageText : message.message || message.text || "").trim().slice(0, 180);
 const buildDirectReplyPreview = async (replyToId, userId, receiverId) => {
@@ -204,33 +147,6 @@ const buildDirectReplyPreview = async (replyToId, userId, receiverId) => {
       deleted: Boolean(original.deletedAt),
     },
   };
-};
-const buildGroupReplyPreview = async (groupId, replyToId) => {
-  const id = normalizeObjectId(replyToId);
-
-  if (!id) return {};
-
-  const original = await GroupMessage.findOne({ _id: id, group: groupId }).populate("sender", "name");
-
-  if (!original) return {};
-
-  return {
-    replyTo: original._id,
-    replyPreview: {
-      messageId: original._id,
-      senderName: original.sender?.name || "User",
-      snippet: snippetFor(original),
-      deleted: Boolean(original.deletedAt),
-    },
-  };
-};
-
-const joinUserGroupRooms = async (socket, userId) => {
-  const groups = await ChatGroup.find({ isActive: true }).select("_id members");
-
-  groups
-    .filter((group) => userIsGroupMember(group, userId))
-    .forEach((group) => socket.join(groupRoomFor(group._id)));
 };
 
 const unreadCountFor = (userId) =>
@@ -426,9 +342,7 @@ const initSocket = (server, corsOptions = {}) => {
       addOnlineUser(userId, socket.id);
       socket.join("global");
       socket.join(userId);
-      await joinUserGroupRooms(socket, userId);
       await markPendingMessagesDelivered(userId);
-      socket.data.activeGroupRoom = "";
       if (!isProduction) {
         console.log(`Socket connected: ${userId}${socket.recovered ? " (recovered)" : ""}`);
       }
@@ -649,179 +563,7 @@ const initSocket = (server, corsOptions = {}) => {
       }
     });
 
-    socket.on("join_group", async (payload = {}, callback) => {
-      try {
-        const groupId = normalizeObjectId(payload.groupId || payload);
 
-        if (!groupId) {
-          callback?.({ success: false, message: "Valid groupId is required" });
-          return;
-        }
-
-        const group = await ChatGroup.findOne({ _id: groupId, isActive: true }).select("members");
-
-        if (!group || !userIsGroupMember(group, userId)) {
-          callback?.({ success: false, message: "You are not a member of this group" });
-          return;
-        }
-
-        const room = groupRoomFor(group._id);
-        if (socket.data.activeGroupRoom && socket.data.activeGroupRoom !== room) {
-          socket.leave(socket.data.activeGroupRoom);
-        }
-
-        socket.join(room);
-        socket.data.activeGroupRoom = room;
-        callback?.({ success: true, groupId: group._id.toString() });
-      } catch (error) {
-        callback?.({ success: false, message: "Unable to join group room" });
-      }
-    });
-
-    socket.on("leave_group", (payload = {}, callback) => {
-      try {
-        const groupId = normalizeObjectId(payload.groupId || payload);
-
-        if (!groupId) {
-          callback?.({ success: false, message: "Valid groupId is required" });
-          return;
-        }
-
-        const room = groupRoomFor(groupId);
-        socket.leave(room);
-
-        if (socket.data.activeGroupRoom === room) {
-          socket.data.activeGroupRoom = "";
-        }
-
-        callback?.({ success: true, groupId });
-      } catch (error) {
-        logSocketError("socket:leave_group", error);
-        callback?.({ success: false, message: "Unable to leave group room" });
-      }
-    });
-
-    socket.on("send_group_message", async (payload = {}, callback) => {
-      try {
-        const groupId = normalizeObjectId(payload.groupId);
-        const rawMessage = payload.message || payload.text;
-
-        if (!groupId || !rawMessage) {
-          callback?.({ success: false, message: "Invalid payload" });
-          return;
-        }
-
-        const validation = validateChatMessage(rawMessage);
-
-        if (validation.error) {
-          callback?.({ success: false, message: validation.error });
-          return;
-        }
-
-        const group = await ChatGroup.findOne({
-          _id: groupId,
-          isActive: true,
-        });
-
-        if (!group || !userIsGroupMember(group, userId)) {
-          callback?.({ success: false, message: "You are not a member of this group" });
-          return;
-        }
-
-        const replyData = await buildGroupReplyPreview(group._id, payload.replyTo || payload.replyToId);
-        const groupMessage = await GroupMessage.create({
-          group: group._id,
-          sender: socket.user._id,
-          clientId: payload.clientId,
-          message: validation.message,
-          ...replyData,
-        });
-
-        group.updatedAt = new Date();
-        await saveSocketDocument(group, "socket:send_group_message");
-        await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
-
-        const room = groupRoomFor(group._id);
-        const messagePayload = serializeGroupMessage(groupMessage);
-        ioInstance.to(room).emit("group:message", messagePayload);
-        User.find({ _id: { $in: group.members }, isBlocked: false })
-          .select("name")
-          .then((members) => {
-            members
-              .filter((member) => idOf(member._id) !== userId)
-              .forEach((member) => {
-                const mentioned = textMentionsName(validation.message, member.name);
-
-                queueNotification({
-                  userId: member._id,
-                  type: mentioned ? "group_mention" : "group_message",
-                  title: mentioned ? "You were mentioned" : "New group message",
-                  message: `${socket.user.name || "Someone"} posted in ${group.groupName || group.name || "a group"}`,
-                  actorId: socket.user._id,
-                  groupId: group._id,
-                  data: { groupMessageId: groupMessage._id?.toString?.() || "" },
-                  dedupeKey: `${mentioned ? "mention" : "group-message"}:${groupMessage._id}:${member._id}`,
-                });
-              });
-          })
-          .catch((error) => logSocketError("socket:group_notification", error));
-        callback?.({ success: true, message: "Message sent", data: messagePayload });
-      } catch (error) {
-        if (!error?.vibeBookLogged) {
-          logSocketError("socket:send_group_message", error);
-        }
-        callback?.({ success: false, message: "Group message failed" });
-      }
-    });
-
-    socket.on("group:message_delete", async (payload = {}, callback) => {
-      try {
-        const groupId = normalizeObjectId(payload.groupId);
-        const messageId = normalizeObjectId(payload.messageId || payload.id);
-
-        if (!groupId || !messageId) {
-          callback?.({ success: false, message: "Valid group and message ids are required" });
-          return;
-        }
-
-        const group = await ChatGroup.findOne({ _id: groupId, isActive: true, members: userId });
-
-        if (!group) {
-          callback?.({ success: false, message: "You are not a member of this group" });
-          return;
-        }
-
-        const groupMessage = await GroupMessage.findOne({ _id: messageId, group: group._id });
-
-        if (!groupMessage) {
-          callback?.({ success: false, message: "Message not found" });
-          return;
-        }
-
-        const isSender = idOf(groupMessage.sender) === userId;
-        const canModerate = ["owner", "moderator"].includes(roleForGroup(group, userId));
-
-        if (!isSender && !canModerate) {
-          callback?.({ success: false, message: "You cannot delete this message" });
-          return;
-        }
-
-        groupMessage.deletedAt = groupMessage.deletedAt || new Date();
-        groupMessage.deletedBy = userId;
-        groupMessage.deletedReason = isSender ? "sender" : "moderator";
-        groupMessage.message = "This message was deleted";
-        groupMessage.attachments = [];
-        await saveSocketDocument(groupMessage, "socket:group_message_delete");
-        await groupMessage.populate("sender", "name role profileImage profilePicture images gallery");
-
-        const messagePayload = serializeGroupMessage(groupMessage);
-        ioInstance.to(groupRoomFor(group._id)).emit("group:message_deleted", { groupId: group._id, message: messagePayload });
-        callback?.({ success: true, message: "Message deleted", data: messagePayload });
-      } catch (error) {
-        logSocketError("socket:group_message_delete", error);
-        callback?.({ success: false, message: "Unable to delete message" });
-      }
-    });
 
     socket.on("global:send", async (payload = {}, callback) => {
       try {

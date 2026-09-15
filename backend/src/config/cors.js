@@ -1,6 +1,7 @@
 // @ts-nocheck
 const rejectedOriginsLogged = new Set();
 const DEPLOYED_FRONTEND_ORIGIN = "https://vibe-book-kappa.vercel.app";
+const isProduction = process.env.NODE_ENV === "production";
 
 const normalizeOrigin = (value = "") => {
   const trimmed = String(value || "").trim().replace(/\/+$/, "");
@@ -21,8 +22,7 @@ const normalizeOrigin = (value = "") => {
 
 const requiredOrigins = [
   DEPLOYED_FRONTEND_ORIGIN,
-  "http://localhost:5173",
-  "http://localhost:3000",
+  ...(isProduction ? [] : ["http://localhost:5173", "http://localhost:3000"]),
 ];
 
 const configuredOrigins = [
@@ -48,20 +48,19 @@ const allowedOrigins = Array.from(new Set(configuredOrigins.map(normalizeOrigin)
 // Ensure production URLs are always included
 const productionOrigins = [
   DEPLOYED_FRONTEND_ORIGIN,
-  "http://localhost:5173",
-  "http://localhost:3000",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:3000",
+  ...(isProduction ? [] : ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"]),
 ];
 
 // Merge and deduplicate
 const finalAllowedOrigins = Array.from(new Set([...allowedOrigins, ...productionOrigins]));
 
 const allowedOriginPatterns = [
-  /^http:\/\/localhost:\d+$/i,
-  /^http:\/\/127\.0\.0\.1:\d+$/i,
-  /^https:\/\/(?:[a-z0-9-]+-)*vibe-?book(?:-[a-z0-9-]+)*\.vercel\.app$/i,
-  /^https:\/\/(?:[a-z0-9-]+-)*vibebook(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+  ...(!isProduction ? [
+    /^http:\/\/localhost:\d+$/i,
+    /^http:\/\/127\.0\.0\.1:\d+$/i,
+    /^https:\/\/(?:[a-z0-9-]+-)*vibe-?book(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+    /^https:\/\/(?:[a-z0-9-]+-)*vibebook(?:-[a-z0-9-]+)*\.vercel\.app$/i,
+  ] : []),
 ];
 
 const isOriginAllowed = (origin) => {

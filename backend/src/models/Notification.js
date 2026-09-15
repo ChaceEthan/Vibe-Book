@@ -14,10 +14,7 @@ const notificationSchema = new mongoose.Schema(
       enum: [
         "message",
         "direct_message",
-        "group_message",
-        "group_invite",
         "mention",
-        "group_mention",
         "gift",
         "panel_request",
         "live_started",
@@ -44,10 +41,6 @@ const notificationSchema = new mongoose.Schema(
     messageId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Message",
-    },
-    groupId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "ChatGroup",
     },
     dedupeKey: {
       type: String,

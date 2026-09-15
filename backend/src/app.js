@@ -15,7 +15,6 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const mediaRoutes = require("./routes/mediaRoutes");
 const chatRoutes = require("./routes/chatRoutes");
-const groupRoutes = require("./routes/groupRoutes");
 const creatorRoutes = require("./routes/creatorRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const feedRoutes = require("./routes/feedRoutes");
@@ -103,7 +102,7 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/groups", "/api/creator", "/api/admin", "/api/bookings", "/api/payments", "/api/marketplace", "/api/wallet", "/api/livestream", "/api/media", "/api/upload"];
+  const privatePrefixes = ["/api/auth", "/api/profile", "/api/messages", "/api/inbox", "/api/chat", "/api/creator", "/api/admin", "/api/bookings", "/api/payments", "/api/marketplace", "/api/wallet", "/api/livestream", "/api/media", "/api/upload"];
   if (privatePrefixes.some((prefix) => req.path.startsWith(prefix))) {
     res.set("Cache-Control", "no-store");
   } else {
@@ -136,7 +135,6 @@ app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/upload", uploadLimiter, uploadRoutes);
 app.use("/api/media", mediaRoutes);
 app.use("/api/chat", chatRoutes);
-app.use("/api/groups", groupRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/inbox", messageRoutes);
 app.use("/api/payments", bookingLimiter, paymentRoutes);
